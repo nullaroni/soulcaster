@@ -21,4 +21,4 @@ log_ok "Initial key repeat: shortest"
 run_or_dry defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool false
 log_ok "Press-and-hold accent menu: disabled"
 
-log_ok "Keyboard settings applied"
+log_ok "Keyboard settings applied (log out/restart required to take effect)"

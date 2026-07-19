@@ -31,6 +31,16 @@ ask_git_name() {
     return 0
   fi
 
+  # Fall back to existing global git config, if any
+  local existing
+  existing="$(git config --global user.name 2>/dev/null || true)"
+  if [[ -n "$existing" ]]; then
+    GIT_NAME="$existing"
+    export GIT_NAME
+    log_ok "Git name from existing git config: $GIT_NAME"
+    return 0
+  fi
+
   read -rp "Enter your Git full name: " name
   if [[ -z "$name" ]]; then
     log_fail "Git name cannot be empty."
@@ -44,6 +54,16 @@ ask_git_name() {
 ask_git_email() {
   if [[ -n "${GIT_EMAIL:-}" ]]; then
     log_ok "Git email already set: $GIT_EMAIL"
+    return 0
+  fi
+
+  # Fall back to existing global git config, if any
+  local existing
+  existing="$(git config --global user.email 2>/dev/null || true)"
+  if [[ -n "$existing" ]]; then
+    GIT_EMAIL="$existing"
+    export GIT_EMAIL
+    log_ok "Git email from existing git config: $GIT_EMAIL"
     return 0
   fi
 

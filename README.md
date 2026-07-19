@@ -4,11 +4,21 @@ A boring, rerunnable, inspectable macOS provisioning system for Apple Silicon Ma
 
 ## Quick Start
 
+One command on a bare Mac (installs Xcode Command Line Tools, clones this repo, runs bootstrap):
+
 ```bash
-git clone <repo-url> ~/Developer/macbook-setup
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/peytonmscott/macbook-setup/main/install.sh)"
+```
+
+Or manually:
+
+```bash
+git clone https://github.com/peytonmscott/macbook-setup.git ~/Developer/macbook-setup
 cd ~/Developer/macbook-setup
 ./bootstrap.sh
 ```
+
+After the first run, your role and Git identity are saved to `.local.env` (gitignored), so reruns are hands-free. Delete that file to be asked again.
 
 ## Features
 
@@ -22,6 +32,7 @@ cd ~/Developer/macbook-setup
 
 ```
 macbook-setup/
+├── install.sh            # One-command installer (curl | bash)
 ├── bootstrap.sh          # Main entrypoint
 ├── config/               # Environment presets
 ├── scripts/              # Modular setup scripts
@@ -117,8 +128,11 @@ cask "docker"
 9. Symlinks dotfiles from your repo (with backups for conflicts)
 10. Applies macOS settings (Dock, Finder, Keyboard, Menu Bar)
 11. Installs Kotlin and Android CLI tools
-12. Installs OmniWM tiling window manager
-13. Runs postflight checks and prints summary
+12. Runs postflight checks and prints summary
+
+If any package fails to install, the run continues and the final summary
+prints a `brew bundle --file ...` command to retry the failures. At the end
+you'll be offered a restart to apply all system settings.
 
 ## Dotfiles
 
@@ -136,7 +150,6 @@ dotfiles/
 ├── git/gitignore_global   -> ~/.gitignore_global
 ├── ghostty/               -> ~/.config/ghostty
 ├── aerospace/aerospace.toml -> ~/.config/aerospace/aerospace.toml
-├── omniwm/                -> ~/.config/omniwm
 ├── nvim/                  -> ~/.config/nvim
 ├── starship/starship.toml -> ~/.config/starship.toml
 └── yazi/                  -> ~/.config/yazi

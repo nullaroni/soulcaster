@@ -71,6 +71,5 @@ link_file "$DOTFILES_DIR/aerospace/aerospace.toml" "$HOME/.config/aerospace/aero
 link_file "$DOTFILES_DIR/nvim"               "$HOME/.config/nvim"
 link_file "$DOTFILES_DIR/starship/starship.toml" "$HOME/.config/starship.toml"
 link_file "$DOTFILES_DIR/yazi"               "$HOME/.config/yazi"
-link_file "$DOTFILES_DIR/omniwm"             "$HOME/.config/omniwm"
 
 log_ok "Dotfiles linked from $DOTFILES_DIR"

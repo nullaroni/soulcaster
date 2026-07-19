@@ -94,6 +94,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Load persisted choices from a previous run (gitignored).
+# Entries use ${VAR:-default} form, so CLI flags above always win.
+LOCAL_ENV="$REPO_ROOT/.local.env"
+if [[ -f "$LOCAL_ENV" ]]; then
+  # shellcheck disable=SC1090
+  source "$LOCAL_ENV"
+fi
+
 # Export flags so sub-scripts can see them
 export MACHINE_ROLE GIT_NAME GIT_EMAIL SKIP_BREW SKIP_MACOS SKIP_DOTFILES SKIP_PACKAGES DRY_RUN DOTFILES_REPO
 
@@ -132,6 +140,18 @@ if ! type confirm_choices &>/dev/null; then
   source "$REPO_ROOT/scripts/ask.sh"
 fi
 confirm_choices
+
+# Persist choices so reruns are hands-free (file is gitignored).
+# Delete .local.env to be asked again on the next run.
+if [[ "$DRY_RUN" != "true" ]]; then
+  cat > "$LOCAL_ENV" <<EOF
+# macbook-setup local configuration (auto-generated, gitignored)
+# Delete this file to be asked again on the next run.
+MACHINE_ROLE="\${MACHINE_ROLE:-$MACHINE_ROLE}"
+GIT_NAME="\${GIT_NAME:-$GIT_NAME}"
+GIT_EMAIL="\${GIT_EMAIL:-$GIT_EMAIL}"
+EOF
+fi
 
 # Source role config
 if [[ "$MACHINE_ROLE" == "personal" ]]; then
@@ -203,6 +223,18 @@ bash "$REPO_ROOT/scripts/paths.sh"
 # 11. Postflight
 bash "$REPO_ROOT/scripts/postflight.sh"
 
+# Report failed package installs with rerun commands
+FAILED_BREWFILES_FILE="/tmp/macbook-setup-failed-brewfiles"
+if [[ "$DRY_RUN" != "true" && -s "$FAILED_BREWFILES_FILE" ]]; then
+  echo
+  log_warn "Some packages failed to install. Rerun them with:"
+  while IFS= read -r brewfile; do
+    echo "  brew bundle --file $brewfile"
+  done < "$FAILED_BREWFILES_FILE"
+  rm -f "$FAILED_BREWFILES_FILE"
+  echo
+fi
+
 # Manual steps reminder
 echo
 echo "================================"
@@ -213,3 +245,17 @@ echo "================================"
 echo
 
 log_ok "All done!"
+
+# Offer to restart so system settings take effect
+if [[ "$DRY_RUN" == "true" ]]; then
+  log_skip "(dry-run) Would offer to restart"
+elif [[ -t 0 ]]; then
+  echo
+  read -rp "Restart now to apply all changes? [y/N]: " restart || true
+  if [[ "$restart" =~ ^[Yy]$ ]]; then
+    log_warn "Restarting..."
+    sudo shutdown -r now
+  else
+    log_ok "No restart. Log out and back in (or restart) later to apply all settings."
+  fi
+fi

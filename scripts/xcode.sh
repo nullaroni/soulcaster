@@ -27,12 +27,10 @@ log_warn "A GUI dialog will appear. Please complete the installation."
 # Trigger the install
 xcode-select --install || true
 
-echo
-read -rp "Press Enter after Xcode Command Line Tools installation finishes..."
+# Wait for the installation to finish
+log_warn "Waiting for installation to finish..."
+until xcode-select -p >/dev/null 2>&1; do
+  sleep 5
+done
 
-if xcode-select -p >/dev/null 2>&1; then
-  log_ok "Xcode Command Line Tools installed successfully"
-else
-  log_fail "Xcode Command Line Tools still not detected. Please rerun bootstrap.sh after installing."
-  exit 1
-fi
+log_ok "Xcode Command Line Tools installed successfully"
