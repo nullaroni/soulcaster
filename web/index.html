@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>macbook-setup — build your provision script</title>
+    <meta
+      name="description"
+      content="Pick apps, settings, and dev tooling. Download a Bash setup script or JSON backup for your Mac."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Sora:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./css/styles.css" />
+  </head>
+  <body>
+    <div class="atmosphere" aria-hidden="true"></div>
+
+    <header class="hero">
+      <p class="brand">macbook-setup</p>
+      <h1 class="hero-title">Build the script.<br />Provision the Mac.</h1>
+      <p class="hero-lede">
+        Check the apps, settings, and dev modules you want. Download a Bash
+        installer or export JSON to back up your choices — no account needed.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#configure">Start configuring</a>
+        <a class="btn btn-ghost" href="#export">Jump to export</a>
+      </div>
+    </header>
+
+    <main id="configure" class="shell">
+      <section class="panel presets-panel">
+        <div class="panel-head">
+          <h2>Presets</h2>
+          <p>Start from a known-good mix, then tweak.</p>
+        </div>
+        <div id="presets" class="presets"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Identity &amp; dotfiles</h2>
+          <p>Optional — baked into the generated script and JSON.</p>
+        </div>
+        <div class="fields">
+          <label class="field">
+            <span>Git name</span>
+            <input id="git-name" type="text" autocomplete="name" placeholder="Peyton Scott" />
+          </label>
+          <label class="field">
+            <span>Git email</span>
+            <input id="git-email" type="email" autocomplete="email" placeholder="you@example.com" />
+          </label>
+          <label class="field field-wide">
+            <span>Dotfiles repo URL</span>
+            <input
+              id="dotfiles-repo"
+              type="url"
+              placeholder="https://github.com/you/dotfiles.git"
+            />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Apps</h2>
+          <p>Homebrew formulae and casks from the curated catalog.</p>
+        </div>
+        <div id="apps"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Settings</h2>
+          <p>macOS defaults applied by the existing setup scripts.</p>
+        </div>
+        <div id="settings"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Dev setup</h2>
+          <p>Toolchains and bootstrap steps beyond brew packages.</p>
+        </div>
+        <div id="modules"></div>
+      </section>
+
+      <section id="export" class="panel export-panel">
+        <div class="panel-head">
+          <h2>Export</h2>
+          <p>
+            <span id="count-apps">0</span> apps ·
+            <span id="count-settings">0</span> settings ·
+            <span id="count-modules">0</span> modules
+          </p>
+        </div>
+
+        <div class="export-actions">
+          <button type="button" class="btn btn-primary" id="btn-download-script">
+            Download setup.sh
+          </button>
+          <button type="button" class="btn btn-secondary" id="btn-copy-script">
+            Copy script
+          </button>
+          <button type="button" class="btn btn-secondary" id="btn-export-json">
+            Export JSON
+          </button>
+          <button type="button" class="btn btn-secondary" id="btn-copy-json">
+            Copy JSON
+          </button>
+          <button type="button" class="btn btn-ghost" id="btn-import-json">
+            Import JSON
+          </button>
+          <button type="button" class="btn btn-ghost" id="btn-clear">Clear</button>
+          <input id="import-file" type="file" accept="application/json,.json" hidden />
+        </div>
+
+        <p class="export-hint">
+          On your Mac:
+          <code>chmod +x ~/Downloads/macbook-setup.sh && ~/Downloads/macbook-setup.sh</code>
+        </p>
+
+        <details class="preview">
+          <summary>Brewfile preview</summary>
+          <pre id="brewfile-preview" class="code-block"># (no packages selected)</pre>
+        </details>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Inspectable Bash · Apple Silicon macOS ·
+        <a href="https://github.com/peytonmscott/macbook-setup">GitHub</a>
+      </p>
+    </footer>
+
+    <div id="toast" class="toast" data-show="false" role="status"></div>
+
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>

@@ -5,3 +5,7 @@
 
 # Local env overrides
 .local.env
+
+# Generated machine configs
+machine.json
+brew/Brewfile.generated

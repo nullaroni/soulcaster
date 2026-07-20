@@ -1,8 +1,26 @@
 # macbook-setup
 
-A boring, rerunnable, inspectable macOS provisioning system for Apple Silicon Macs.
+A boring, rerunnable, inspectable macOS provisioning system for Apple Silicon Macs — plus a **web configurator** that builds your setup script (no account required).
 
-## Quick Start
+## Web configurator
+
+Open [`web/index.html`](web/index.html) locally, or deploy the `web/` folder to Cloudflare Pages (`wrangler.toml` is included).
+
+1. Pick a preset or check apps, settings, and dev modules
+2. Optionally set Git identity and a dotfiles repo URL
+3. **Download `setup.sh`** or **export JSON** to back up your selections
+4. On your Mac: `chmod +x macbook-setup.sh && ./macbook-setup.sh`
+
+The generated script writes `machine.json`, clones this repo into `~/Developer/macbook-setup`, and runs [`scripts/apply-config.sh`](scripts/apply-config.sh).
+
+Import a previously exported JSON anytime to restore your checklist.
+
+### Cloudflare Pages
+
+- Build output directory: `web` (static — no build step)
+- Or: `npx wrangler pages deploy web`
+
+## Quick Start (classic bootstrap)
 
 One command on a bare Mac (installs Xcode Command Line Tools, clones this repo, runs bootstrap):
 
@@ -20,20 +38,29 @@ cd ~/Developer/macbook-setup
 
 After the first run, your role and Git identity are saved to `.local.env` (gitignored), so reruns are hands-free. Delete that file to be asked again.
 
+### Apply a saved `machine.json`
+
+```bash
+./scripts/apply-config.sh ./machine.json
+```
+
 ## Features
 
-- **One command** to provision a new Mac.
-- **Role-based** setup: `personal` or `work`.
-- **Idempotent** — safe to rerun.
-- **Dry-run mode** for testing changes.
-- **Boring Bash** — no magic, easy to audit.
+- **Web UI** to compose apps / settings / dev setup and export a script or JSON
+- **One command** to provision a new Mac
+- **Role-based** setup: `personal` or `work` (classic CLI path)
+- **Idempotent** — safe to rerun
+- **Dry-run mode** for testing changes
+- **Boring Bash** — no magic, easy to audit
 
 ## Structure
 
 ```
 macbook-setup/
+├── web/                  # Cloudflare Pages configurator (static)
 ├── install.sh            # One-command installer (curl | bash)
-├── bootstrap.sh          # Main entrypoint
+├── bootstrap.sh          # Classic interactive entrypoint
+├── scripts/apply-config.sh  # Applies machine.json from the web UI
 ├── config/               # Environment presets
 ├── scripts/              # Modular setup scripts
 ├── brew/                 # Brewfiles for packages
