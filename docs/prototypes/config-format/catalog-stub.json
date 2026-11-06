@@ -1,0 +1,448 @@
+{
+  "_prototype": "Illustrative only, and not the Catalog's final design: recipes and the engine's lifecycle belong to ticket #12. It holds only what examples/ references.",
+  "items": {
+    "aerospace": {
+      "kind": "app",
+      "install": {
+        "cask": "nikitabobko/tap/aerospace"
+      },
+      "needsYou": [
+        "Grant Accessibility in System Settings"
+      ]
+    },
+    "android-sdk": {
+      "kind": "cli",
+      "install": {
+        "recipe": "android-sdk"
+      },
+      "needsYou": [
+        "Accept the Android SDK licenses"
+      ]
+    },
+    "android.build-tools": {
+      "kind": "setting",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "apply": "recipe:android-sdk"
+    },
+    "android.emulator": {
+      "kind": "setting",
+      "type": "boolean",
+      "apply": "recipe:android-sdk"
+    },
+    "android.platform": {
+      "kind": "setting",
+      "type": "integer",
+      "apply": "recipe:android-sdk"
+    },
+    "claude-code": {
+      "kind": "cli",
+      "install": {
+        "cask": "claude-code"
+      }
+    },
+    "codex": {
+      "kind": "cli",
+      "install": {
+        "cask": "codex"
+      }
+    },
+    "dock.apps": {
+      "kind": "setting",
+      "type": "string-list",
+      "pattern": "^/(System/)?Applications/.+\\.app$",
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "persistent-apps"
+      },
+      "apply": "restart-dock"
+    },
+    "dock.autohide": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "autohide"
+      },
+      "apply": "restart-dock"
+    },
+    "dock.position": {
+      "kind": "setting",
+      "type": "string",
+      "values": {
+        "bottom": "bottom",
+        "left": "left",
+        "right": "right"
+      },
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "orientation"
+      },
+      "apply": "restart-dock"
+    },
+    "dock.show-recents": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "show-recents"
+      },
+      "apply": "restart-dock"
+    },
+    "example-deprecated-tool": {
+      "kind": "cli",
+      "install": {
+        "formula": "fzf"
+      },
+      "deprecated": {
+        "message": "Upstream has stopped maintaining this.",
+        "replacedBy": "ghostty"
+      }
+    },
+    "example-old-name": {
+      "renamedTo": "gh"
+    },
+    "example-retired-tool": {
+      "retired": {
+        "message": "The vendor shut this down.",
+        "replacedBy": "ghostty"
+      }
+    },
+    "finder.default-view": {
+      "kind": "setting",
+      "type": "string",
+      "values": {
+        "column": "clmv",
+        "gallery": "glyv",
+        "icon": "icnv",
+        "list": "Nlsv"
+      },
+      "store": {
+        "domain": "com.apple.finder",
+        "key": "FXPreferredViewStyle"
+      },
+      "apply": "restart-finder"
+    },
+    "finder.info-panes-expanded": {
+      "kind": "setting",
+      "type": "string-list",
+      "values": {
+        "general": "General",
+        "open-with": "OpenWith",
+        "privileges": "Privileges"
+      },
+      "store": {
+        "domain": "com.apple.finder",
+        "key": "FXInfoPanesExpanded"
+      },
+      "apply": "restart-finder"
+    },
+    "finder.new-window-target": {
+      "kind": "setting",
+      "type": "string",
+      "values": {
+        "documents": "PfDo, file://<home>/Documents/"
+      },
+      "store": {
+        "domain": "com.apple.finder",
+        "key": "NewWindowTarget + NewWindowTargetPath"
+      },
+      "apply": "restart-finder"
+    },
+    "finder.search-scope": {
+      "kind": "setting",
+      "type": "string",
+      "values": {
+        "current-folder": "SCcf"
+      },
+      "store": {
+        "domain": "com.apple.finder",
+        "key": "FXDefaultSearchScope"
+      },
+      "apply": "restart-finder"
+    },
+    "finder.show-library-folder": {
+      "kind": "setting",
+      "type": "boolean",
+      "apply": "recipe:library-folder-flag"
+    },
+    "finder.show-path-bar": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "com.apple.finder",
+        "key": "ShowPathbar"
+      },
+      "apply": "restart-finder"
+    },
+    "finder.show-recent-tags": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "com.apple.finder",
+        "key": "ShowRecentTags"
+      },
+      "apply": "restart-finder"
+    },
+    "finder.show-status-bar": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "com.apple.finder",
+        "key": "ShowStatusBar"
+      },
+      "apply": "restart-finder"
+    },
+    "finder.sidebar-favorites": {
+      "kind": "setting",
+      "type": "string-list",
+      "pattern": "^~/.+$",
+      "apply": "needs-you"
+    },
+    "gh": {
+      "kind": "cli",
+      "install": {
+        "formula": "gh"
+      }
+    },
+    "gh-sign-in": {
+      "kind": "sign-in",
+      "requires": [
+        "gh"
+      ],
+      "needsYou": [
+        "Sign in to GitHub in the browser"
+      ]
+    },
+    "ghostty": {
+      "kind": "app",
+      "install": {
+        "cask": "ghostty"
+      }
+    },
+    "git-identity": {
+      "kind": "machine-values",
+      "localValues": [
+        "git.user.name",
+        "git.user.email"
+      ]
+    },
+    "git.default-branch": {
+      "kind": "setting",
+      "type": "string",
+      "apply": "git-config:init.defaultBranch"
+    },
+    "git.excludes-file": {
+      "kind": "setting",
+      "type": "string",
+      "pattern": "^~/.+$",
+      "apply": "git-config:core.excludesfile"
+    },
+    "git.pull-rebase": {
+      "kind": "setting",
+      "type": "boolean",
+      "apply": "git-config:pull.rebase"
+    },
+    "git.push-auto-setup-remote": {
+      "kind": "setting",
+      "type": "boolean",
+      "apply": "git-config:push.autoSetupRemote"
+    },
+    "git.rerere": {
+      "kind": "setting",
+      "type": "boolean",
+      "apply": "git-config:rerere.enabled"
+    },
+    "hot-corners.bottom-left": {
+      "kind": "setting",
+      "type": "string",
+      "values": {
+        "none": 0
+      },
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "wvous-bl-corner + wvous-bl-modifier"
+      },
+      "apply": "restart-dock"
+    },
+    "hot-corners.bottom-right": {
+      "kind": "setting",
+      "type": "string",
+      "values": {
+        "none": 0
+      },
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "wvous-br-corner + wvous-br-modifier"
+      },
+      "apply": "restart-dock"
+    },
+    "hot-corners.top-left": {
+      "kind": "setting",
+      "type": "string",
+      "values": {
+        "none": 0
+      },
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "wvous-tl-corner + wvous-tl-modifier"
+      },
+      "apply": "restart-dock"
+    },
+    "hot-corners.top-right": {
+      "kind": "setting",
+      "type": "string",
+      "values": {
+        "none": 0
+      },
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "wvous-tr-corner + wvous-tr-modifier"
+      },
+      "apply": "restart-dock"
+    },
+    "junie": {
+      "kind": "cli",
+      "install": {
+        "formula": "jetbrains/junie/junie"
+      }
+    },
+    "keyboard.initial-key-repeat": {
+      "kind": "setting",
+      "type": "integer",
+      "store": {
+        "domain": "NSGlobalDomain",
+        "key": "InitialKeyRepeat"
+      },
+      "apply": "log-out"
+    },
+    "keyboard.key-repeat": {
+      "kind": "setting",
+      "type": "integer",
+      "store": {
+        "domain": "NSGlobalDomain",
+        "key": "KeyRepeat"
+      },
+      "apply": "log-out"
+    },
+    "keyboard.press-and-hold": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "NSGlobalDomain",
+        "key": "ApplePressAndHoldEnabled"
+      },
+      "apply": "restart-affected-apps"
+    },
+    "kotlin": {
+      "kind": "cli",
+      "install": {
+        "recipe": "kotlin-toolchain"
+      }
+    },
+    "kotlin-lsp": {
+      "kind": "cli",
+      "install": {
+        "recipe": "kotlin-lsp",
+        "version": "262.7569.0"
+      }
+    },
+    "menu-bar.extras": {
+      "kind": "setting",
+      "type": "string-list",
+      "evidence": "broken",
+      "values": {
+        "airport": "AirPort.menu",
+        "battery": "Battery.menu",
+        "bluetooth": "Bluetooth.menu",
+        "clock": "Clock.menu",
+        "volume": "Volume.menu"
+      },
+      "store": {
+        "domain": "com.apple.systemuiserver",
+        "key": "menuExtras"
+      },
+      "apply": "restart-systemuiserver"
+    },
+    "menu-bar.show-spotlight": {
+      "kind": "setting",
+      "type": "boolean",
+      "evidence": "unconfirmed",
+      "store": {
+        "domain": "com.apple.Spotlight + com.apple.controlcenter",
+        "key": "MenuItemHidden + NSStatusItem Visible com.apple.Spotlight"
+      },
+      "apply": "restart-controlcenter"
+    },
+    "menu-bar.show-weather": {
+      "kind": "setting",
+      "type": "boolean",
+      "evidence": "unconfirmed",
+      "store": {
+        "domain": "com.apple.controlcenter",
+        "key": "NSStatusItem Visible com.apple.WeatherWidget, NSStatusItem Preferred Position com.apple.WeatherWidget=100"
+      },
+      "apply": "restart-controlcenter"
+    },
+    "mission-control.group-windows-by-app": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "expose-group-apps"
+      },
+      "apply": "restart-dock"
+    },
+    "opencode": {
+      "kind": "cli",
+      "install": {
+        "formula": "opencode"
+      }
+    },
+    "spaces.auto-rearrange": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "com.apple.dock",
+        "key": "mru-spaces"
+      },
+      "apply": "restart-dock"
+    },
+    "tailscale": {
+      "kind": "app",
+      "install": {
+        "cask": "tailscale-app"
+      },
+      "needsYou": [
+        "Approve the system extension in System Settings"
+      ]
+    },
+    "tailscale-sign-in": {
+      "kind": "sign-in",
+      "requires": [
+        "tailscale"
+      ],
+      "needsYou": [
+        "Sign in to your tailnet in the browser"
+      ]
+    },
+    "trackpad.tap-to-click": {
+      "kind": "setting",
+      "type": "boolean",
+      "store": {
+        "domain": "com.apple.AppleMultitouchTrackpad + com.apple.driver.AppleBluetoothMultitouch.trackpad",
+        "key": "Clicking"
+      },
+      "apply": "log-out"
+    },
+    "xcode": {
+      "kind": "app",
+      "install": {
+        "recipe": "xcode"
+      },
+      "needsYou": [
+        "Sign in with an Apple Account to download Xcode"
+      ]
+    }
+  }
+}

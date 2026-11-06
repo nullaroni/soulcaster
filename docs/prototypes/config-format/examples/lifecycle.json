@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nullaroni/soulcaster/main/schema/config-1.schema.json",
+  "schemaVersion": 1,
+  "name": "Old Config against a newer Catalog",
+  "items": [
+    "example-deprecated-tool",
+    "example-from-a-newer-catalog",
+    "example-old-name",
+    "example-retired-tool"
+  ],
+  "settings": {
+    "dock.autohide": "yes",
+    "dock.position": "left",
+    "example.from-a-newer-catalog": true
+  }
+}

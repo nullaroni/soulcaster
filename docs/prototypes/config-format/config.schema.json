@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nullaroni/soulcaster/main/schema/config-1.schema.json",
+  "title": "Soulcaster Config, schema version 1",
+  "description": "PROTOTYPE. A Config lists what a Machine should have. Every object is closed: a field this schema doesn't name is an error, which is what keeps shell commands, trust grants, removal flags and includes out. Whether an Item ID exists and whether a settings value suits its Item are checked against the Catalog after this schema passes, entry by entry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name"],
+  "properties": {
+    "$schema": {
+      "description": "Editor hint for completion and checking. The app never fetches it.",
+      "const": "https://raw.githubusercontent.com/nullaroni/soulcaster/main/schema/config-1.schema.json"
+    },
+    "schemaVersion": {
+      "description": "The format version. An app that doesn't know this number refuses the file and changes nothing.",
+      "const": 1
+    },
+    "name": {
+      "description": "Shown in the app. There is no description field: prose belongs in the Config Repo's README.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "items": {
+      "description": "Catalog Items to install or complete: apps, CLIs and sign-ins. Settings go in `settings`.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/itemId" }
+    },
+    "packages": {
+      "description": "Homebrew packages the Catalog doesn't cover. Names only: no options, versions or trust.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "formulae": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/formulaName" }
+        },
+        "casks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/caskName" }
+        },
+        "taps": {
+          "description": "Third-party taps wanted with no package named from them. A package written owner/tap/name already implies its tap.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/tapName" }
+        }
+      }
+    },
+    "settings": {
+      "description": "Setting Item ID to desired value. Leaving an ID out means the app doesn't manage that setting.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/settingId" },
+      "additionalProperties": { "$ref": "#/$defs/settingValue" }
+    },
+    "dotfiles": {
+      "description": "The Dotfiles Repo. The clone location is a Machine-local value, so it isn't here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo"],
+      "properties": {
+        "repo": {
+          "description": "owner/repo on GitHub, or an https URL with no credentials in it.",
+          "type": "string",
+          "pattern": "^(?!.*/\\.{1,2}(?:/|$))(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+|https://[A-Za-z0-9.-]+(?:/[A-Za-z0-9._~-]+)+)$"
+        },
+        "links": {
+          "description": "Link location on the Machine to path inside the Dotfiles Repo. One link per line, and two links can't claim the same location.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/linkTarget" },
+          "additionalProperties": { "$ref": "#/$defs/repoPath" }
+        },
+        "installScript": {
+          "description": "Path of one script inside the Dotfiles Repo, with no arguments. It runs only after approval on the Machine, which is tied to the script's contents.",
+          "type": "string",
+          "pattern": "^(?!-)(?!\\.{1,2}(?:/|$))(?!.*/\\.{1,2}(?:/|$))[A-Za-z0-9._+@-]+(?:/[A-Za-z0-9._+@-]+)*$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "itemId": {
+      "description": "Lowercase kebab-case product name with no category or delivery method in it, such as ghostty or gh-sign-in. It has no dots, so a setting ID fails here.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "settingId": {
+      "description": "<surface>.<name>, such as dock.autohide. Keys that look like secrets or Git identity are refused, because those values belong on the Machine.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)+$",
+      "not": {
+        "pattern": "(?:^|[.-])(?:tokens?|secrets?|passwords?|passwd|passphrases?|credentials?|api-keys?|apikeys?|private-keys?|auth|license-keys?)(?:[.-]|$)|^git\\.user\\."
+      }
+    },
+    "settingValue": {
+      "description": "A value the Catalog types and checks. There is no null, because leaving the ID out is the only way to say unmanaged, and no nested objects.",
+      "anyOf": [
+        { "type": "boolean" },
+        { "type": "number" },
+        { "$ref": "#/$defs/settingString" },
+        {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/settingString" }
+        }
+      ]
+    },
+    "settingString": {
+      "description": "Best effort only: refuses common token prefixes, private keys, email addresses and home-folder paths. The real guard is that values only reach typed Catalog settings.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+      "not": {
+        "pattern": "^(?:ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|glpat-|sk-|xox[abprs]-|AKIA|ASIA|AIza|-----BEGIN)|^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$|^(?:file://)?/Users/"
+      }
+    },
+    "formulaName": {
+      "description": "A homebrew-core name, or owner/tap/name for a third-party formula. Lowercase, starts with a letter or digit, and has one spelling: homebrew/core/x is written x.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?!homebrew/)(?:[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._+@-]*$"
+    },
+    "caskName": {
+      "description": "A homebrew/cask name, or owner/tap/name for a third-party cask. Same rules as formulaName.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?!homebrew/)(?:[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._+@-]*$"
+    },
+    "tapName": {
+      "description": "owner/tap. Official homebrew/ taps are never listed. Custom tap URLs aren't supported in version 1.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?!homebrew/)[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$"
+    },
+    "linkTarget": {
+      "description": "Inside the home folder, written with ~/. No absolute paths, no $HOME and no .. segments.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^~/(?!\\.{1,2}(?:/|$))(?!.*/\\.{1,2}(?:/|$))[A-Za-z0-9._+@ -]+(?:/[A-Za-z0-9._+@ -]+)*$"
+    },
+    "repoPath": {
+      "description": "Relative to the Dotfiles Repo root, and can't climb out of it.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^(?!-)(?!\\.{1,2}(?:/|$))(?!.*/\\.{1,2}(?:/|$))[A-Za-z0-9._+@ -]+(?:/[A-Za-z0-9._+@ -]+)*$"
+    }
+  }
+}
