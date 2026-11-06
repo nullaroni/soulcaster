@@ -7,13 +7,13 @@ A boring, rerunnable, inspectable macOS provisioning system for Apple Silicon Ma
 One command on a bare Mac (installs Xcode Command Line Tools, clones this repo, runs bootstrap):
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/peytonmscott/macbook-setup/main/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/nullaroni/soulcaster/main/install.sh)"
 ```
 
 Or manually:
 
 ```bash
-git clone https://github.com/peytonmscott/macbook-setup.git ~/Developer/macbook-setup
+git clone https://github.com/nullaroni/soulcaster.git ~/Developer/macbook-setup
 cd ~/Developer/macbook-setup
 ./bootstrap.sh
 ```

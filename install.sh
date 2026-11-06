@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # install.sh - One-command installer for macbook-setup
-# Usage: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/peytonmscott/macbook-setup/main/install.sh)"
+# Usage: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/nullaroni/soulcaster/main/install.sh)"
 #
 # Works on a bare Mac: installs Xcode Command Line Tools (for git),
 # clones/updates this repo, then hands off to bootstrap.sh.
 
 set -euo pipefail
 
-REPO_URL="https://github.com/peytonmscott/macbook-setup.git"
+REPO_URL="https://github.com/nullaroni/soulcaster.git"
 INSTALL_DIR="$HOME/Developer/macbook-setup"
 
 echo "================================"
