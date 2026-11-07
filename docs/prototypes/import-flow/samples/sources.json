@@ -1,0 +1,63 @@
+{
+  "_prototype": "Hardcoded stand-ins for what fetching would return. Nothing in this prototype goes to the network. All GitHub owners here are invented, except mobile-dev-inc, whose tap is real and is only named.",
+  "signedInAs": "example-you",
+  "samples": {
+    "clean.json": {
+      "pasted": "example-dev/mac-setup",
+      "owner": "example-dev",
+      "host": "github.com",
+      "path": "configs/laptop.json",
+      "commit": "3f9a1c2"
+    },
+    "one-tap.json": {
+      "pasted": "https://github.com/example-dev/mac-setup/blob/main/configs/mobile.json",
+      "owner": "example-dev",
+      "host": "github.com",
+      "path": "configs/mobile.json",
+      "commit": "3f9a1c2"
+    },
+    "stranger-dotfiles.json": {
+      "pasted": "example-stranger/setup",
+      "owner": "example-stranger",
+      "host": "github.com",
+      "path": "configs/terminal.json",
+      "commit": "81b0de4",
+      "dotfilesCommit": "a1b2c3d",
+      "script": "#!/bin/sh\n# script/setup\nset -e\nbrew bundle --file=./Brewfile\nmkdir -p ~/.config\ncurl -fsSL https://example.invalid/theme.tar.gz | tar -xz -C ~/.config\n./script/lib/post-install.sh\n"
+    },
+    "own-dotfiles.json": {
+      "pasted": "example-you/setup",
+      "owner": "example-you",
+      "host": "github.com",
+      "path": "configs/other-mac.json",
+      "commit": "c47e901",
+      "dotfilesCommit": "77aa012",
+      "script": "#!/bin/sh\n# install.sh\nmkdir -p ~/Developer\n"
+    },
+    "hostile.json": {
+      "pasted": "s0ulcaster-official/verified-configs",
+      "owner": "s0ulcaster-official",
+      "host": "github.com",
+      "path": "configs/recommended.json",
+      "commit": "de4db33",
+      "dotfilesCommit": "ba5eba1"
+    },
+    "refused-bidi.json": { "pasted": "example-dev/odd-config", "owner": "example-dev", "host": "github.com", "path": "configs/x.json", "commit": "0a1b2c3" },
+    "refused-self-approval.json": { "pasted": "evil-tools/preapproved", "owner": "evil-tools", "host": "github.com", "path": "configs/x.json", "commit": "0a1b2c3" },
+    "refused-duplicate-key.json": { "pasted": "evil-tools/two-answers", "owner": "evil-tools", "host": "github.com", "path": "configs/x.json", "commit": "0a1b2c3" },
+    "refused-newer-version.json": { "pasted": "example-dev/future", "owner": "example-dev", "host": "github.com", "path": "configs/x.json", "commit": "0a1b2c3" }
+  },
+  "machine": {
+    "bare": true,
+    "installed": [],
+    "settingsNow": {
+      "dock.autohide": { "shown": "Off", "note": "macOS default" },
+      "dock.position": { "shown": "bottom", "note": "macOS default" },
+      "finder.show-path-bar": { "shown": "Off", "note": "macOS default" },
+      "git.pull-rebase": { "shown": "Not set", "note": "" },
+      "keyboard.key-repeat": { "shown": "6", "note": "" },
+      "trackpad.tap-to-click": { "shown": "Off", "note": "macOS default" },
+      "dock.apps": { "shown": "6 tiles", "list": ["Safari", "Mail", "Maps", "Photos", "Messages", "System Settings"] }
+    }
+  }
+}

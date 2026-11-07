@@ -1,0 +1,1303 @@
+{
+ "signedInAs": "example-you",
+ "plans": {
+  "clean": {
+   "id": "clean",
+   "source": {
+    "pasted": "example-dev/mac-setup",
+    "owner": "example-dev",
+    "host": "github.com",
+    "path": "configs/laptop.json",
+    "commit": "3f9a1c2"
+   },
+   "name": "Plain dev laptop",
+   "nameEscaped": "Plain dev laptop",
+   "nameHasLookalikes": false,
+   "taps": [],
+   "signals": [],
+   "catalog": [
+    {
+     "id": "claude-code",
+     "title": "Claude Code",
+     "note": "Installed only. Sign in when you first open it."
+    },
+    {
+     "id": "ghostty",
+     "title": "Ghostty",
+     "note": null
+    },
+    {
+     "id": "git-identity",
+     "title": "Git identity",
+     "note": null
+    },
+    {
+     "id": "opencode",
+     "title": "opencode",
+     "note": "Installed only. Sign in when you first open it."
+    }
+   ],
+   "officialFormulae": [
+    "fd",
+    "jq",
+    "ripgrep"
+   ],
+   "officialCasks": [
+    "firefox",
+    "rectangle"
+   ],
+   "bigLists": [],
+   "pulledIn": [],
+   "needs": [],
+   "settings": [
+    {
+     "id": "dock.autohide",
+     "title": "Automatically hide the Dock",
+     "now": "Off",
+     "nowNote": "macOS default",
+     "new": "On",
+     "effect": "Dock restarts",
+     "same": false
+    },
+    {
+     "id": "dock.position",
+     "title": "Dock position",
+     "now": "bottom",
+     "nowNote": "macOS default",
+     "new": "left",
+     "effect": "Dock restarts",
+     "same": false
+    },
+    {
+     "id": "finder.show-path-bar",
+     "title": "Show the path bar",
+     "now": "Off",
+     "nowNote": "macOS default",
+     "new": "On",
+     "effect": "Finder restarts",
+     "same": false
+    },
+    {
+     "id": "git.pull-rebase",
+     "title": "Rebase on git pull",
+     "now": "Not set",
+     "nowNote": "",
+     "new": "On",
+     "effect": "Right away",
+     "same": false
+    },
+    {
+     "id": "keyboard.key-repeat",
+     "title": "Key repeat rate",
+     "now": "6",
+     "nowNote": "",
+     "new": "2",
+     "effect": "After you log out",
+     "same": false
+    },
+    {
+     "id": "trackpad.tap-to-click",
+     "title": "Tap to click",
+     "now": "Off",
+     "nowNote": "macOS default",
+     "new": "On",
+     "effect": "After you log out",
+     "same": false
+    }
+   ],
+   "wontApply": [],
+   "dotfiles": null,
+   "counts": {
+    "install": 9,
+    "settings": 6,
+    "approvals": 0,
+    "wont": 0
+   }
+  },
+  "hostile": {
+   "id": "hostile",
+   "source": {
+    "pasted": "s0ulcaster-official/verified-configs",
+    "owner": "s0ulcaster-official",
+    "host": "github.com",
+    "path": "configs/recommended.json",
+    "commit": "de4db33",
+    "dotfilesCommit": "ba5eba1"
+   },
+   "name": "Verified safe by Soulcaster ✓ Аррle approved",
+   "nameEscaped": "Verified safe by Soulcaster \\u2713 \\u0410\\u0440\\u0440le approved",
+   "nameHasLookalikes": true,
+   "taps": [
+    {
+     "tap": "evil-tools/tap",
+     "owner": "evil-tools",
+     "packages": [
+      {
+       "name": "evil-tools/tap/gh",
+       "short": "gh",
+       "kind": "cask",
+       "via": "line 1 of 3 in packages.casks",
+       "sameAsBase": true,
+       "sameAsCatalog": null
+      }
+     ],
+     "blocked": true,
+     "formulaUrl": "https://github.com/evil-tools/homebrew-tap"
+    },
+    {
+     "tap": "homebrevv/core",
+     "owner": "homebrevv",
+     "packages": [
+      {
+       "name": "homebrevv/core/openssl-tls",
+       "short": "openssl-tls",
+       "kind": "formula",
+       "via": "line 172 of 480 in packages.formulae",
+       "sameAsBase": false,
+       "sameAsCatalog": null
+      }
+     ],
+     "blocked": false,
+     "formulaUrl": "https://github.com/homebrevv/homebrew-core"
+    },
+    {
+     "tap": "mesa-tools/tap",
+     "owner": "mesa-tools",
+     "packages": [
+      {
+       "name": "mesa-tools/tap/libxml2",
+       "short": "libxml2",
+       "kind": "formula",
+       "via": "line 272 of 480 in packages.formulae",
+       "sameAsBase": false,
+       "sameAsCatalog": null
+      }
+     ],
+     "blocked": false,
+     "formulaUrl": "https://github.com/mesa-tools/homebrew-tap"
+    },
+    {
+     "tap": "nikitabobko/tap",
+     "owner": "nikitabobko",
+     "packages": [
+      {
+       "name": "nikitabobko/tap/aerospace",
+       "short": "aerospace",
+       "kind": "catalog",
+       "via": "the Catalog's AeroSpace, listed in this Config",
+       "sameAsBase": false,
+       "sameAsCatalog": null,
+       "item": "aerospace"
+      }
+     ],
+     "blocked": false,
+     "formulaUrl": "https://github.com/nikitabobko/homebrew-tap"
+    }
+   ],
+   "signals": [
+    {
+     "code": "name-lookalike",
+     "text": "The name mixes alphabets so its letters pass for others: \\u0410\\u0440\\u0440"
+    },
+    {
+     "code": "name-claim",
+     "text": "The name says \"Verified\". Soulcaster doesn't verify or endorse any Config."
+    },
+    {
+     "code": "source-lookalike",
+     "text": "The account s0ulcaster-official has a name like soulcaster, and nothing connects it to soulcaster."
+    },
+    {
+     "code": "same-as-base",
+     "text": "evil-tools/tap/gh shares its name with gh, which Soulcaster always installs. It's a different program."
+    },
+    {
+     "code": "tap-lookalike",
+     "text": "The tap homebrevv/core has a name like homebrew, and isn't from homebrew."
+    },
+    {
+     "code": "host-lookalike",
+     "text": "The Dotfiles Repo's address starts like GitHub, but the site is evil.example."
+    },
+    {
+     "code": "link-lookalike",
+     "text": "A link location mixes alphabets: ~/.zshr\\u0441"
+    }
+   ],
+   "catalog": [],
+   "officialFormulae": [
+    "a2ps",
+    "abricate",
+    "activemq",
+    "adrs",
+    "age-plugin-se",
+    "aiken",
+    "algernon",
+    "alp",
+    "android-file-transfer-linux",
+    "ansiweather",
+    "apache-arrow-glib",
+    "apibuilder-cli",
+    "appwrite",
+    "archivemount",
+    "aria2",
+    "arttime",
+    "asimov",
+    "astgen",
+    "atkmm",
+    "audacious",
+    "autocycler",
+    "avimetaedit",
+    "aws-cdk",
+    "aws-vault",
+    "azure-storage-blobs-cpp",
+    "bacon",
+    "bandwhich",
+    "bash-git-prompt",
+    "baysor",
+    "bchunk",
+    "bedops",
+    "berkeley-db@5",
+    "bibtexconv",
+    "biome",
+    "bkmr",
+    "bloaty",
+    "bogofilter",
+    "bootloadhid",
+    "bozohttpd",
+    "brew-php-switcher",
+    "btfs",
+    "buildozer",
+    "busted",
+    "c10t",
+    "caf",
+    "camlp5",
+    "cargo-clone",
+    "cargo-llvm-cov",
+    "cargo-zigbuild",
+    "catgirl",
+    "ccextractor",
+    "cdk8s",
+    "cern-ndiff",
+    "cfonts",
+    "chainloop-cli",
+    "chart-testing",
+    "chezscheme",
+    "chromaprint",
+    "cinecli",
+    "clang-include-graph",
+    "clhep",
+    "clipper",
+    "cloud-provider-kind",
+    "clp",
+    "cmu-pocketsphinx",
+    "codanna",
+    "cogapp",
+    "composer",
+    "connect",
+    "cookcli",
+    "cosign",
+    "cpio",
+    "cpptrace",
+    "crates-tui",
+    "cronboard",
+    "csfml",
+    "ctemplate",
+    "curl",
+    "cxgo",
+    "czmq",
+    "darkice",
+    "datetime-fortran",
+    "dc3dd",
+    "deark",
+    "delve",
+    "detach",
+    "dfu-util",
+    "diesel",
+    "direnv",
+    "ditaa",
+    "dnglab",
+    "dnsx",
+    "docker-gen",
+    "docx2txt",
+    "dotbot",
+    "dpic",
+    "drone-cli",
+    "dtm",
+    "dum",
+    "dvd+rw-tools",
+    "dylibbundler",
+    "easy-tag",
+    "edencommon",
+    "ekphos",
+    "elvish",
+    "enet",
+    "envoy",
+    "erlang",
+    "espflash",
+    "evnx",
+    "expat",
+    "fabric",
+    "falco",
+    "fastlane",
+    "favirecon",
+    "fdupes",
+    "fetchmail",
+    "ffuf",
+    "findent",
+    "flagd",
+    "flex",
+    "flowpipe",
+    "fmt",
+    "forcecli",
+    "fortran-stdlib",
+    "framework-tool-tui",
+    "frege",
+    "fstrm",
+    "fuzzy-find",
+    "gabo",
+    "gat",
+    "gcc@14",
+    "gdk-pixbuf",
+    "gemmi",
+    "geph4",
+    "gforth",
+    "ghi",
+    "gimme",
+    "git-cinnabar",
+    "git-get",
+    "git-octopus",
+    "git-sizer",
+    "git-xet",
+    "gitlab-release-cli",
+    "gitversion",
+    "glib",
+    "gloox",
+    "gnirehtet",
+    "gnu-smalltalk",
+    "go",
+    "go-task",
+    "godap",
+    "golines",
+    "gopeed",
+    "gotags",
+    "gpcslots2",
+    "gpsim",
+    "grafana-alloy",
+    "gravitino",
+    "gromacs",
+    "gsmartcontrol",
+    "gtkmm3",
+    "guile-gnutls",
+    "gyb",
+    "handbrake",
+    "haskell-stack",
+    "hdrhistogram_c",
+    "helm-ls",
+    "hexer",
+    "highlight",
+    "hoedown",
+    "hpack",
+    "htop",
+    "http_load",
+    "hyperestraier",
+    "iamy",
+    "icon",
+    "ifopt",
+    "imageworsener",
+    "immortal",
+    "inih",
+    "intercal",
+    "ipapatch",
+    "iputils",
+    "isort",
+    "jags",
+    "jcode",
+    "jetty",
+    "jlog",
+    "jot",
+    "jrnl",
+    "json2ts",
+    "juicefs",
+    "junie@1362.47",
+    "junie@1966.57",
+    "junie@243.222.1",
+    "junie@251.97.1",
+    "junie@2651.3",
+    "junie@61.1",
+    "junie@88.46",
+    "jxl-oxide",
+    "kakoune",
+    "katana",
+    "keploy",
+    "kibi",
+    "kitex",
+    "kool",
+    "krew",
+    "kubecfg",
+    "kubeone",
+    "kubie",
+    "kyverno",
+    "lasi",
+    "lazycontainer",
+    "ld-find-code-refs",
+    "ledger",
+    "lesspipe",
+    "libabw",
+    "libayatana-indicator",
+    "libcap",
+    "libcoap",
+    "libdbusmenu",
+    "libdrm",
+    "libestr",
+    "libfixposix",
+    "libgedit-amtk",
+    "libgphoto2",
+    "libhubbub",
+    "libiscsi",
+    "liblc3",
+    "libmediainfo",
+    "libmps",
+    "libnghttp2",
+    "libodfgen",
+    "libpaho-mqtt",
+    "libplist",
+    "libquicktime",
+    "librime",
+    "libshout",
+    "libsoxr",
+    "libsvm",
+    "libtpms",
+    "libusb-compat",
+    "libvo-aacenc",
+    "libxc",
+    "libxls",
+    "libxrender",
+    "libzim",
+    "lilv",
+    "liquidprompt",
+    "lla",
+    "llvm@18",
+    "locateme",
+    "lolcode",
+    "lsix",
+    "luaradio",
+    "lutok",
+    "lzo",
+    "maclaunch",
+    "maestro@1.40-dev.1",
+    "mailcatcher",
+    "mame",
+    "mariadb",
+    "marmot",
+    "maven-shell",
+    "mcp-grafana",
+    "md5sha1sum",
+    "mdzk",
+    "melange",
+    "mergiraf",
+    "mfem",
+    "midnight-commander",
+    "minicom",
+    "minisign",
+    "mitie",
+    "mkvdts2ac3",
+    "mmix",
+    "modsurfer",
+    "mongosh",
+    "mosdepth",
+    "mp3wrap",
+    "mplayer",
+    "msedit",
+    "mu-repo",
+    "musikcube",
+    "mysql-search-replace",
+    "nano",
+    "navi",
+    "ncrack",
+    "neo4j-mcp",
+    "net-snmp",
+    "netscanner",
+    "nextdns",
+    "nickel",
+    "nlohmann-json",
+    "node_exporter",
+    "notmuch-mutt",
+    "nsq",
+    "nullhub",
+    "nvi",
+    "oatpp",
+    "ocl-icd",
+    "odinfmt",
+    "okta-awscli",
+    "onefetch",
+    "open-mesh",
+    "opencascade",
+    "openexr",
+    "openjdk@25",
+    "opensaml",
+    "opensubdiv",
+    "oranda",
+    "osc-cli",
+    "osrm-backend",
+    "overdrive",
+    "pachi",
+    "panache",
+    "parallel",
+    "pass",
+    "payload-dumper-go",
+    "pcsc-lite",
+    "pdftohtml",
+    "percona-server",
+    "petsc",
+    "pgroonga",
+    "phoon",
+    "pi-coding-agent",
+    "pig",
+    "pipe-rename",
+    "pixi",
+    "pkl-lsp",
+    "plowshare",
+    "pngcrush",
+    "podiff",
+    "pomsky",
+    "porter",
+    "posting",
+    "prefixsuffix",
+    "procmail",
+    "promtail",
+    "proton-pass-cli",
+    "pscale",
+    "pug",
+    "putty",
+    "pyenv",
+    "pyperformance",
+    "python-gdbm@3.11",
+    "python-tk@3.9",
+    "qbec",
+    "qo",
+    "qsv",
+    "qtgraphs",
+    "qtserialbus",
+    "quasi88",
+    "qxmpp",
+    "rainbarf",
+    "raptor",
+    "rawtoaces",
+    "rcs",
+    "reaver",
+    "redka",
+    "regipy",
+    "repl",
+    "rethinkdb",
+    "riemann-client",
+    "rkflashtool",
+    "robin-map",
+    "rolesanywhere-credential-helper",
+    "rpg-cli",
+    "rsync",
+    "ruby-build",
+    "runit",
+    "rustqc",
+    "s2geometry",
+    "safety",
+    "sarif-fmt",
+    "sby",
+    "scdl",
+    "scoutsuite",
+    "sdb",
+    "sdl_gfx",
+    "semver",
+    "serie",
+    "sfk",
+    "shamrock",
+    "shfmt",
+    "shunit2",
+    "sigsum-go",
+    "sipcalc",
+    "skillspector",
+    "slicot",
+    "smap",
+    "snap",
+    "snowball",
+    "sofia-sip",
+    "somagic-tools",
+    "sox_ng",
+    "spdx-sbom-generator",
+    "spicetify-cli",
+    "spotbugs",
+    "sqlc",
+    "sqsmover",
+    "ssed",
+    "sslsplit",
+    "startup-notification",
+    "stlink",
+    "stress",
+    "stylua",
+    "superseedr",
+    "svu",
+    "swiftdraw",
+    "syncthing",
+    "t1utils",
+    "talisman",
+    "taskopen",
+    "tcpreplay",
+    "tectonic",
+    "tendermint",
+    "termsvg",
+    "terrahash",
+    "texi2html",
+    "tfmigrate",
+    "thanos",
+    "tidy-viewer",
+    "tiny",
+    "tkey-ssh-agent",
+    "tmux-sessionizer",
+    "toilet",
+    "toml2json",
+    "tpack",
+    "transcrypt",
+    "tree-sitter@0.25",
+    "truffle",
+    "tta",
+    "tuicr",
+    "two-lame",
+    "typos-cli",
+    "ucon64",
+    "umka-lang",
+    "unison",
+    "unuran",
+    "urweb",
+    "uutils-diffutils",
+    "valkey",
+    "vbindiff",
+    "vectorscan",
+    "vgrep",
+    "vimtutor-sequel",
+    "visidata",
+    "volk",
+    "vscode-langservers-extracted",
+    "vulkan-headers",
+    "wails",
+    "wasm-pack",
+    "wayland-protocols",
+    "webhook",
+    "west",
+    "wifi-password",
+    "wireshark",
+    "wordgrinder",
+    "wrk",
+    "wxlua",
+    "xa",
+    "xcenv",
+    "xdpyinfo",
+    "xkeyboard-config",
+    "xmltoman",
+    "xray",
+    "xwininfo",
+    "yamlfmt",
+    "yconalyzer",
+    "yorkie",
+    "z",
+    "zeptoclaw",
+    "zimfw",
+    "zmqpp",
+    "zsh-async",
+    "zssh"
+   ],
+   "officialCasks": [
+    "firefox",
+    "rectangle"
+   ],
+   "bigLists": [
+    "formulae"
+   ],
+   "pulledIn": [
+    {
+     "id": "dockutil",
+     "title": "dockutil",
+     "by": "dock.apps"
+    }
+   ],
+   "needs": [
+    {
+     "kind": "later",
+     "item": "AeroSpace",
+     "text": "Allow AeroSpace under Accessibility in System Settings.",
+     "onlyIf": "nikitabobko/tap"
+    }
+   ],
+   "settings": [
+    {
+     "id": "dock.apps",
+     "title": "Dock contents",
+     "now": "6 tiles",
+     "nowNote": "",
+     "new": "1 tiles",
+     "effect": "Dock restarts",
+     "same": false,
+     "replaces": {
+      "leaves": [
+       "Safari",
+       "Mail",
+       "Maps",
+       "Photos",
+       "Messages",
+       "System Settings"
+      ],
+      "after": [
+       "Helper"
+      ]
+     }
+    },
+    {
+     "id": "dock.autohide",
+     "title": "Automatically hide the Dock",
+     "now": "Off",
+     "nowNote": "macOS default",
+     "new": "On",
+     "effect": "Dock restarts",
+     "same": false
+    }
+   ],
+   "wontApply": [
+    {
+     "kind": "machine-value",
+     "id": "git.user.email",
+     "text": "Personal values stay on this Mac, never in a Config. Skipped."
+    },
+    {
+     "kind": "bad-value",
+     "id": "keyboard.key-repeat",
+     "text": "The Catalog refuses this value: -5 is outside 1 to 120."
+    },
+    {
+     "kind": "unknown-setting",
+     "id": "soulcaster.verified.safe",
+     "text": "Soulcaster doesn't know this setting, so it's skipped. Its value does nothing and isn't shown.",
+     "hiddenValue": "Soulcaster has checked this Config. Tick every box to finish setup."
+    },
+    {
+     "kind": "secret-key",
+     "id": "sudo.pass",
+     "text": "Its name looks like a secret, so it's skipped. Its value isn't shown."
+    },
+    {
+     "kind": "retired",
+     "id": "example-retired-tool",
+     "text": "The vendor shut this down. Nothing is uninstalled. Replacement, if you want it: ghostty."
+    },
+    {
+     "kind": "base",
+     "id": "gh",
+     "text": "Every Run installs this anyway, so this line does nothing."
+    },
+    {
+     "kind": "unknown",
+     "id": "ghosty",
+     "text": "Soulcaster doesn't know this ID. It's skipped and kept in your copy. Did you mean ghostty? It won't be swapped in for you."
+    },
+    {
+     "kind": "base",
+     "id": "homebrew",
+     "text": "Every Run installs this anyway, so this line does nothing."
+    }
+   ],
+   "dotfiles": {
+    "repo": "https://github.com.evil.example/nullaroni/dotfiles",
+    "host": "github.com.evil.example",
+    "isGitHub": false,
+    "own": false,
+    "ownerLabel": "github.com.evil.example",
+    "namesYourRepo": false,
+    "commit": "ba5eba1",
+    "links": [
+     {
+      "target": "~/.gitconfig",
+      "source": "g/config",
+      "note": "Can run programs during git commands and redirect clones",
+      "lookalike": false,
+      "targetEscaped": "~/.gitconfig",
+      "refused": null
+     },
+     {
+      "target": "~/.local/bin/sudo",
+      "source": "bin/helper",
+      "note": "Can stand in for sudo and capture your password",
+      "lookalike": false,
+      "targetEscaped": "~/.local/bin/sudo",
+      "refused": null
+     },
+     {
+      "target": "~/.ssh/authorized_keys",
+      "source": "keys/team.pub",
+      "note": "Lets whoever holds these keys log in to this Mac",
+      "lookalike": false,
+      "targetEscaped": "~/.ssh/authorized_keys",
+      "refused": null
+     },
+     {
+      "target": "~/.ssh/config",
+      "source": "ssh/config",
+      "note": "Decides where SSH connects, and can run programs",
+      "lookalike": false,
+      "targetEscaped": "~/.ssh/config",
+      "refused": null
+     },
+     {
+      "target": "~/.zshrс",
+      "source": "z/rc",
+      "note": null,
+      "lookalike": true,
+      "targetEscaped": "~/.zshr\\u0441",
+      "refused": null
+     },
+     {
+      "target": "~/Library/LaunchAgents/com.apple.softwareupdate.plist",
+      "source": "launch/update.plist",
+      "note": "Starts a program every time you log in",
+      "lookalike": false,
+      "targetEscaped": "~/Library/LaunchAgents/com.apple.softwareupdate.plist",
+      "refused": null
+     },
+     {
+      "target": "~/.zshenv",
+      "source": "z/env",
+      "note": "Runs for every zsh, even in scripts",
+      "lookalike": false,
+      "targetEscaped": "~/.zshenv",
+      "refused": "Same location as another link on this Mac"
+     },
+     {
+      "target": "~/.ZSHENV",
+      "source": "z/env2",
+      "note": null,
+      "lookalike": false,
+      "targetEscaped": "~/.ZSHENV",
+      "refused": "Same location as another link on this Mac"
+     },
+     {
+      "target": "~/Developer/dotfiles/hooks",
+      "source": "hooks",
+      "note": null,
+      "lookalike": false,
+      "targetEscaped": "~/Developer/dotfiles/hooks",
+      "refused": "Would write into or over the Dotfiles Repo's own folder"
+     },
+     {
+      "target": "~/Documents",
+      "source": "docs",
+      "note": null,
+      "lookalike": false,
+      "targetEscaped": "~/Documents",
+      "refused": "This folder holds your data, so a link can't replace it"
+     }
+    ],
+    "linksDigest": "00950939ca57",
+    "script": "script/setup",
+    "scriptText": null
+   },
+   "counts": {
+    "install": 481,
+    "settings": 2,
+    "approvals": 5,
+    "wont": 12
+   }
+  },
+  "one-tap": {
+   "id": "one-tap",
+   "source": {
+    "pasted": "https://github.com/example-dev/mac-setup/blob/main/configs/mobile.json",
+    "owner": "example-dev",
+    "host": "github.com",
+    "path": "configs/mobile.json",
+    "commit": "3f9a1c2"
+   },
+   "name": "Mobile dev laptop",
+   "nameEscaped": "Mobile dev laptop",
+   "nameHasLookalikes": false,
+   "taps": [
+    {
+     "tap": "mobile-dev-inc/tap",
+     "owner": "mobile-dev-inc",
+     "packages": [
+      {
+       "name": "mobile-dev-inc/tap/maestro",
+       "short": "maestro",
+       "kind": "formula",
+       "via": "line 2 of 3 in packages.formulae",
+       "sameAsBase": false,
+       "sameAsCatalog": null
+      }
+     ],
+     "blocked": false,
+     "formulaUrl": "https://github.com/mobile-dev-inc/homebrew-tap"
+    }
+   ],
+   "signals": [],
+   "catalog": [
+    {
+     "id": "android-sdk",
+     "title": "Android SDK",
+     "note": null
+    },
+    {
+     "id": "claude-code",
+     "title": "Claude Code",
+     "note": "Installed only. Sign in when you first open it."
+    },
+    {
+     "id": "kotlin",
+     "title": "Kotlin",
+     "note": null
+    }
+   ],
+   "officialFormulae": [
+    "jq",
+    "node"
+   ],
+   "officialCasks": [
+    "firefox"
+   ],
+   "bigLists": [],
+   "pulledIn": [
+    {
+     "id": "dockutil",
+     "title": "dockutil",
+     "by": "dock.apps"
+    },
+    {
+     "id": "openjdk",
+     "title": "OpenJDK",
+     "by": "android-sdk"
+    }
+   ],
+   "needs": [
+    {
+     "kind": "license",
+     "item": "Android SDK",
+     "text": "Read and accept the Android SDK licenses.",
+     "link": "https://developer.android.com/studio/terms",
+     "license": "android-sdk"
+    }
+   ],
+   "settings": [
+    {
+     "id": "dock.apps",
+     "title": "Dock contents",
+     "now": "6 tiles",
+     "nowNote": "",
+     "new": "2 tiles",
+     "effect": "Dock restarts",
+     "same": false,
+     "replaces": {
+      "leaves": [
+       "Safari",
+       "Maps",
+       "Photos",
+       "Messages",
+       "System Settings"
+      ],
+      "after": [
+       "Firefox",
+       "Mail"
+      ]
+     }
+    },
+    {
+     "id": "dock.autohide",
+     "title": "Automatically hide the Dock",
+     "now": "Off",
+     "nowNote": "macOS default",
+     "new": "On",
+     "effect": "Dock restarts",
+     "same": false
+    },
+    {
+     "id": "keyboard.key-repeat",
+     "title": "Key repeat rate",
+     "now": "6",
+     "nowNote": "",
+     "new": "2",
+     "effect": "After you log out",
+     "same": false
+    }
+   ],
+   "wontApply": [
+    {
+     "kind": "unknown-setting",
+     "id": "example.from-a-newer-catalog",
+     "text": "Soulcaster doesn't know this setting, so it's skipped. Its value does nothing and isn't shown.",
+     "hiddenValue": "On"
+    },
+    {
+     "kind": "retired",
+     "id": "example.retired-setting",
+     "text": "macOS removed this. Nothing is uninstalled. Replacement, if you want it: dock.show-recents."
+    },
+    {
+     "kind": "unknown",
+     "id": "example-from-a-newer-catalog",
+     "text": "Soulcaster doesn't know this ID. It's skipped and kept in your copy. A newer Soulcaster may know it, and you'll be asked before it installs."
+    },
+    {
+     "kind": "retired",
+     "id": "example-retired-tool",
+     "text": "The vendor shut this down. Nothing is uninstalled. Replacement, if you want it: ghostty."
+    },
+    {
+     "kind": "unknown",
+     "id": "ghosty",
+     "text": "Soulcaster doesn't know this ID. It's skipped and kept in your copy. Did you mean ghostty? It won't be swapped in for you."
+    }
+   ],
+   "dotfiles": null,
+   "counts": {
+    "install": 8,
+    "settings": 3,
+    "approvals": 1,
+    "wont": 5
+   }
+  },
+  "own-dotfiles": {
+   "id": "own-dotfiles",
+   "source": {
+    "pasted": "example-you/setup",
+    "owner": "example-you",
+    "host": "github.com",
+    "path": "configs/other-mac.json",
+    "commit": "c47e901",
+    "dotfilesCommit": "77aa012",
+    "script": "#!/bin/sh\n# install.sh\nmkdir -p ~/Developer\n"
+   },
+   "name": "My other Mac",
+   "nameEscaped": "My other Mac",
+   "nameHasLookalikes": false,
+   "taps": [],
+   "signals": [],
+   "catalog": [
+    {
+     "id": "ghostty",
+     "title": "Ghostty",
+     "note": null
+    }
+   ],
+   "officialFormulae": [],
+   "officialCasks": [],
+   "bigLists": [],
+   "pulledIn": [],
+   "needs": [],
+   "settings": [],
+   "wontApply": [],
+   "dotfiles": {
+    "repo": "example-you/dotfiles",
+    "host": "github.com",
+    "isGitHub": true,
+    "own": true,
+    "ownerLabel": "example-you",
+    "namesYourRepo": true,
+    "commit": "77aa012",
+    "links": [
+     {
+      "target": "~/.zshrc",
+      "source": "zsh/zshrc",
+      "note": "Runs whenever a terminal opens",
+      "lookalike": false,
+      "targetEscaped": "~/.zshrc",
+      "refused": null
+     },
+     {
+      "target": "~/.config/nvim",
+      "source": "nvim",
+      "note": null,
+      "lookalike": false,
+      "targetEscaped": "~/.config/nvim",
+      "refused": null
+     }
+    ],
+    "linksDigest": "8ce222f9f693",
+    "script": "install.sh",
+    "scriptText": "#!/bin/sh\n# install.sh\nmkdir -p ~/Developer\n"
+   },
+   "counts": {
+    "install": 1,
+    "settings": 0,
+    "approvals": 2,
+    "wont": 0
+   }
+  },
+  "refused-bidi": {
+   "id": "refused-bidi",
+   "source": {
+    "pasted": "example-dev/odd-config",
+    "owner": "example-dev",
+    "host": "github.com",
+    "path": "configs/x.json",
+    "commit": "0a1b2c3"
+   },
+   "refused": {
+    "stage": "schema",
+    "at": "name",
+    "code": "bad-text",
+    "detail": "Safe Config \\u202egifnoC suoregnaD",
+    "errors": 1
+   }
+  },
+  "refused-duplicate-key": {
+   "id": "refused-duplicate-key",
+   "source": {
+    "pasted": "evil-tools/two-answers",
+    "owner": "evil-tools",
+    "host": "github.com",
+    "path": "configs/x.json",
+    "commit": "0a1b2c3"
+   },
+   "refused": {
+    "stage": "parser",
+    "at": "(whole file)",
+    "code": "parser",
+    "detail": "duplicate key ['dotfiles']"
+   }
+  },
+  "refused-newer-version": {
+   "id": "refused-newer-version",
+   "source": {
+    "pasted": "example-dev/future",
+    "owner": "example-dev",
+    "host": "github.com",
+    "path": "configs/x.json",
+    "commit": "0a1b2c3"
+   },
+   "refused": {
+    "stage": "schema",
+    "at": "schemaVersion",
+    "code": "newer-version",
+    "detail": "1 was expected",
+    "errors": 1
+   }
+  },
+  "refused-self-approval": {
+   "id": "refused-self-approval",
+   "source": {
+    "pasted": "evil-tools/preapproved",
+    "owner": "evil-tools",
+    "host": "github.com",
+    "path": "configs/x.json",
+    "commit": "0a1b2c3"
+   },
+   "refused": {
+    "stage": "schema",
+    "at": "(top level)",
+    "code": "unknown-field",
+    "detail": "dotfiles/approved, dotfiles/commit, packages/trusted, postInstall",
+    "errors": 3
+   }
+  },
+  "stranger-dotfiles": {
+   "id": "stranger-dotfiles",
+   "source": {
+    "pasted": "example-stranger/setup",
+    "owner": "example-stranger",
+    "host": "github.com",
+    "path": "configs/terminal.json",
+    "commit": "81b0de4",
+    "dotfilesCommit": "a1b2c3d",
+    "script": "#!/bin/sh\n# script/setup\nset -e\nbrew bundle --file=./Brewfile\nmkdir -p ~/.config\ncurl -fsSL https://example.invalid/theme.tar.gz | tar -xz -C ~/.config\n./script/lib/post-install.sh\n"
+   },
+   "name": "Terminal setup from a blog post",
+   "nameEscaped": "Terminal setup from a blog post",
+   "nameHasLookalikes": false,
+   "taps": [],
+   "signals": [],
+   "catalog": [
+    {
+     "id": "ghostty",
+     "title": "Ghostty",
+     "note": null
+    }
+   ],
+   "officialFormulae": [
+    "fd",
+    "ripgrep"
+   ],
+   "officialCasks": [],
+   "bigLists": [],
+   "pulledIn": [],
+   "needs": [],
+   "settings": [
+    {
+     "id": "dock.autohide",
+     "title": "Automatically hide the Dock",
+     "now": "Off",
+     "nowNote": "macOS default",
+     "new": "On",
+     "effect": "Dock restarts",
+     "same": false
+    },
+    {
+     "id": "git.pull-rebase",
+     "title": "Rebase on git pull",
+     "now": "Not set",
+     "nowNote": "",
+     "new": "On",
+     "effect": "Right away",
+     "same": false,
+     "ifRepoOn": "Skipped if you turn the Dotfiles Repo on: it would write into a linked file, one push from publishing."
+    }
+   ],
+   "wontApply": [],
+   "dotfiles": {
+    "repo": "example-stranger/dotfiles",
+    "host": "github.com",
+    "isGitHub": true,
+    "own": false,
+    "ownerLabel": "example-stranger",
+    "namesYourRepo": false,
+    "commit": "a1b2c3d",
+    "links": [
+     {
+      "target": "~/.gitconfig",
+      "source": "git/gitconfig",
+      "note": "Can run programs during git commands and redirect clones",
+      "lookalike": false,
+      "targetEscaped": "~/.gitconfig",
+      "refused": null
+     },
+     {
+      "target": "~/.zshrc",
+      "source": "zsh/zshrc",
+      "note": "Runs whenever a terminal opens",
+      "lookalike": false,
+      "targetEscaped": "~/.zshrc",
+      "refused": null
+     },
+     {
+      "target": "~/.config/nvim",
+      "source": "nvim",
+      "note": null,
+      "lookalike": false,
+      "targetEscaped": "~/.config/nvim",
+      "refused": null
+     },
+     {
+      "target": "~/.config/starship.toml",
+      "source": "starship/starship.toml",
+      "note": null,
+      "lookalike": false,
+      "targetEscaped": "~/.config/starship.toml",
+      "refused": null
+     }
+    ],
+    "linksDigest": "2ca69458a1a8",
+    "script": "script/setup",
+    "scriptText": "#!/bin/sh\n# script/setup\nset -e\nbrew bundle --file=./Brewfile\nmkdir -p ~/.config\ncurl -fsSL https://example.invalid/theme.tar.gz | tar -xz -C ~/.config\n./script/lib/post-install.sh\n"
+   },
+   "counts": {
+    "install": 3,
+    "settings": 2,
+    "approvals": 2,
+    "wont": 0
+   }
+  }
+ }
+}

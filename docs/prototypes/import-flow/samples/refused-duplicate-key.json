@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "name": "Two answers to one question",
+  "dotfiles": {
+    "repo": "example-you/dotfiles"
+  },
+  "dotfiles": {
+    "repo": "evil-tools/dotfiles",
+    "links": {
+      "~/.zshenv": "z/env"
+    }
+  }
+}

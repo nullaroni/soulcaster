@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "Mobile dev laptop",
+  "items": [
+    "android-sdk",
+    "claude-code",
+    "example-from-a-newer-catalog",
+    "example-retired-tool",
+    "ghosty",
+    "kotlin"
+  ],
+  "packages": {
+    "formulae": [
+      "jq",
+      "mobile-dev-inc/tap/maestro",
+      "node"
+    ],
+    "casks": [
+      "firefox"
+    ]
+  },
+  "settings": {
+    "dock.apps": [
+      "/Applications/Firefox.app",
+      "/System/Applications/Mail.app"
+    ],
+    "dock.autohide": true,
+    "example.from-a-newer-catalog": true,
+    "example.retired-setting": true,
+    "keyboard.key-repeat": 2
+  }
+}
