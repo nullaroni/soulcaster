@@ -43,6 +43,7 @@ mkdir "$bin"
 
 write_stub() {
   {
+    # shellcheck disable=SC2016
     printf '#!/bin/bash\nprintf "%%s\\n" "%s $*" >>"$STUB_LOG"\n' "$1"
     cat
   } >"$bin/$1"
@@ -432,6 +433,7 @@ done
 finish_case
 
 begin "the real entry point installs to /Applications and takes no arguments"
+# shellcheck disable=SC2016
 /usr/bin/grep -q '^  soulcaster_install /Applications "\$team_id"$' <<<"$code" ||
   not_ok "soulcaster_main doesn't name /Applications"
 finish_case
