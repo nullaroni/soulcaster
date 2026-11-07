@@ -25,15 +25,30 @@ cargo run -p soulcaster-app -- --snap out.png --scene catalog-picked
 
 None of this installs anything yet: the CLI only reads a Config, and the app plays a simulated Run.
 
-## Quick Start
+### Build the app
 
-One command on a bare Mac (installs Xcode Command Line Tools, clones this repo, runs bootstrap):
+```sh
+packaging/build-app.sh               # target/package/Soulcaster.app, ad-hoc signed and checked
+open target/package/Soulcaster.app
+```
+
+This needs Rust and Command Line Tools. [docs/releasing.md](docs/releasing.md) covers releases, signing and notarization.
+
+## Install Soulcaster
+
+On an Apple Silicon Mac with macOS 15 or later:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/nullaroni/soulcaster/main/install.sh)"
 ```
 
-Or manually:
+**This doesn't install anything yet.** No notarized release exists, so the command stops with a message pointing to the source build above.
+
+Once a notarized release exists, the command downloads it, checks its checksum, verifies it with `codesign` and `spctl` against the expected Apple team, copies it to `/Applications` and opens it. It works on a bare Mac, with no Git or Command Line Tools. It never asks for a password and refuses an app that fails verification, and nothing can skip that check. If the app is already installed, it verifies and opens it. To get a newer release, move the app to the Trash and run the command again.
+
+## Quick Start (the older Bash setup)
+
+The Bash setup below is being replaced by Soulcaster. `install.sh` no longer runs it, so start it from a clone:
 
 ```bash
 git clone https://github.com/nullaroni/soulcaster.git ~/Developer/macbook-setup
@@ -55,8 +70,9 @@ After the first run, your role and Git identity are saved to `.local.env` (gitig
 
 ```
 macbook-setup/
-├── install.sh            # One-command installer (curl | bash)
-├── bootstrap.sh          # Main entrypoint
+├── install.sh            # Installs the Soulcaster app (verified, one command)
+├── packaging/            # Builds and signs Soulcaster.app, and tests install.sh
+├── bootstrap.sh          # Main entrypoint of the Bash setup
 ├── config/               # Environment presets
 ├── scripts/              # Modular setup scripts
 ├── brew/                 # Brewfiles for packages
