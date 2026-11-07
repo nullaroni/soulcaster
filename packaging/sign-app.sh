@@ -17,4 +17,6 @@ bundle_id=$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")
 
 codesign --force --sign "$identity" "${flags[@]}" --identifier "$bundle_id.cli" \
   "$app/Contents/Helpers/soulcaster"
+codesign --force --sign "$identity" "${flags[@]}" --identifier "$bundle_id.askpass" \
+  "$app/Contents/Helpers/soulcaster-askpass"
 codesign --force --sign "$identity" "${flags[@]}" "$app"

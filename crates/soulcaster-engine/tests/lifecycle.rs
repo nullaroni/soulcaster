@@ -30,6 +30,43 @@ use soulcaster_engine::{
 
 const SECRET: &str = "s3cret-plover";
 
+/// Hands the command back unwrapped, so a test's runner sees `installer` rather than `sudo`.
+/// `tests/admin.rs` covers the real gate.
+struct OpenGate;
+
+struct OpenWindow;
+
+impl soulcaster_engine::AdminWindow for OpenWindow {
+    fn elevated(&self, inner: Command) -> Command {
+        inner.env("SUDO_ASKPASS", "/sandbox/askpass")
+    }
+
+    fn may_elevate(&self, inner: Command) -> Command {
+        inner.env("SUDO_ASKPASS", "/sandbox/askpass")
+    }
+}
+
+impl soulcaster_engine::AdminGate for OpenGate {
+    fn validate(
+        &self,
+        _runner: &dyn CommandRunner,
+        _home: &Path,
+        _password: &Password,
+    ) -> soulcaster_engine::Validation {
+        soulcaster_engine::Validation::Accepted
+    }
+
+    fn open(
+        &self,
+        _password: &Password,
+        _budget: soulcaster_engine::Budget,
+    ) -> Result<Box<dyn soulcaster_engine::AdminWindow>, String> {
+        Ok(Box::new(OpenWindow))
+    }
+
+    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) {}
+}
+
 struct Sandbox(PathBuf);
 
 impl Sandbox {
@@ -175,6 +212,7 @@ impl Harness {
         let config_name = plan.config_name.clone();
         let asked_before = self.asks.asked();
         let result = perform(RunInput {
+            admin: &OpenGate,
             plan,
             runner: &self.runner,
             home: self.home.path(),
@@ -740,6 +778,7 @@ fn cancel_between_items_keeps_a_consistent_record_and_discards_the_password() {
     let mut plan = plan(vec![formula("first", &[]), formula("second", &[])]);
     let mut events = Vec::new();
     let report = perform(RunInput {
+        admin: &OpenGate,
         plan: &mut plan,
         runner: &Arming {
             inner: &harness.runner,
@@ -802,6 +841,7 @@ fn the_password_is_discarded_after_sixty_minutes_and_the_rest_waits() {
     ]);
     let mut events = Vec::new();
     let report = perform(RunInput {
+        admin: &OpenGate,
         plan: &mut plan,
         runner: &Jumping {
             inner: &harness.runner,
@@ -926,6 +966,7 @@ fn the_admin_stage_discards_the_password_before_any_user_stage_command() {
     let mut events = Vec::new();
     let log_for_sink = Arc::clone(&log);
     perform(RunInput {
+        admin: &OpenGate,
         plan: &mut plan,
         runner: &Trace {
             inner: &harness.runner,
@@ -1024,6 +1065,7 @@ fn an_admin_item_that_requires_a_user_stage_tap_does_not_run_that_tap_while_the_
     ]);
     let mut events = Vec::new();
     let report = perform(RunInput {
+        admin: &OpenGate,
         plan: &mut plan,
         runner: &Trace {
             inner: &harness.runner,
@@ -2204,6 +2246,7 @@ mod review {
         let mut sink = SharedSink(seen.clone());
         let mut p = plan(vec![formula("ripgrep", &[])]);
         perform(RunInput {
+            admin: &OpenGate,
             plan: &mut p,
             runner: &runner,
             home: h.home.path(),
@@ -2482,6 +2525,7 @@ mod round_two {
         let mut sink = RecordingSink(seen);
         let mut p = plan(vec![formula("ripgrep", &[])]);
         perform(RunInput {
+            admin: &OpenGate,
             plan: &mut p,
             runner: &runner,
             home: h.home.path(),
@@ -2547,6 +2591,7 @@ mod round_two {
         let mut events = Vec::new();
         let mut p = plan(vec![formula("ripgrep", &[])]);
         let report = perform(RunInput {
+            admin: &OpenGate,
             plan: &mut p,
             runner: &runner,
             home: h.home.path(),
@@ -2665,5 +2710,676 @@ mod round_two {
                 file_name(c) == "rm" && c.args.iter().any(|a| a.contains("/tools/k/"))
             })
         );
+    }
+}
+
+mod admin_stage {
+    use super::review::download;
+    use super::*;
+    use soulcaster_core::recipe::Bootstrap;
+    use soulcaster_engine::{AdminWindow, Budget, Validation};
+
+    /// A gate with a script of answers, that records what it was asked for and when.
+    #[derive(Default)]
+    struct WatchedGate {
+        answers: Mutex<Vec<Validation>>,
+        budgets: Mutex<Vec<Budget>>,
+        forgotten: AtomicUsize,
+        refuse_open: AtomicBool,
+    }
+
+    impl soulcaster_engine::AdminGate for WatchedGate {
+        fn validate(
+            &self,
+            _runner: &dyn CommandRunner,
+            _home: &Path,
+            _password: &Password,
+        ) -> Validation {
+            let mut answers = self.answers.lock().unwrap();
+            if answers.is_empty() {
+                Validation::Accepted
+            } else {
+                answers.remove(0)
+            }
+        }
+
+        fn open(
+            &self,
+            _password: &Password,
+            budget: Budget,
+        ) -> Result<Box<dyn AdminWindow>, String> {
+            if self.refuse_open.load(Ordering::Relaxed) {
+                return Err("no helper".to_string());
+            }
+            self.budgets.lock().unwrap().push(budget);
+            Ok(Box::new(OpenWindow))
+        }
+
+        fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) {
+            self.forgotten.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[derive(Default)]
+    struct AsksInOrder {
+        wrong_flags: Mutex<Vec<bool>>,
+        codes: Mutex<Vec<(String, String)>>,
+        statuses: Mutex<Vec<SignInStatus>>,
+    }
+
+    impl Asks for AsksInOrder {
+        fn password(&self, request: &PasswordRequest) -> Option<Password> {
+            self.wrong_flags
+                .lock()
+                .unwrap()
+                .push(request.last_was_wrong);
+            Some(Password::new(SECRET.to_string()))
+        }
+
+        fn show_github_code(&self, code: &str, url: &str) {
+            self.codes
+                .lock()
+                .unwrap()
+                .push((code.to_string(), url.to_string()));
+        }
+
+        fn github_status(&self, status: SignInStatus) {
+            self.statuses.lock().unwrap().push(status);
+        }
+    }
+
+    fn perform_with(
+        h: &Harness,
+        plan: &mut Plan,
+        gate: &WatchedGate,
+        asks: &AsksInOrder,
+    ) -> (RunReport, Vec<Event>) {
+        h.script_machine();
+        let mut events = Vec::new();
+        let report = perform(RunInput {
+            admin: gate,
+            plan,
+            runner: &h.runner,
+            home: h.home.path(),
+            events: &mut events,
+            asks,
+            cancel: &h.cancel,
+            clock: &h.clock,
+            scope: RunScope::Full,
+            config: ConfigRef::default(),
+            catalog_version: "t",
+            engine_version: "t",
+        })
+        .unwrap();
+        (report, events)
+    }
+
+    fn admin_item(id: &str) -> PlanEntry {
+        let mut entry = formula(id, &[]);
+        if let Recipe::Install(install) = &mut entry.recipe {
+            install.steps = vec![Step::Builtin {
+                name: BuiltinStep::XcodeFirstLaunch,
+                admin: true,
+                unless: None,
+            }];
+        }
+        entry
+    }
+
+    fn base_gh() -> PlanEntry {
+        let catalog = Catalog::shipped();
+        let config = Config::parse(br#"{"schemaVersion":1,"name":"x"}"#).unwrap();
+        let plan = Plan::new(&config, catalog);
+        plan.entries
+            .iter()
+            .find(|entry| entry.id == "gh")
+            .unwrap()
+            .clone()
+    }
+
+    fn bootstrap_of(entry: &PlanEntry) -> Bootstrap {
+        match &entry.recipe {
+            Recipe::Install(install) => install.bootstrap.clone().unwrap(),
+            _ => panic!("gh is an install"),
+        }
+    }
+
+    fn program_is(command: &Command, name: &str) -> bool {
+        file_name(command) == name
+    }
+
+    #[test]
+    fn a_wrong_password_asks_again_without_starting_the_run() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let gate = WatchedGate::default();
+        gate.answers
+            .lock()
+            .unwrap()
+            .extend([Validation::Wrong, Validation::Accepted]);
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![admin_item("xc")]);
+        let (_, events) = perform_with(&h, &mut p, &gate, &asks);
+        assert_eq!(*asks.wrong_flags.lock().unwrap(), [false, true]);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.kind, EventKind::AdminHeld { .. }))
+        );
+    }
+
+    #[test]
+    fn three_wrong_passwords_stop_asking_and_the_admin_work_goes_to_the_queue() {
+        let h = Harness::new();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        let gate = WatchedGate::default();
+        gate.answers.lock().unwrap().extend([
+            Validation::Wrong,
+            Validation::Wrong,
+            Validation::Wrong,
+        ]);
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![admin_item("xc")]);
+        let (report, events) = perform_with(&h, &mut p, &gate, &asks);
+        assert_eq!(asks.wrong_flags.lock().unwrap().len(), 3);
+        assert!(gate.budgets.lock().unwrap().is_empty());
+        assert!(matches!(state(&report, "xc"), ItemState::NeedsYou { .. }));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event.kind, EventKind::AdminHeld { .. }))
+        );
+    }
+
+    #[test]
+    fn discarding_the_password_also_ends_sudos_timestamp_once() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![admin_item("xc")]);
+        perform_with(&h, &mut p, &gate, &asks);
+        assert_eq!(gate.forgotten.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn a_run_that_never_held_the_password_has_no_timestamp_to_end() {
+        let h = Harness::new();
+        absent_then_present(&h, "Cellar/ripgrep");
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![formula("ripgrep", &[])]);
+        perform_with(&h, &mut p, &gate, &asks);
+        assert_eq!(gate.forgotten.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn an_admin_step_gets_one_answer_and_an_admin_cask_as_many_as_it_needs() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::fails(1, ""), Reply::ok("")],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut cask = formula("cask", &[]);
+        if let Recipe::Install(install) = &mut cask.recipe {
+            install.steps = vec![Step::BrewCask {
+                name: "tailscale-app".to_string(),
+                admin: true,
+                unless: None,
+            }];
+        }
+        let mut p = plan(vec![admin_item("xc"), cask]);
+        perform_with(&h, &mut p, &gate, &asks);
+        assert_eq!(
+            *gate.budgets.lock().unwrap(),
+            [Budget::One, Budget::AsNeeded]
+        );
+    }
+
+    #[test]
+    fn nothing_but_an_admin_step_carries_the_helper() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![admin_item("xc"), formula("ripgrep", &[])]);
+        perform_with(&h, &mut p, &gate, &asks);
+        for command in h.runner.calls() {
+            let helper = command.env.iter().any(|(key, _)| key == "SUDO_ASKPASS");
+            assert_eq!(helper, program_is(&command, "xcodebuild"), "{command:?}");
+        }
+    }
+
+    #[test]
+    fn a_helper_that_wont_open_sends_the_item_to_the_queue() {
+        let h = Harness::new();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        let gate = WatchedGate::default();
+        gate.refuse_open.store(true, Ordering::Relaxed);
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![admin_item("xc")]);
+        let (report, _) = perform_with(&h, &mut p, &gate, &asks);
+        assert!(matches!(state(&report, "xc"), ItemState::NeedsYou { .. }));
+        assert!(!h.runner.calls().iter().any(|c| program_is(c, "xcodebuild")));
+    }
+
+    fn command_line_tools() -> PlanEntry {
+        let mut entry = formula("command-line-tools", &[]);
+        if let Recipe::Install(install) = &mut entry.recipe {
+            install.steps = vec![Step::Builtin {
+                name: BuiltinStep::CommandLineTools,
+                admin: true,
+                unless: None,
+            }];
+        }
+        entry
+    }
+
+    #[test]
+    fn command_line_tools_install_the_newest_listed_release_then_clear_the_placeholder() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        h.runner.on(
+            |c| file_name(c) == "softwareupdate" && args_contain(c, "-l"),
+            [Reply::ok(
+                "Software Update found the following:\n\
+                 * Label: Command Line Tools for Xcode-15.3\n\
+                 \tTitle: Command Line Tools\n\
+                 * Label: Command Line Tools for Xcode-16.4\n\
+                 * Label: Command Line Tools beta 3 for Xcode-26.0\n\
+                 * Label: macOS Tahoe 26.1\n",
+            )],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![command_line_tools()]);
+        let (report, _) = perform_with(&h, &mut p, &gate, &asks);
+        assert!(matches!(
+            state(&report, "command-line-tools"),
+            ItemState::Satisfied { .. }
+        ));
+        let calls = h.runner.calls();
+        let install = calls
+            .iter()
+            .find(|c| program_is(c, "softwareupdate") && args_contain(c, "-i"))
+            .unwrap();
+        assert_eq!(install.args, ["-i", "Command Line Tools for Xcode-16.4"]);
+        assert!(install.env.iter().any(|(key, _)| key == "SUDO_ASKPASS"));
+        let at = |name: &str| calls.iter().position(|c| program_is(c, name)).unwrap();
+        assert!(at("touch") < at("softwareupdate"));
+        assert!(calls.iter().rposition(|c| program_is(c, "rm")).unwrap() > at("softwareupdate"));
+        assert!(!calls.iter().any(|c| program_is(c, "xcode-select")));
+    }
+
+    #[test]
+    fn when_the_quiet_route_fails_apples_dialog_opens_and_the_item_waits_in_the_queue() {
+        let h = Harness::new();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        h.runner.on(
+            |c| file_name(c) == "softwareupdate",
+            [Reply::ok("No new software available.\n")],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![command_line_tools()]);
+        let (report, _) = perform_with(&h, &mut p, &gate, &asks);
+        assert!(matches!(
+            state(&report, "command-line-tools"),
+            ItemState::NeedsYou { .. }
+        ));
+        let calls = h.runner.calls();
+        assert!(calls.iter().any(|c| program_is(c, "xcode-select")));
+        assert!(
+            calls.iter().any(|c| program_is(c, "rm")),
+            "placeholder left"
+        );
+    }
+
+    fn gh_absent(h: &Harness) {
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+    }
+
+    fn sign_in_output() -> Reply {
+        Reply::ok(
+            "! First copy your one-time code: ABCD-1234\n\
+             Open this URL to continue in your web browser: https://evil.example/login\n",
+        )
+    }
+
+    fn is_gh(command: &Command) -> bool {
+        file_name(command) == "gh"
+    }
+
+    fn scripted_gh(h: &Harness, statuses: Vec<Reply>, login: Vec<Reply>) {
+        h.runner
+            .on(|c| is_gh(c) && args_contain(c, "status"), statuses);
+        h.runner.on(|c| is_gh(c) && args_contain(c, "login"), login);
+    }
+
+    #[test]
+    fn a_bare_mac_fetches_the_pinned_gh_and_signs_in_with_nothing_on_path() {
+        let h = Harness::new();
+        gh_absent(&h);
+        let gh = base_gh();
+        let pinned = bootstrap_of(&gh);
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok(format!("{}  gh.zip\n", pinned.sha256))],
+        );
+        h.runner.on(|c| file_name(c) == "codesign", [Reply::ok("")]);
+        scripted_gh(
+            &h,
+            vec![
+                Reply::fails(1, "not logged in"),
+                Reply::ok("Logged in (keyring)\n"),
+            ],
+            vec![sign_in_output()],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        perform_with(&h, &mut p, &gate, &asks);
+
+        // The code reaches the person. The address is GitHub's, whatever the tool printed.
+        assert_eq!(
+            *asks.codes.lock().unwrap(),
+            [(
+                "ABCD-1234".to_string(),
+                "https://github.com/login/device".to_string()
+            )]
+        );
+        assert_eq!(
+            *asks.statuses.lock().unwrap(),
+            [SignInStatus::Waiting, SignInStatus::SignedIn]
+        );
+        let calls = h.runner.calls();
+        let curl = calls.iter().find(|c| program_is(c, "curl")).unwrap();
+        assert!(args_contain(curl, &pinned.url));
+        let verify = calls.iter().find(|c| program_is(c, "codesign")).unwrap();
+        assert!(args_contain(verify, &pinned.signed_by));
+        let login = calls
+            .iter()
+            .find(|c| is_gh(c) && args_contain(c, "login"))
+            .unwrap();
+        for flag in ["--web", "--clipboard=false", "--skip-ssh-key"] {
+            assert!(login.args.iter().any(|arg| arg == flag), "{flag}");
+        }
+        let path = &login.env.iter().find(|(key, _)| key == "PATH").unwrap().1;
+        assert!(path.ends_with("empty-path"), "{path}");
+        assert!(
+            login
+                .env
+                .iter()
+                .any(|(k, v)| k == "GH_TELEMETRY" && v == "false")
+        );
+        // Sign-in comes before the bootstrap copy is used for anything, and never runs git.
+        assert!(!calls.iter().any(|c| program_is(c, "git")));
+    }
+
+    #[test]
+    fn a_failed_sign_in_goes_to_the_queue_and_the_run_carries_on() {
+        let h = Harness::new();
+        gh_absent(&h);
+        let gh = base_gh();
+        let pinned = bootstrap_of(&gh);
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok(format!("{}  gh.zip\n", pinned.sha256))],
+        );
+        h.runner.on(|c| file_name(c) == "codesign", [Reply::ok("")]);
+        scripted_gh(
+            &h,
+            vec![Reply::fails(1, "not logged in")],
+            vec![Reply::fails(1, "denied")],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        let (report, _) = perform_with(&h, &mut p, &gate, &asks);
+        assert_eq!(
+            *asks.statuses.lock().unwrap(),
+            [SignInStatus::Waiting, SignInStatus::Failed]
+        );
+        assert!(
+            report
+                .queue
+                .iter()
+                .any(|entry| entry.id.contains("sign-in"))
+        );
+    }
+
+    #[test]
+    fn a_refused_signature_means_no_sign_in_and_no_copy_of_gh_in_place() {
+        let h = Harness::new();
+        gh_absent(&h);
+        let gh = base_gh();
+        let pinned = bootstrap_of(&gh);
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok(format!("{}  gh.zip\n", pinned.sha256))],
+        );
+        h.runner.on(
+            |c| file_name(c) == "codesign",
+            [Reply::fails(3, "failed to satisfy")],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        perform_with(&h, &mut p, &gate, &asks);
+        let calls = h.runner.calls();
+        assert!(!calls.iter().any(is_gh));
+        assert!(!calls.iter().any(|c| program_is(c, "mv")));
+        assert!(asks.codes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn homebrews_gh_already_here_means_no_bootstrap_and_no_sign_in() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test" && args_contain(c, "/opt/homebrew/bin/gh"),
+            [Reply::ok("")],
+        );
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![base_gh()]);
+        perform_with(&h, &mut p, &gate, &asks);
+        assert!(asks.statuses.lock().unwrap().is_empty());
+    }
+
+    fn make_bootstrap_copy(h: &Harness, entry: &PlanEntry) -> PathBuf {
+        let pinned = bootstrap_of(entry);
+        let folder = h
+            .home
+            .path()
+            .join("Library/Application Support/Soulcaster/bootstrap-gh")
+            .join(&pinned.version);
+        let binary = folder.join(&pinned.binary);
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::write(&binary, "").unwrap();
+        binary
+    }
+
+    /// The hand-off's reads, by which `gh` is asking.
+    fn accounts(h: &Harness, early: &str, homebrew: &str) {
+        let (early, homebrew) = (early.to_string(), homebrew.to_string());
+        h.runner.on(
+            |c| c.program.starts_with("/opt/homebrew") && is_gh(c) && args_contain(c, "user"),
+            vec![Reply::ok(format!("{homebrew}\n")); 4],
+        );
+        h.runner.on(
+            |c| is_gh(c) && args_contain(c, "user"),
+            vec![Reply::ok(format!("{early}\n")); 4],
+        );
+    }
+
+    fn hand_off_only(h: &Harness) -> PlanEntry {
+        // Homebrew's gh is in, the copy is still there, so only the hand-off is left to do.
+        let mut gh = base_gh();
+        if let Recipe::Install(install) = &mut gh.recipe {
+            install.requires.clear();
+            install.steps = vec![Step::Builtin {
+                name: BuiltinStep::GhHandOff,
+                admin: false,
+                unless: None,
+            }];
+        }
+        h.runner.on(
+            |c| file_name(c) == "test" && args_contain(c, "/opt/homebrew/bin/gh"),
+            vec![Reply::ok(""); 8],
+        );
+        h.runner.on(
+            |c| file_name(c) == "test" && args_contain(c, "bootstrap-gh"),
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        gh
+    }
+
+    #[test]
+    fn the_hand_off_sets_up_git_with_homebrews_gh_and_removes_the_copy() {
+        let h = Harness::new();
+        let gh = hand_off_only(&h);
+        let copy = make_bootstrap_copy(&h, &gh);
+        accounts(&h, "someone", "someone");
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        perform_with(&h, &mut p, &gate, &asks);
+        let calls = h.runner.calls();
+        let setup = calls
+            .iter()
+            .find(|c| is_gh(c) && args_contain(c, "setup-git"))
+            .expect("git's sign-in was set up");
+        assert_eq!(setup.program, Path::new("/opt/homebrew/bin/gh"));
+        assert!(
+            setup
+                .env
+                .iter()
+                .any(|(key, value)| key == "GH_PATH" && value == "/opt/homebrew/bin/gh")
+        );
+        assert!(!copy.exists(), "the bootstrap copy is still there");
+    }
+
+    #[test]
+    fn a_different_account_stops_the_hand_off_and_keeps_the_copy() {
+        let h = Harness::new();
+        let gh = hand_off_only(&h);
+        let copy = make_bootstrap_copy(&h, &gh);
+        accounts(&h, "someone", "someone-else");
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        let (report, _) = perform_with(&h, &mut p, &gate, &asks);
+        assert!(matches!(state(&report, "gh"), ItemState::Failed { .. }));
+        assert!(copy.exists());
+        assert!(
+            !h.runner
+                .calls()
+                .iter()
+                .any(|c| is_gh(c) && args_contain(c, "setup-git"))
+        );
+    }
+
+    #[test]
+    fn a_linked_gitconfig_is_left_alone_and_the_report_says_so() {
+        let h = Harness::new();
+        let gh = hand_off_only(&h);
+        make_bootstrap_copy(&h, &gh);
+        accounts(&h, "someone", "someone");
+        std::os::unix::fs::symlink("/nowhere", h.home.path().join(".gitconfig")).unwrap();
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        let (_, events) = perform_with(&h, &mut p, &gate, &asks);
+        assert!(
+            !h.runner
+                .calls()
+                .iter()
+                .any(|c| is_gh(c) && args_contain(c, "setup-git"))
+        );
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            EventKind::RunWarning { text } if text.contains(".gitconfig")
+        )));
+    }
+
+    #[test]
+    fn another_git_helper_for_github_is_left_alone() {
+        let h = Harness::new();
+        let gh = hand_off_only(&h);
+        make_bootstrap_copy(&h, &gh);
+        accounts(&h, "someone", "someone");
+        h.runner.on(
+            |c| file_name(c) == "test" && args_contain(c, "CommandLineTools"),
+            vec![Reply::ok(""); 4],
+        );
+        h.runner.on(
+            |c| file_name(c) == "git" && args_contain(c, "--get-regexp"),
+            [Reply::ok(
+                "credential.https://github.com.helper !/usr/local/bin/other-helper\n",
+            )],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        perform_with(&h, &mut p, &gate, &asks);
+        assert!(
+            !h.runner
+                .calls()
+                .iter()
+                .any(|c| is_gh(c) && args_contain(c, "setup-git"))
+        );
+    }
+
+    #[test]
+    fn the_stub_never_runs_during_the_hand_off_on_a_bare_mac() {
+        let h = Harness::new();
+        let gh = hand_off_only(&h);
+        make_bootstrap_copy(&h, &gh);
+        accounts(&h, "someone", "someone");
+        h.runner.on(
+            |c| file_name(c) == "test" && args_contain(c, "CommandLineTools"),
+            vec![Reply::fails(1, ""); 4],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        perform_with(&h, &mut p, &gate, &asks);
+        assert!(!h.runner.calls().iter().any(|c| file_name(c) == "git"));
+    }
+
+    #[test]
+    fn a_download_item_still_verifies_and_swaps_after_the_refactor() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok("abc123  tool.zip\n")],
+        );
+        h.runner.on(|c| file_name(c) == "codesign", [Reply::ok("")]);
+        let (report, _) = h.run(&mut plan(vec![download("k")]));
+        assert!(matches!(state(&report, "k"), ItemState::Satisfied { .. }));
     }
 }

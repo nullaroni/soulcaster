@@ -6,7 +6,7 @@ set -euo pipefail
 app="$1"
 root=$(cd "$(dirname "$0")/.." && pwd)
 contents="$app/Contents"
-binaries=("$contents/MacOS/Soulcaster" "$contents/Helpers/soulcaster")
+binaries=("$contents/MacOS/Soulcaster" "$contents/Helpers/soulcaster" "$contents/Helpers/soulcaster-askpass")
 failed=0
 
 check() {
