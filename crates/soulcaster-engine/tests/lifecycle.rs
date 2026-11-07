@@ -2374,7 +2374,6 @@ mod review {
 
     #[test]
     fn r18_dock_contents_are_compared_exactly_not_by_substring() {
-        let h = Harness::new();
         // Extra tiles: a Dock with more apps than the Config is not a match either.
         let h2 = Harness::new();
         h2.runner.on(|c| file_name(c) == "dockutil" && args_contain(c, "--list"),
