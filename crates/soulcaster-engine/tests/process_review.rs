@@ -62,3 +62,38 @@ fn p3_output_with_no_newline_counts_as_progress_and_is_bounded() {
         "steady progress with no newline was killed as a stall"
     );
 }
+
+#[test]
+fn p4_a_command_that_closes_its_pipes_and_hangs_still_hits_its_stall_limit() {
+    let started = Instant::now();
+    let out = ProcessRunner::new()
+        .run(
+            &Command::new("/bin/sh")
+                .args(["-c", "exec >&- 2>&-; /bin/sleep 30"])
+                .stall_limit(Duration::from_millis(300)),
+            &mut |_, _| {},
+        )
+        .unwrap();
+    assert_eq!(out.end, CommandEnd::Stalled);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "run() waited {:?} on a process with no open pipes",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn p5_output_written_before_the_exit_is_not_lost_to_a_slow_reader() {
+    let mut lines = 0;
+    let out = ProcessRunner::new()
+        .run(
+            &Command::new("/usr/bin/perl").args(["-e", "print qq(x\\n) x 20000"]),
+            &mut |_, _| {
+                std::thread::sleep(Duration::from_micros(20));
+                lines += 1;
+            },
+        )
+        .unwrap();
+    assert_eq!(out.end, CommandEnd::Exited(0));
+    assert_eq!(lines, 20000);
+}

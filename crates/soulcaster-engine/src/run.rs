@@ -1,12 +1,15 @@
 //! Check every Item, then the Admin Stage, discard the password, then the User Stage.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use fs2::FileExt;
 use serde_json::Value;
 use soulcaster_core::ask::{Asks, Password, PasswordRequest};
 use soulcaster_core::command::{Command, CommandEnd, CommandOutput, CommandRunner, OutputStream};
@@ -23,8 +26,8 @@ use soulcaster_core::recipe::{
 };
 
 use crate::act::{
-    self, Beat, failure_kind, is_network, mask_secrets, output_has_team, restart_command,
-    setting_json, sha_matches, version_below,
+    self, Beat, codesign_team_ok, failure_kind, is_network, mask_secrets, pkg_signer_has_team,
+    restart_command, setting_json, sha_matches, version_below,
 };
 use crate::record::{
     AcceptedLicense, InProgress, Interruption, ItemOutcome, LastApplied, MachineRecord, QueueItem,
@@ -33,6 +36,7 @@ use crate::record::{
 
 const ADMIN_HOLD_MS: u64 = 60 * 60 * 1000;
 const LOG_CAP: usize = 10 * 1024 * 1024;
+const LOG_BATCH: Duration = Duration::from_millis(100);
 static RUN_SEQ: AtomicU64 = AtomicU64::new(1);
 
 pub struct RunInput<'a> {
@@ -209,10 +213,11 @@ struct Engine<'a> {
     run_id: String,
     cancelled: bool,
     closed: bool,
-    emitted: Vec<Event>,
     interruption_note: Option<String>,
     needs_logout: bool,
     log_bytes: BTreeMap<String, usize>,
+    log_pending: Vec<(String, LogStream, String)>,
+    log_since: Option<Instant>,
 }
 
 pub fn perform(input: RunInput<'_>) -> Result<RunReport, EngineError> {
@@ -239,10 +244,10 @@ fn lock_run(home: &Path) -> Result<RunLock, EngineError> {
             path: path.clone(),
             detail: error.to_string(),
         })?;
-    match file.try_lock_exclusive() {
+    match file.try_lock() {
         Ok(()) => Ok(RunLock(file)),
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Err(EngineError::Busy),
-        Err(error) => Err(EngineError::RecordIo {
+        Err(TryLockError::WouldBlock) => Err(EngineError::Busy),
+        Err(TryLockError::Error(error)) => Err(EngineError::RecordIo {
             path,
             detail: error.to_string(),
         }),
@@ -256,7 +261,7 @@ impl<'a> Engine<'a> {
             input.clock.now_ms(),
             RUN_SEQ.fetch_add(1, Ordering::Relaxed)
         );
-        let scope = scope_of(&input.scope, input.plan, &record);
+        let scope = scope_of(&input.scope, input.plan);
         Ok(Self {
             plan: input.plan,
             runner: input.runner,
@@ -287,14 +292,16 @@ impl<'a> Engine<'a> {
             run_id,
             cancelled: false,
             closed: false,
-            emitted: Vec::new(),
             interruption_note: None,
             needs_logout: false,
             log_bytes: BTreeMap::new(),
+            log_pending: Vec::new(),
+            log_since: None,
         })
     }
 
     fn execute(&mut self) -> Result<RunReport, EngineError> {
+        self.prepare_run_dir();
         self.preflight()?;
         self.reconcile()?;
         self.precheck()?;
@@ -322,7 +329,7 @@ impl<'a> Engine<'a> {
             self.debug_no_secret(&text);
         }
         let event = self.stamper.stamp(self.now(), kind);
-        self.emitted.push(event.clone());
+        self.append_event(&event);
         self.events.send(event);
     }
 
@@ -406,6 +413,15 @@ impl<'a> Engine<'a> {
         if let Some(reason) = self.skip_reason(&entry) {
             self.early
                 .insert(id.to_string(), ItemState::Skipped { reason });
+            return Ok(());
+        }
+        if self.forced_by_profile(&entry)? {
+            self.early.insert(
+                id.to_string(),
+                ItemState::Skipped {
+                    reason: SkipReason::ManagedByAdmin,
+                },
+            );
             return Ok(());
         }
         if self.conflict_hit(&entry)? {
@@ -528,11 +544,46 @@ impl<'a> Engine<'a> {
     }
 
     fn missing_tap(&self, entry: &PlanEntry) -> bool {
-        entry
-            .recipe
-            .taps()
-            .iter()
-            .any(|tap| !self.record.approvals.taps.contains_key(tap))
+        entry.recipe.steps().iter().any(|step| {
+            let Some(name) = step.brew_name() else {
+                return false;
+            };
+            let Some(tap) = soulcaster_core::recipe::tap_of(name) else {
+                return false;
+            };
+            let tap_ok = self.record.approvals.taps.contains_key(&tap);
+            let package_ok = self.record.approvals.packages.contains_key(name);
+            !tap_ok && !package_ok
+        })
+    }
+
+    /// A profile that forces the key. The read is the managed-preferences file, not the user's defaults.
+    fn forced_by_profile(&mut self, entry: &PlanEntry) -> Result<bool, EngineError> {
+        let Recipe::Setting(setting) = &entry.recipe else {
+            return Ok(false);
+        };
+        let stores = setting.stores.clone();
+        for store in &stores {
+            let Store::Defaults { domain, key, .. } = store else {
+                continue;
+            };
+            for command in act::managed_preference_reads(self.home, domain.as_str(), key) {
+                if let CmdResult::Done(output) = self.run_command(&command, "", false)?
+                    && output.is_success()
+                    && !output.stdout_text().trim().is_empty()
+                {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn command_line_tools_present(&mut self) -> Result<bool, EngineError> {
+        let probe = Probe::Builtin {
+            name: soulcaster_core::recipe::BuiltinProbe::CommandLineTools,
+        };
+        Ok(self.eval_probe(&probe)? == Verdict::Pass)
     }
 
     fn person_gate_open(&self, item: &str) -> bool {
@@ -623,7 +674,7 @@ impl<'a> Engine<'a> {
             return Ok(Verdict::Unknown);
         }
         for command in &commands {
-            match self.run_command(command, "", true)? {
+            match self.run_command(command, "", false)? {
                 CmdResult::Failed(FailureKind::Stalled)
                 | CmdResult::Failed(FailureKind::Network) => {
                     return Ok(Verdict::Unknown);
@@ -683,7 +734,7 @@ impl<'a> Engine<'a> {
                 let Some(command) = act::defaults_read(self.home, store) else {
                     return Ok(ReadBack::Unknown);
                 };
-                match self.run_command(&command, id, true)? {
+                match self.run_command(&command, id, false)? {
                     CmdResult::Done(output) if output.is_success() => {
                         let prior = parse_defaults(store, &output.stdout_text());
                         if let Some(value) = &prior {
@@ -697,32 +748,19 @@ impl<'a> Engine<'a> {
                 }
             }
             Store::GitConfig { key } => {
-                let mut command = act::git_command(self.home);
-                command.args = vec![
-                    "config".into(),
-                    "--file".into(),
-                    act::git_file(self.home).to_string_lossy().into_owned(),
-                    "--get".into(),
-                    git_key(key).into(),
-                ];
-                match self.run_command(&command, id, false)? {
-                    CmdResult::Done(output) if output.is_success() => {
-                        let text = output.stdout_text().trim().to_string();
-                        self.priors
-                            .entry(id.to_string())
-                            .or_insert(Value::String(text.clone()));
-                        let wanted = match desired {
-                            SettingValue::String(value) => value.as_str(),
-                            _ => "",
-                        };
-                        Ok(if text == wanted {
-                            ReadBack::Match
-                        } else {
-                            ReadBack::Differ
-                        })
-                    }
-                    CmdResult::Done(_) | CmdResult::Failed(_) => Ok(ReadBack::Unset),
-                }
+                // `/usr/bin/git` is Apple's stub until Command Line Tools exist. The value is
+                // read at act time, once that requirement has passed.
+                let Some(text) = self.read_git_config(key)? else {
+                    return Ok(ReadBack::Unset);
+                };
+                self.priors
+                    .entry(id.to_string())
+                    .or_insert(Value::String(text.clone()));
+                Ok(if text == rendered_git(desired) {
+                    ReadBack::Match
+                } else {
+                    ReadBack::Differ
+                })
             }
             Store::Builtin { name } => match name {
                 soulcaster_core::recipe::BuiltinStore::LibraryVisible => {
@@ -735,7 +773,7 @@ impl<'a> Engine<'a> {
     }
 
     fn read_library(&mut self, id: &str, desired: &SettingValue) -> Result<ReadBack, EngineError> {
-        match self.run_command(&act::library_read(self.home), id, true)? {
+        match self.run_command(&act::library_read(self.home), id, false)? {
             CmdResult::Done(output) if output.is_success() => {
                 let hidden = output.stdout_text().contains("hidden");
                 let visible = !hidden;
@@ -754,18 +792,26 @@ impl<'a> Engine<'a> {
         let SettingValue::List(wanted) = desired else {
             return Ok(ReadBack::Differ);
         };
-        match self.run_command(&act::dock_list(self.home), id, true)? {
+        match self.run_command(&act::dock_list(self.home), id, false)? {
             CmdResult::Done(output) if output.is_success() => {
-                let text = output.stdout_text();
-                let all = wanted.iter().all(|app| text.contains(app));
-                Ok(if all {
+                let got = dock_paths(&output.stdout_text());
+                let same = got.len() == wanted.len()
+                    && got
+                        .iter()
+                        .zip(wanted.iter())
+                        .all(|(got, want)| dock_path(got) == dock_path(want));
+                Ok(if same {
                     ReadBack::Match
                 } else {
                     ReadBack::Differ
                 })
             }
-            CmdResult::Done(_) => Ok(ReadBack::Unset),
-            _ => Ok(ReadBack::Unknown),
+            // dockutil is not on the Machine yet. That is unset, so the Run writes it after
+            // the requirement installs the tool. A stall still can't be told from a real value.
+            CmdResult::Failed(FailureKind::Stalled) | CmdResult::Failed(FailureKind::Network) => {
+                Ok(ReadBack::Unknown)
+            }
+            _ => Ok(ReadBack::Unset),
         }
     }
 
@@ -992,16 +1038,8 @@ impl<'a> Engine<'a> {
     }
 
     fn maybe_ask(&mut self) {
-        if !self.admin_account {
-            self.emit(EventKind::AskState {
-                ask: AskKind::Password,
-                state: AskStatus::Skipped,
-            });
-            return;
-        }
-        let admin_left = self.pending_admin();
-        let full = matches!(self.scope_kind, RunScope::Full);
-        if !full && !admin_left {
+        // The map: the password is asked for only when the plan has admin work after the check.
+        if !self.admin_account || !self.pending_admin() {
             self.emit(EventKind::AskState {
                 ask: AskKind::Password,
                 state: AskStatus::Skipped,
@@ -1034,9 +1072,6 @@ impl<'a> Engine<'a> {
                     state: AskStatus::Skipped,
                 });
             }
-        }
-        if !admin_left {
-            self.discard("nothing in this Run needs the password");
         }
     }
 
@@ -1093,7 +1128,19 @@ impl<'a> Engine<'a> {
             if self.same_restart_group(&id) {
                 let batch = self.collect_batch(&ids[index..]);
                 let count = batch.len();
-                self.run_setting_batch(&batch)?;
+                let mut runnable = Vec::new();
+                for member in &batch {
+                    if self.states.get(member) != Some(&ItemState::Pending) {
+                        continue;
+                    }
+                    if self.consider_dependency(member, stage)? {
+                        continue;
+                    }
+                    runnable.push(member.clone());
+                }
+                if !runnable.is_empty() {
+                    self.run_setting_batch(&runnable)?;
+                }
                 index += count;
             } else {
                 self.run_one(&id)?;
@@ -1319,7 +1366,7 @@ impl<'a> Engine<'a> {
                 step_type: step.type_name().to_string(),
                 phase: StepPhase::Started,
             });
-            let beats = act::step_beats(self.home, step, self.password.is_some());
+            let beats = act::step_beats(self.home, step);
             if let Some(kind) = self.run_beats(id, &beats)? {
                 self.emit(EventKind::ItemStep {
                     item: id.to_string(),
@@ -1395,10 +1442,18 @@ impl<'a> Engine<'a> {
                         self.finish_step_failure(id, step, kind)?;
                         return Ok(Some(true));
                     }
-                    self.record.accepted.push(AcceptedLicense {
-                        license: license_name(*license).into(),
-                        at: self.now(),
-                    });
+                    let name = license_name(*license);
+                    if !self
+                        .record
+                        .accepted
+                        .iter()
+                        .any(|accepted| accepted.license == name)
+                    {
+                        self.record.accepted.push(AcceptedLicense {
+                            license: name.into(),
+                            at: self.now(),
+                        });
+                    }
                     self.close_queue_id(&queue_id(id, step_id));
                     self.emit_step(id, index, step, StepPhase::Finished);
                     return Ok(Some(false));
@@ -1520,39 +1575,44 @@ impl<'a> Engine<'a> {
     }
 
     fn run_beats(&mut self, id: &str, beats: &[Beat]) -> Result<Option<FailureKind>, EngineError> {
-        let mut previous: Option<CommandOutput> = None;
+        let mut previous: Option<(Command, CommandOutput)> = None;
         for beat in beats {
             match beat {
                 Beat::Run(command) => match self.run_command(command, id, true)? {
                     CmdResult::Failed(kind) => {
                         if is_signature_program(command)
-                            && !matches!(kind, FailureKind::Network | FailureKind::NotFound)
+                            && !matches!(
+                                kind,
+                                FailureKind::Network | FailureKind::NotFound | FailureKind::Stalled
+                            )
                         {
                             return Ok(Some(FailureKind::Signature));
                         }
                         return Ok(Some(kind));
                     }
-                    CmdResult::Done(output) => previous = Some(output),
+                    CmdResult::Done(output) => previous = Some((command.clone(), output)),
                 },
                 Beat::Sha256(expected) => {
                     let stdout = previous
                         .as_ref()
-                        .map(|output| output.stdout_text())
+                        .map(|(_, output)| output.stdout_text())
                         .unwrap_or_default();
                     if !sha_matches(&stdout, expected) {
                         return Ok(Some(FailureKind::Checksum));
                     }
                 }
                 Beat::Team(team) => {
-                    let stdout = previous
-                        .as_ref()
-                        .map(|output| output.stdout_text())
-                        .unwrap_or_default();
-                    let stderr = previous
-                        .as_ref()
-                        .map(|output| String::from_utf8_lossy(&output.stderr).into_owned())
-                        .unwrap_or_default();
-                    if !output_has_team(&stdout, &stderr, team) {
+                    let Some((command, output)) = &previous else {
+                        return Ok(Some(FailureKind::Signature));
+                    };
+                    let stdout = output.stdout_text();
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let ok = if command.program.ends_with("pkgutil") {
+                        pkg_signer_has_team(&stdout, team)
+                    } else {
+                        codesign_team_ok(&stdout, &stderr, team)
+                    };
+                    if !ok {
                         return Ok(Some(FailureKind::Signature));
                     }
                 }
@@ -1619,12 +1679,15 @@ impl<'a> Engine<'a> {
                 }
             }
             Store::GitConfig { key } => {
-                let text = match value {
-                    SettingValue::String(text) => text.clone(),
-                    SettingValue::Bool(value) => value.to_string(),
-                    SettingValue::Number(value) => value.to_string(),
-                    SettingValue::List(list) => list.join("\n"),
-                };
+                if !self.command_line_tools_present()? {
+                    return Ok(());
+                }
+                if !self.priors.contains_key(id)
+                    && let Some(current) = self.read_git_config(key)?
+                {
+                    self.priors.insert(id.to_string(), Value::String(current));
+                }
+                let text = rendered_git(value);
                 let mut command = act::git_command(self.home);
                 command.args = vec![
                     "config".into(),
@@ -1633,7 +1696,7 @@ impl<'a> Engine<'a> {
                     git_key(key).into(),
                     text,
                 ];
-                let _ = self.run_command(&command, id, false)?;
+                let _ = self.run_command(&command, id, true)?;
             }
             Store::Builtin { name } => match name {
                 soulcaster_core::recipe::BuiltinStore::LibraryVisible => {
@@ -1767,6 +1830,17 @@ impl<'a> Engine<'a> {
         let Store::GitConfig { key } = store else {
             return Ok(None);
         };
+        self.read_git_config(key)
+    }
+
+    /// `None` when Command Line Tools are not there yet, or the key is unset. Neither runs the stub.
+    fn read_git_config(
+        &mut self,
+        key: &soulcaster_core::recipe::GitKey,
+    ) -> Result<Option<String>, EngineError> {
+        if !self.command_line_tools_present()? {
+            return Ok(None);
+        }
         let mut command = act::git_command(self.home);
         command.args = vec![
             "config".into(),
@@ -1987,17 +2061,13 @@ impl<'a> Engine<'a> {
         &mut self,
         command: &Command,
         item: &str,
-        log_stdout: bool,
+        log: bool,
     ) -> Result<CmdResult, EngineError> {
         let mut attempt = 0;
         loop {
-            let mut lines = Vec::new();
-            let ran = self.runner.run(command, &mut |stream, line| {
-                lines.push((stream, line.to_string()));
-            });
+            let ran = self.run_once(command, item, log);
             match ran {
                 Err(error) => {
-                    self.log_lines(item, &lines, log_stdout);
                     let kind = if is_network(&error.message) {
                         FailureKind::Network
                     } else {
@@ -2011,7 +2081,6 @@ impl<'a> Engine<'a> {
                     return Ok(CmdResult::Failed(kind));
                 }
                 Ok(output) => {
-                    self.log_lines(item, &lines, log_stdout);
                     if output.is_success() {
                         return Ok(CmdResult::Done(output));
                     }
@@ -2029,6 +2098,93 @@ impl<'a> Engine<'a> {
                     return Ok(CmdResult::Failed(kind));
                 }
             }
+        }
+    }
+
+    fn run_once(
+        &mut self,
+        command: &Command,
+        item: &str,
+        log: bool,
+    ) -> Result<CommandOutput, soulcaster_core::command::SpawnError> {
+        let runner = self.runner;
+        if !log || item.is_empty() || !self.reporting {
+            return runner.run(command, &mut |_, _| {});
+        }
+        // The command runs on its own thread so a batch goes out on time even if the command
+        // then goes quiet for twenty minutes. Only this thread touches the Engine.
+        let (lines, received) = mpsc::channel();
+        thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                runner.run(command, &mut |stream, line| {
+                    let _ = lines.send((stream, line.to_string()));
+                })
+            });
+            loop {
+                let wait = self
+                    .log_since
+                    .map_or(LOG_BATCH, |since| LOG_BATCH.saturating_sub(since.elapsed()));
+                match received.recv_timeout(wait) {
+                    Ok((stream, line)) => self.note_output(item, stream, &line),
+                    Err(RecvTimeoutError::Timeout) => self.flush_output(),
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            }
+            self.flush_output();
+            worker
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
+    }
+
+    fn note_output(&mut self, item: &str, stream: OutputStream, line: &str) {
+        if !self.reporting {
+            return;
+        }
+        let masked = mask_secrets(line);
+        // Past the cap the line goes nowhere: not the log file, and not the event stream.
+        if !self.append_item_log(item, &masked) {
+            return;
+        }
+        let stream = match stream {
+            OutputStream::Stdout => LogStream::Stdout,
+            OutputStream::Stderr => LogStream::Stderr,
+        };
+        if self.log_since.is_none() {
+            self.log_since = Some(Instant::now());
+        }
+        self.log_pending.push((item.to_string(), stream, masked));
+        if self
+            .log_since
+            .is_some_and(|start| start.elapsed() >= LOG_BATCH)
+        {
+            self.flush_output();
+        }
+    }
+
+    fn flush_output(&mut self) {
+        if self.log_pending.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.log_pending);
+        self.log_since = None;
+        let mut batch: Vec<(String, LogStream, Vec<String>)> = Vec::new();
+        for (item, stream, line) in pending {
+            if let Some(last) = batch.last_mut()
+                && last.0 == item
+                && last.1 == stream
+            {
+                last.2.push(line);
+            } else {
+                batch.push((item, stream, vec![line]));
+            }
+        }
+        for (item, stream, lines) in batch {
+            self.emit(EventKind::ItemLog {
+                item,
+                stream,
+                lines,
+            });
         }
     }
 
@@ -2051,39 +2207,6 @@ impl<'a> Engine<'a> {
                 detail: format!("{} failed ({})", command.program.display(), kind_name(kind)),
             }),
         }
-    }
-
-    fn log_lines(&mut self, item: &str, lines: &[(OutputStream, String)], log_stdout: bool) {
-        if item.is_empty() {
-            return;
-        }
-        let mut kept = Vec::new();
-        for (stream, line) in lines {
-            if *stream == OutputStream::Stdout && !log_stdout {
-                continue;
-            }
-            let masked = mask_secrets(line);
-            let used = self.log_bytes.entry(item.to_string()).or_insert(0);
-            if *used >= LOG_CAP {
-                continue;
-            }
-            *used += masked.len() + 1;
-            let stream = match stream {
-                OutputStream::Stdout => LogStream::Stdout,
-                OutputStream::Stderr => LogStream::Stderr,
-            };
-            kept.push((stream, masked));
-        }
-        if kept.is_empty() {
-            return;
-        }
-        let stream = kept[0].0;
-        let lines = kept.into_iter().map(|(_, line)| line).collect();
-        self.emit(EventKind::ItemLog {
-            item: item.to_string(),
-            stream,
-            lines,
-        });
     }
 
     fn entry(&self, id: &str) -> Option<&PlanEntry> {
@@ -2145,25 +2268,53 @@ impl<'a> Engine<'a> {
             .collect()
     }
 
+    fn prepare_run_dir(&self) {
+        let dir = support_dir(self.home).join("runs").join(&self.run_id);
+        let _ = fs::create_dir_all(dir.join("logs"));
+        // The design keeps these in a folder only the user can read, from the first event on.
+        let _ = fs::set_permissions(support_dir(self.home), fs::Permissions::from_mode(0o700));
+    }
+
+    fn append_event(&self, event: &Event) {
+        // `item.log` is lossy by design and has its own file. This one holds the lossless events.
+        if matches!(event.kind, EventKind::ItemLog { .. }) {
+            return;
+        }
+        let path = support_dir(self.home)
+            .join("runs")
+            .join(&self.run_id)
+            .join("events.ndjson");
+        let Ok(mut file) = private_append(&path) else {
+            return;
+        };
+        if let Ok(line) = serde_json::to_string(event) {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+
+    /// False once this Item's log is full.
+    fn append_item_log(&mut self, item: &str, line: &str) -> bool {
+        let used = self.log_bytes.entry(item.to_string()).or_insert(0);
+        if *used >= LOG_CAP {
+            return false;
+        }
+        *used += line.len() + 1;
+        let path = support_dir(self.home)
+            .join("runs")
+            .join(&self.run_id)
+            .join("logs")
+            .join(log_file_name(item));
+        if let Ok(mut file) = private_append(&path) {
+            let _ = writeln!(file, "{line}");
+        }
+        true
+    }
+
     fn write_run_files(&self) -> Result<(), EngineError> {
         let dir = support_dir(self.home).join("runs").join(&self.run_id);
-        fs::create_dir_all(dir.join("logs")).map_err(|error| EngineError::RecordIo {
+        fs::create_dir_all(&dir).map_err(|error| EngineError::RecordIo {
             path: dir.clone(),
             detail: error.to_string(),
-        })?;
-        let mut events = Vec::new();
-        for event in &self.emitted {
-            let line = serde_json::to_string(event).map_err(|error| EngineError::RecordIo {
-                path: dir.clone(),
-                detail: error.to_string(),
-            })?;
-            events.push(line);
-        }
-        fs::write(dir.join("events.ndjson"), events.join("\n") + "\n").map_err(|error| {
-            EngineError::RecordIo {
-                path: dir.join("events.ndjson"),
-                detail: error.to_string(),
-            }
         })?;
         let summary = serde_json::json!({
             "runId": self.run_id,
@@ -2216,7 +2367,7 @@ impl Drop for Engine<'_> {
     }
 }
 
-fn scope_of(scope: &RunScope, plan: &Plan, record: &MachineRecord) -> BTreeSet<String> {
+fn scope_of(scope: &RunScope, plan: &Plan) -> BTreeSet<String> {
     let ids: BTreeSet<String> = plan.entries.iter().map(|entry| entry.id.clone()).collect();
     match scope {
         RunScope::Full => ids,
@@ -2240,7 +2391,7 @@ fn scope_of(scope: &RunScope, plan: &Plan, record: &MachineRecord) -> BTreeSet<S
             }
             let seeds: Vec<String> = out.iter().cloned().collect();
             for id in seeds {
-                add_requirements(plan, record, &id, &mut out);
+                add_requirements(plan, &id, &mut out);
             }
             out.retain(|id| ids.contains(id));
             out
@@ -2248,7 +2399,7 @@ fn scope_of(scope: &RunScope, plan: &Plan, record: &MachineRecord) -> BTreeSet<S
     }
 }
 
-fn add_requirements(plan: &Plan, record: &MachineRecord, id: &str, out: &mut BTreeSet<String>) {
+fn add_requirements(plan: &Plan, id: &str, out: &mut BTreeSet<String>) {
     let Some(entry) = plan.entries.iter().find(|entry| entry.id == id) else {
         return;
     };
@@ -2256,24 +2407,11 @@ fn add_requirements(plan: &Plan, record: &MachineRecord, id: &str, out: &mut BTr
         if out.contains(requirement) {
             continue;
         }
-        if requirement_satisfied(record, requirement) {
-            continue;
-        }
+        // Installed or not is a check. The Machine Record does not answer it.
         if out.insert(requirement.clone()) {
-            add_requirements(plan, record, requirement, out);
+            add_requirements(plan, requirement, out);
         }
     }
-}
-
-fn requirement_satisfied(record: &MachineRecord, id: &str) -> bool {
-    if record
-        .outcomes
-        .get(id)
-        .is_some_and(|outcome| outcome.state == "satisfied" || outcome.state == "unknown")
-    {
-        return true;
-    }
-    record.last_applied.contains_key(id)
 }
 
 fn needs_admin_rights(entry: &PlanEntry) -> bool {
@@ -2329,11 +2467,13 @@ fn compare_defaults(store: &Store, desired: &SettingValue, stdout: &str) -> Read
                 ReadBack::Unknown
             }
         }
-        StoredType::Int | StoredType::Float => match desired {
-            SettingValue::Number(number) if text == number.to_string() => ReadBack::Match,
-            SettingValue::Number(_) => ReadBack::Differ,
-            _ => ReadBack::Differ,
-        },
+        StoredType::Int | StoredType::Float => {
+            if text == act::stored_number(desired, encode) {
+                ReadBack::Match
+            } else {
+                ReadBack::Differ
+            }
+        }
         StoredType::String => {
             let wanted = match desired {
                 SettingValue::String(value) => encoded_lookup(value, encode),
@@ -2421,6 +2561,77 @@ fn parse_defaults(store: &Store, stdout: &str) -> Option<Value> {
     }
 }
 
+fn rendered_git(value: &SettingValue) -> String {
+    match value {
+        SettingValue::String(text) => text.clone(),
+        SettingValue::Bool(value) => value.to_string(),
+        SettingValue::Number(value) => value.to_string(),
+        SettingValue::List(list) => list.join("\n"),
+    }
+}
+
+fn dock_path(path: &str) -> String {
+    let path = path.trim();
+    let path = path.strip_prefix("file://").unwrap_or(path);
+    percent_decode(path.trim_end_matches('/'))
+}
+
+/// `dockutil --list` prints a URL, so `Google Chrome.app` comes back as `Google%20Chrome.app`.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let hex = (bytes[index] == b'%')
+            .then(|| bytes.get(index + 1..index + 3))
+            .flatten()
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        if let Some(byte) = hex {
+            out.push(byte);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A package's id holds slashes (`owner/tap/name`). One Item is one file in `logs/`.
+fn log_file_name(item: &str) -> String {
+    let safe: String = item
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | '\0' => '_',
+            other => other,
+        })
+        .collect();
+    format!("{safe}.log")
+}
+
+fn private_append(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(path)
+}
+
+fn dock_paths(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let field = line.split('\t').nth(1).unwrap_or(line).trim();
+            if field.is_empty() {
+                None
+            } else {
+                Some(dock_path(field))
+            }
+        })
+        .collect()
+}
+
 fn git_key(key: &soulcaster_core::recipe::GitKey) -> &'static str {
     match key {
         soulcaster_core::recipe::GitKey::UserName => "user.name",
@@ -2477,6 +2688,34 @@ fn reason_label(reason: SkipReason) -> &'static str {
         SkipReason::BrokenHere => "broken-here",
         SkipReason::WritesThroughLink => "writes-through-link",
         SkipReason::MarkedByPerson => "marked-by-person",
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn dock_paths_are_compared_as_paths_not_as_urls() {
+        assert_eq!(
+            dock_paths(
+                "Google Chrome\tfile:///Applications/Google%20Chrome.app/\tpersistentApps\n"
+            ),
+            ["/Applications/Google Chrome.app"]
+        );
+        assert_eq!(
+            dock_path("/Applications/Google Chrome.app"),
+            "/Applications/Google Chrome.app"
+        );
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("a%zzb"), "a%zzb");
+    }
+
+    #[test]
+    fn a_package_item_gets_one_log_file_inside_logs() {
+        assert_eq!(log_file_name("ripgrep"), "ripgrep.log");
+        assert_eq!(log_file_name("owner/tap/name"), "owner_tap_name.log");
+        assert_eq!(log_file_name("../../x"), ".._.._x.log");
     }
 }
 

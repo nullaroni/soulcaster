@@ -2,6 +2,7 @@
 //! never reads the Machine's git config.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde_json::Value;
 use soulcaster_core::command::Command;
@@ -16,11 +17,16 @@ use crate::record::support_dir;
 pub const BREW: &str = "/opt/homebrew/bin/brew";
 const PATH: &str = "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 
+/// `installer` and `xcodebuild -runFirstLaunch` print little while they work.
+const QUIET_ADMIN_STEP: Duration = Duration::from_secs(20 * 60);
+
 pub fn base_command(home: &Path, program: &str) -> Command {
+    // Every command can hang. Longer steps replace this.
     Command::new(program)
         .env("HOME", home_string(home))
         .env("PATH", PATH)
         .cwd(home)
+        .stall_limit(Duration::from_secs(5 * 60))
 }
 
 pub fn git_command(home: &Path) -> Command {
@@ -135,7 +141,7 @@ fn flag_arg(flag: VersionFlag) -> &'static str {
     }
 }
 
-pub fn brew_command(home: &Path, name: &str, cask: bool, admin_held: bool) -> Command {
+pub fn brew_command(home: &Path, name: &str, cask: bool, step_is_admin: bool) -> Command {
     let mut args = vec!["install".to_string()];
     if cask {
         args.push("--cask".to_string());
@@ -144,8 +150,9 @@ pub fn brew_command(home: &Path, name: &str, cask: bool, admin_held: bool) -> Co
     let mut command = base_command(home, BREW)
         .args(args)
         .env("HOMEBREW_NO_AUTO_UPDATE", "1")
-        .stall_limit(std::time::Duration::from_secs(10 * 60));
-    if !admin_held {
+        .stall_limit(Duration::from_secs(10 * 60));
+    // A formula is never privileged. Holding the password does not change that.
+    if !(cask && step_is_admin) {
         command = command.env("HOMEBREW_NO_SUDO", "1");
     }
     command
@@ -160,12 +167,14 @@ pub enum Beat {
     Team(String),
 }
 
-pub fn step_beats(home: &Path, step: &Step, admin_held: bool) -> Vec<Beat> {
+pub fn step_beats(home: &Path, step: &Step) -> Vec<Beat> {
     match step {
         Step::BrewFormula { name, .. } => {
-            vec![Beat::Run(brew_command(home, name, false, admin_held))]
+            vec![Beat::Run(brew_command(home, name, false, false))]
         }
-        Step::BrewCask { name, .. } => vec![Beat::Run(brew_command(home, name, true, admin_held))],
+        Step::BrewCask { name, admin, .. } => {
+            vec![Beat::Run(brew_command(home, name, true, *admin))]
+        }
         Step::Download {
             tool,
             version,
@@ -215,16 +224,42 @@ fn download_beats(
     let dest = support_dir(home).join("downloads").join(tool).join(version);
     let file_name = url.rsplit('/').next().unwrap_or("download");
     let archive_path = dest.join(file_name);
+    // Extract beside the download. The tools directory is where the check looks, and a refused
+    // signer must not leave a binary there for the next Run to call satisfied.
+    let staging = support_dir(home).join("staging").join(tool).join(version);
     let tools = support_dir(home).join("tools").join(tool).join(version);
     let mut beats = fetch_beats(home, url, &archive_path, sha256);
-    beats.push(Beat::Run(extract(home, archive, &archive_path, &tools)));
-    let signed = tools.join(signed_file);
+    // A refused or interrupted attempt must not leave files that travel with this one.
+    beats.push(Beat::Run(
+        base_command(home, "/bin/rm").args(["-rf", &staging.to_string_lossy()]),
+    ));
+    beats.push(Beat::Run(
+        base_command(home, "/bin/mkdir").args(["-p", &staging.to_string_lossy()]),
+    ));
+    beats.push(Beat::Run(extract(home, archive, &archive_path, &staging)));
+    let signed = staging.join(signed_file);
+    let requirement = format!("anchor apple generic and certificate leaf[subject.OU] = \"{team}\"");
     beats.push(Beat::Run(base_command(home, "/usr/bin/codesign").args([
-        "-dv",
-        "--verbose=2",
+        "--verify",
+        "--strict",
+        &format!("-R={requirement}"),
         &signed.to_string_lossy(),
     ])));
     beats.push(Beat::Team(team.to_string()));
+    if let Some(parent) = tools.parent() {
+        beats.push(Beat::Run(
+            base_command(home, "/bin/mkdir").args(["-p", &parent.to_string_lossy()]),
+        ));
+    }
+    let staging_path = staging.to_string_lossy().into_owned();
+    let tools_path = tools.to_string_lossy().into_owned();
+    // `mv` into an existing folder would nest there, and the check would never pass.
+    beats.push(Beat::Run(
+        base_command(home, "/bin/rm").args(["-rf", tools_path.as_str()]),
+    ));
+    beats.push(Beat::Run(
+        base_command(home, "/bin/mv").args([staging_path, tools_path]),
+    ));
     for link in links {
         if link.target.contains("..") {
             continue;
@@ -255,12 +290,11 @@ fn pkg_beats(home: &Path, url: &str, sha256: &str, team: &str) -> Vec<Beat> {
     beats.push(Beat::Team(team.to_string()));
     // `sudo -A` is the password-helper ticket. This command runs only while the password is held;
     // the helper attaches itself. The password is never an argument or an environment entry.
-    beats.push(Beat::Run(base_command(home, "/usr/sbin/installer").args([
-        "-pkg",
-        &pkg.to_string_lossy(),
-        "-target",
-        "/",
-    ])));
+    beats.push(Beat::Run(
+        base_command(home, "/usr/sbin/installer")
+            .args(["-pkg", &pkg.to_string_lossy(), "-target", "/"])
+            .stall_limit(QUIET_ADMIN_STEP),
+    ));
     beats
 }
 
@@ -271,7 +305,7 @@ fn fetch_beats(home: &Path, url: &str, dest: &Path, sha256: &str) -> Vec<Beat> {
         Beat::Run(
             base_command(home, "/usr/bin/curl")
                 .args(["-fsSL", "--output", &dest.to_string_lossy(), url])
-                .stall_limit(std::time::Duration::from_secs(10 * 60)),
+                .stall_limit(Duration::from_secs(10 * 60)),
         ),
         Beat::Run(base_command(home, "/usr/bin/shasum").args([
             "-a",
@@ -321,11 +355,13 @@ fn builtin_beats(home: &Path, name: BuiltinStep) -> Vec<Beat> {
         BuiltinStep::CommandLineTools => vec![Beat::Run(
             base_command(home, "/usr/sbin/softwareupdate")
                 .args(["-i", "Command Line Tools for Xcode"])
-                .stall_limit(std::time::Duration::from_secs(30 * 60)),
+                .stall_limit(Duration::from_secs(30 * 60)),
         )],
         BuiltinStep::GhHandOff => Vec::new(),
         BuiltinStep::XcodeFirstLaunch => vec![Beat::Run(
-            base_command(home, "/usr/bin/xcodebuild").args(["-runFirstLaunch"]),
+            base_command(home, "/usr/bin/xcodebuild")
+                .args(["-runFirstLaunch"])
+                .stall_limit(QUIET_ADMIN_STEP),
         )],
     }
 }
@@ -400,11 +436,11 @@ pub fn defaults_write(home: &Path, store: &Store, value: &SettingValue) -> Optio
         }
         StoredType::Int => {
             args.push("-int".into());
-            args.push(number_word(value));
+            args.push(stored_number(value, encode));
         }
         StoredType::Float => {
             args.push("-float".into());
-            args.push(number_word(value));
+            args.push(stored_number(value, encode));
         }
         StoredType::String => {
             args.push("-string".into());
@@ -444,12 +480,32 @@ fn bool_word(value: &SettingValue) -> &'static str {
     }
 }
 
-fn number_word(value: &SettingValue) -> String {
-    match value {
+/// The text `defaults` stores for an int or float, including a boolean's encoded number.
+pub(crate) fn stored_number(
+    value: &SettingValue,
+    encode: &Option<std::collections::BTreeMap<String, Value>>,
+) -> String {
+    let token = match value {
+        SettingValue::Bool(flag) => flag.to_string(),
         SettingValue::Number(number) => number.to_string(),
         SettingValue::String(text) => text.clone(),
-        _ => "0".to_string(),
-    }
+        SettingValue::List(list) => list.join("\n"),
+    };
+    encode
+        .as_ref()
+        .and_then(|map| map.get(&token))
+        .map(|encoded| match encoded {
+            Value::Number(number) => number.to_string(),
+            Value::String(text) => text.clone(),
+            Value::Bool(true) => "1".to_string(),
+            Value::Bool(false) => "0".to_string(),
+            other => other.to_string(),
+        })
+        .unwrap_or(match value {
+            SettingValue::Bool(true) => "1".to_string(),
+            SettingValue::Bool(false) => "0".to_string(),
+            _ => token,
+        })
 }
 
 fn encoded_string(
@@ -506,6 +562,35 @@ pub fn dock_write(home: &Path, apps: &[String]) -> Vec<Command> {
     commands
 }
 
+/// Reads of the file a profile writes, for the Machine and for this user. A file that isn't there
+/// is a failed read, which means nothing forces the key.
+pub fn managed_preference_reads(home: &Path, domain: &str, key: &str) -> Vec<Command> {
+    let file = match domain {
+        "NSGlobalDomain" => ".GlobalPreferences.plist".to_string(),
+        other => format!("{other}.plist"),
+    };
+    let machine = Path::new("/Library/Managed Preferences");
+    let mut paths = vec![machine.join(&file)];
+    if let Some(user) = home.file_name() {
+        paths.push(machine.join(user).join(&file));
+    }
+    // A dot separates a plutil key path, and keys like `com.apple.swipescrolldirection` have them.
+    let key = key.replace('.', "\\.");
+    paths
+        .iter()
+        .map(|path| {
+            base_command(home, "/usr/bin/plutil").args([
+                "-extract",
+                &key,
+                "raw",
+                "-o",
+                "-",
+                &path.to_string_lossy(),
+            ])
+        })
+        .collect()
+}
+
 pub fn id_command(home: &Path) -> Command {
     base_command(home, "/usr/bin/id").args(["-Gn"])
 }
@@ -532,6 +617,9 @@ pub fn failure_kind(text: &str, stalled: bool) -> FailureKind {
 }
 
 pub fn is_network(text: &str) -> bool {
+    if text.lines().any(line_reports_http_5xx) {
+        return true;
+    }
     const MARKERS: &[&str] = &[
         "curl: (6)",
         "curl: (7)",
@@ -555,6 +643,24 @@ pub fn is_network(text: &str) -> bool {
     MARKERS.iter().any(|marker| lower.contains(marker))
 }
 
+/// A 5xx status reported as one: `returned error: 503`, `HTTP 503`, or `HTTP/1.1 503`. A 404 isn't
+/// one of these, and neither is any other number in a tool's output, such as `removed 512 files`.
+fn line_reports_http_5xx(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    let returned_error = lower.contains("returned error:");
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    words.windows(2).any(|pair| {
+        let names_a_status = pair[0] == "http"
+            || pair[0].starts_with("http/")
+            || (returned_error && pair[0] == "error:");
+        let digits = pair[1].trim_end_matches(|c: char| !c.is_ascii_digit());
+        names_a_status
+            && digits.len() == 3
+            && digits.starts_with('5')
+            && digits.bytes().all(|b| b.is_ascii_digit())
+    })
+}
+
 fn is_needs_admin(text: &str) -> bool {
     const MARKERS: &[&str] = &[
         "homebrew_no_sudo",
@@ -573,8 +679,35 @@ pub fn sha_matches(stdout: &str, expected: &str) -> bool {
         .is_some_and(|got| got.eq_ignore_ascii_case(expected))
 }
 
-pub fn output_has_team(stdout: &str, stderr: &str, team: &str) -> bool {
-    stdout.contains(team) || stderr.contains(team)
+/// A pkg is accepted only when `pkgutil` says Apple issued the certificate and the leaf is that
+/// team's Developer ID Installer. Anyone can self-sign a certificate with that name, and then the
+/// status line reads `signed by untrusted certificate`.
+pub fn pkg_signer_has_team(stdout: &str, team: &str) -> bool {
+    let issued_by_apple = stdout.lines().any(|line| {
+        line.trim()
+            .starts_with("Status: signed by a developer certificate issued by Apple")
+    });
+    let suffix = format!("({team})");
+    let leaf_is_team = stdout.lines().any(|line| {
+        let line = line.trim();
+        line.starts_with("1. Developer ID Installer:") && line.ends_with(&suffix)
+    });
+    issued_by_apple && leaf_is_team
+}
+
+/// `codesign --verify` is quiet when the requirement holds. A display that merely mentions the
+/// team, or an ad-hoc signature, is not acceptance.
+pub fn codesign_team_ok(stdout: &str, stderr: &str, team: &str) -> bool {
+    let text = format!("{stdout}\n{stderr}");
+    if text.contains("Signature=adhoc") || text.contains("TeamIdentifier=not set") {
+        return false;
+    }
+    if text.contains("TeamIdentifier=") {
+        return text
+            .lines()
+            .any(|line| line.trim() == format!("TeamIdentifier={team}"));
+    }
+    text.trim().is_empty() || !text.contains("Identifier=")
 }
 
 pub fn mask_secrets(line: &str) -> String {
@@ -652,13 +785,8 @@ mod tests {
     }
 
     #[test]
-    fn brew_clears_sudo_unless_the_password_is_held_and_never_auto_updates() {
-        let user = brew_command(
-            Path::new("/tmp/soulcaster-sandbox"),
-            "ripgrep",
-            false,
-            false,
-        );
+    fn a_formula_stays_unprivileged_even_if_a_caller_marks_the_step_admin() {
+        let user = brew_command(Path::new("/tmp/soulcaster-sandbox"), "ripgrep", false, true);
         assert_eq!(env_value(&user, "HOMEBREW_NO_SUDO"), Some("1"));
         assert_eq!(env_value(&user, "HOMEBREW_NO_AUTO_UPDATE"), Some("1"));
         assert!(!user.env.iter().any(|(key, _)| key == "SUDO_ASKPASS"));
@@ -688,11 +816,113 @@ mod tests {
     }
 
     #[test]
+    fn only_a_reported_5xx_counts_as_a_network_failure() {
+        assert!(is_network(
+            "curl: (22) The requested URL returned error: 503"
+        ));
+        assert!(is_network("gh: HTTP 502 Bad Gateway"));
+        assert!(!is_network(
+            "curl: (22) The requested URL returned error: 404"
+        ));
+        assert!(!is_network("Error: removed 512 files, then gave up"));
+        assert!(!is_network("HTTP 404, tried 500 mirrors of 5000"));
+        assert!(is_network("< HTTP/1.1 503 Service Unavailable"));
+        assert!(!is_network("Error: 500 files could not be linked"));
+    }
+
+    #[test]
+    fn a_download_swaps_into_place_only_after_the_signer_passes() {
+        let beats = download_beats(
+            Path::new("/tmp/soulcaster-sandbox"),
+            "kotlin-lsp",
+            "1",
+            "https://example.com/k.zip",
+            "abc",
+            ArchiveKind::Zip,
+            "2ZEFAR8TH3",
+            "bin/k",
+            &[],
+        );
+        let names: Vec<String> = beats
+            .iter()
+            .filter_map(|beat| match beat {
+                Beat::Run(command) => Some(command.program.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect();
+        let at = |name: &str| names.iter().rposition(|n| n.ends_with(name)).unwrap();
+        assert!(at("codesign") < at("rm"));
+        assert!(at("rm") < at("mv"));
+        let verify = beats
+            .iter()
+            .find_map(|beat| match beat {
+                Beat::Run(command) if command.program.ends_with("codesign") => Some(command),
+                _ => None,
+            })
+            .unwrap();
+        assert!(verify.args.iter().any(|arg| {
+            arg == "-R=anchor apple generic and certificate leaf[subject.OU] = \"2ZEFAR8TH3\""
+        }));
+        assert!(verify.args.iter().any(|arg| arg == "--strict"));
+    }
+
+    #[test]
+    fn a_managed_preference_is_read_from_the_file_a_profile_writes() {
+        let home = Path::new("/Users/someone");
+        let reads = managed_preference_reads(home, "NSGlobalDomain", "com.apple.mouse.scaling");
+        assert_eq!(
+            reads[0].args,
+            [
+                "-extract",
+                "com\\.apple\\.mouse\\.scaling",
+                "raw",
+                "-o",
+                "-",
+                "/Library/Managed Preferences/.GlobalPreferences.plist",
+            ]
+        );
+        assert_eq!(
+            reads[1].args.last().unwrap(),
+            "/Library/Managed Preferences/someone/.GlobalPreferences.plist"
+        );
+        let dock = managed_preference_reads(home, "com.apple.dock", "autohide");
+        assert_eq!(
+            dock[0].args.last().unwrap(),
+            "/Library/Managed Preferences/com.apple.dock.plist"
+        );
+    }
+
+    #[test]
     fn checksum_and_team_checks_read_the_tool_output() {
         assert!(sha_matches("abc123  tool.zip\n", "abc123"));
         assert!(!sha_matches("ffff  tool.zip\n", "abc123"));
-        assert!(output_has_team("Authority=ABCDEFGHIJ", "", "ABCDEFGHIJ"));
-        assert!(!output_has_team("nope", "nope", "ABCDEFGHIJ"));
+        let signed = "Status: signed by a developer certificate issued by Apple for distribution\n\
+             Certificate Chain:\n 1. Developer ID Installer: Example (ABCDEFGHIJ)\n";
+        assert!(pkg_signer_has_team(signed, "ABCDEFGHIJ"));
+        assert!(!pkg_signer_has_team(signed, "ZZZZZZZZZZ"));
+        assert!(!pkg_signer_has_team(
+            "note: team ABCDEFGHIJ appears in the readme",
+            "ABCDEFGHIJ"
+        ));
+        // A self-signed certificate can carry any name. Only the status line tells them apart.
+        assert!(!pkg_signer_has_team(
+            "Status: signed by untrusted certificate\n\
+             Certificate Chain:\n 1. Developer ID Installer: Example (ABCDEFGHIJ)\n",
+            "ABCDEFGHIJ"
+        ));
+        // Apple-issued, but the team is further up the chain than the certificate that signed it.
+        assert!(!pkg_signer_has_team(
+            "Status: signed by a developer certificate issued by Apple for distribution\n\
+             1. Developer ID Installer: Attacker (ATTACKER00)\n\
+             2. Example Intermediate (ABCDEFGHIJ)\n",
+            "ABCDEFGHIJ"
+        ));
+        assert!(!codesign_team_ok(
+            "",
+            "Identifier=ABCDEFGHIJ\nSignature=adhoc\nTeamIdentifier=not set\n",
+            "ABCDEFGHIJ"
+        ));
+        assert!(codesign_team_ok("", "", "ABCDEFGHIJ"));
     }
 
     #[test]

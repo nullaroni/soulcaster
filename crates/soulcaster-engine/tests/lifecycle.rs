@@ -853,26 +853,20 @@ fn the_password_is_discarded_after_sixty_minutes_and_the_rest_waits() {
 }
 
 #[test]
-fn a_full_run_asks_even_when_nothing_needs_admin_and_discards_before_user_work() {
+fn a_full_run_does_not_ask_when_nothing_is_in_the_admin_stage() {
     let harness = Harness::new();
     absent_then_present(&harness, "Cellar/ripgrep");
-    let (_report, events) = harness.run(&mut plan(vec![formula("ripgrep", &[])]));
-    assert_eq!(harness.asks.asked(), 1);
-    let discarded = events
-        .iter()
-        .position(|event| match &event.kind {
-            EventKind::AdminDiscarded { why } => why.contains("nothing"),
-            _ => false,
-        })
-        .expect("a full Run with no admin work still discards the password");
-    let acting = events
-        .iter()
-        .position(|event| match &event.kind {
-            EventKind::ItemState { item, to, .. } => item == "ripgrep" && to.is_working(),
-            _ => false,
-        })
-        .expect("the formula was acted on");
-    assert!(acting > discarded);
+    let (report, events) = harness.run(&mut plan(vec![formula("ripgrep", &[])]));
+    assert_eq!(harness.asks.asked(), 0);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, EventKind::AdminHeld { .. }))
+    );
+    assert!(matches!(
+        state(&report, "ripgrep"),
+        ItemState::Satisfied { .. }
+    ));
 }
 
 #[test]
@@ -1779,7 +1773,7 @@ fn the_machine_record_is_schema_versioned_atomic_and_refuses_a_corrupt_file() {
 }
 
 #[test]
-fn a_finished_requirement_is_not_pulled_into_a_scoped_run() {
+fn a_scoped_run_checks_a_requirement_the_record_already_calls_satisfied() {
     let harness = Harness::new();
     let mut record = MachineRecord::empty();
     record.outcomes.insert(
@@ -1815,9 +1809,22 @@ fn a_finished_requirement_is_not_pulled_into_a_scoped_run() {
             },
         )
         .unwrap();
-    assert!(!report.states.contains_key("tool"));
+    assert!(
+        report.states.contains_key("tool"),
+        "the record was treated as proof that tool was installed"
+    );
+    assert!(matches!(
+        state(&report, "tool"),
+        ItemState::Satisfied { .. }
+    ));
     assert!(matches!(state(&report, "app"), ItemState::Satisfied { .. }));
     assert_eq!(install_count(&harness.runner, "tool"), 0);
+    assert!(
+        harness.runner.calls().iter().any(|command| {
+            file_name(command) == "test" && args_contain(command, "Cellar/tool")
+        }),
+        "tool was not checked"
+    );
 }
 
 #[test]
@@ -1892,7 +1899,7 @@ mod review {
         e
     }
 
-    fn download(id: &str) -> PlanEntry {
+    pub(super) fn download(id: &str) -> PlanEntry {
         let mut entry = formula(id, &[]);
         if let Recipe::Install(install) = &mut entry.recipe {
             install.checks = vec![Probe::ManagedTool {
@@ -2233,14 +2240,14 @@ mod review {
         );
         let (_r, events) = h.run(&mut plan(vec![formula("ripgrep", &[])]));
         for e in &events {
-            if let EventKind::ItemLog { stream, lines, .. } = &e.kind {
-                if lines.iter().any(|l| l == "err-line") {
-                    assert_eq!(
-                        *stream,
-                        soulcaster_core::event::LogStream::Stderr,
-                        "{lines:?}"
-                    );
-                }
+            if let EventKind::ItemLog { stream, lines, .. } = &e.kind
+                && lines.iter().any(|l| l == "err-line")
+            {
+                assert_eq!(
+                    *stream,
+                    soulcaster_core::event::LogStream::Stderr,
+                    "{lines:?}"
+                );
             }
         }
     }
@@ -2406,5 +2413,257 @@ mod review {
             .join(&report.run_id)
             .join("logs/ripgrep.log");
         assert!(log.exists(), "missing {}", log.display());
+    }
+}
+
+mod round_two {
+    use super::review::download;
+    use super::*;
+    use soulcaster_core::command::{CommandOutput, SpawnError};
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    struct RecordingSink(Arc<Mutex<Vec<Event>>>);
+
+    impl EventSink for RecordingSink {
+        fn send(&mut self, event: Event) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    /// Writes a burst during the install, goes quiet, and notes what the stream had by then.
+    struct Burst {
+        inner: FakeRunner,
+        seen: Arc<Mutex<Vec<Event>>>,
+        last_line_arrived: AtomicBool,
+    }
+
+    impl CommandRunner for Burst {
+        fn run(
+            &self,
+            command: &Command,
+            on_line: &mut dyn FnMut(OutputStream, &str),
+        ) -> Result<CommandOutput, SpawnError> {
+            if is_install(command, "ripgrep") {
+                on_line(OutputStream::Stderr, "==> one");
+                on_line(OutputStream::Stderr, "==> two");
+                on_line(OutputStream::Stderr, "==> last before the quiet");
+                std::thread::sleep(Duration::from_millis(500));
+                let arrived = self.seen.lock().unwrap().iter().any(|event| {
+                    matches!(&event.kind, EventKind::ItemLog { lines, .. }
+                        if lines.iter().any(|line| line.contains("last before")))
+                });
+                self.last_line_arrived.store(arrived, Ordering::Relaxed);
+            }
+            self.inner.run(command, on_line)
+        }
+    }
+
+    #[test]
+    fn the_last_lines_before_a_quiet_stretch_reach_the_stream_without_another_line() {
+        let h = Harness::new();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let runner = Burst {
+            inner: FakeRunner::new(),
+            seen: seen.clone(),
+            last_line_arrived: AtomicBool::new(false),
+        };
+        runner
+            .inner
+            .on(|c| file_name(c) == "id", [Reply::ok("staff admin\n")]);
+        runner
+            .inner
+            .on(|c| file_name(c) == "sw_vers", [Reply::ok("15.6.1\n")]);
+        runner.inner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let mut sink = RecordingSink(seen);
+        let mut p = plan(vec![formula("ripgrep", &[])]);
+        perform(RunInput {
+            plan: &mut p,
+            runner: &runner,
+            home: h.home.path(),
+            events: &mut sink,
+            asks: &h.asks,
+            cancel: &h.cancel,
+            clock: &h.clock,
+            scope: RunScope::Full,
+            config: ConfigRef::default(),
+            catalog_version: "t",
+            engine_version: "t",
+        })
+        .unwrap();
+        assert!(
+            runner.last_line_arrived.load(Ordering::Relaxed),
+            "lines sat in the batch through a quiet stretch"
+        );
+    }
+
+    /// One install that writes `lines` lines of `width` bytes.
+    struct Noisy {
+        inner: FakeRunner,
+        lines: usize,
+        width: usize,
+    }
+
+    impl CommandRunner for Noisy {
+        fn run(
+            &self,
+            command: &Command,
+            on_line: &mut dyn FnMut(OutputStream, &str),
+        ) -> Result<CommandOutput, SpawnError> {
+            if is_install(command, "ripgrep") {
+                let line = "x".repeat(self.width);
+                for _ in 0..self.lines {
+                    on_line(OutputStream::Stdout, &line);
+                }
+            }
+            self.inner.run(command, on_line)
+        }
+    }
+
+    fn noisy_run(
+        h: &Harness,
+        lines: usize,
+        width: usize,
+    ) -> (soulcaster_engine::RunReport, Vec<Event>) {
+        let runner = Noisy {
+            inner: FakeRunner::new(),
+            lines,
+            width,
+        };
+        runner
+            .inner
+            .on(|c| file_name(c) == "id", [Reply::ok("staff admin\n")]);
+        runner
+            .inner
+            .on(|c| file_name(c) == "sw_vers", [Reply::ok("15.6.1\n")]);
+        runner.inner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let mut events = Vec::new();
+        let mut p = plan(vec![formula("ripgrep", &[])]);
+        let report = perform(RunInput {
+            plan: &mut p,
+            runner: &runner,
+            home: h.home.path(),
+            events: &mut events,
+            asks: &h.asks,
+            cancel: &h.cancel,
+            clock: &h.clock,
+            scope: RunScope::Full,
+            config: ConfigRef::default(),
+            catalog_version: "t",
+            engine_version: "t",
+        })
+        .unwrap();
+        (report, events)
+    }
+
+    #[test]
+    fn the_ten_megabyte_cap_stops_the_log_file_and_the_event_stream() {
+        let h = Harness::new();
+        // 20 MB of output, against a 10 MB cap.
+        let (report, events) = noisy_run(&h, 2_000, 10_000);
+        let run_dir = h
+            .home
+            .path()
+            .join("Library/Application Support/Soulcaster/runs")
+            .join(&report.run_id);
+        let file = std::fs::metadata(run_dir.join("logs/ripgrep.log")).unwrap();
+        assert!(file.len() <= 10 * 1024 * 1024 + 10_001, "{}", file.len());
+        let logged: usize = events
+            .iter()
+            .map(|event| match &event.kind {
+                EventKind::ItemLog { lines, .. } => lines.iter().map(String::len).sum(),
+                _ => 0,
+            })
+            .sum();
+        assert!(logged <= 10 * 1024 * 1024 + 10_001, "{logged}");
+    }
+
+    #[test]
+    fn the_kept_files_are_private_and_events_ndjson_holds_only_lossless_events() {
+        let h = Harness::new();
+        let (report, _) = noisy_run(&h, 3, 10);
+        let support = h.home.path().join("Library/Application Support/Soulcaster");
+        let run_dir = support.join("runs").join(&report.run_id);
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&support), 0o700);
+        assert_eq!(mode(&run_dir.join("logs/ripgrep.log")), 0o600);
+        assert_eq!(mode(&run_dir.join("events.ndjson")), 0o600);
+        let events = std::fs::read_to_string(run_dir.join("events.ndjson")).unwrap();
+        assert!(
+            events.contains("run.finished") || events.contains("RunFinished"),
+            "{events}"
+        );
+        assert!(
+            !events.contains("xxxxxxxxxx"),
+            "a log line reached events.ndjson"
+        );
+    }
+
+    #[test]
+    fn a_stale_staging_folder_and_an_existing_tools_folder_are_replaced() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok("abc123  tool.zip\n")],
+        );
+        h.runner.on(|c| file_name(c) == "codesign", [Reply::ok("")]);
+        let _ = h.run(&mut plan(vec![download("k")]));
+        let calls = h.runner.calls();
+        let index_of = |wanted: &dyn Fn(&Command) -> bool| calls.iter().position(wanted);
+        let clear_staging =
+            index_of(&|c| file_name(c) == "rm" && c.args.iter().any(|a| a.contains("/staging/k/")));
+        let extract = index_of(&|c| file_name(c) == "ditto");
+        let verify = index_of(&|c| file_name(c) == "codesign");
+        let clear_tools =
+            index_of(&|c| file_name(c) == "rm" && c.args.iter().any(|a| a.contains("/tools/k/")));
+        let swap = index_of(&|c| file_name(c) == "mv");
+        assert!(clear_staging.unwrap() < extract.unwrap());
+        assert!(extract.unwrap() < verify.unwrap());
+        assert!(verify.unwrap() < clear_tools.unwrap());
+        assert!(clear_tools.unwrap() < swap.unwrap());
+    }
+
+    #[test]
+    fn a_refused_signer_fails_as_signature_and_nothing_is_swapped_in() {
+        let h = Harness::new();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok("abc123  tool.zip\n")],
+        );
+        h.runner.on(
+            |c| file_name(c) == "codesign",
+            [Reply::fails(
+                3,
+                "code failed to satisfy specified code requirement(s)\n",
+            )],
+        );
+        let (report, _) = h.run(&mut plan(vec![download("k")]));
+        assert_eq!(
+            state(&report, "k"),
+            &ItemState::Failed {
+                kind: FailureKind::Signature
+            }
+        );
+        let calls = h.runner.calls();
+        assert!(!calls.iter().any(|c| file_name(c) == "mv"));
+        assert!(
+            !calls.iter().any(|c| {
+                file_name(c) == "rm" && c.args.iter().any(|a| a.contains("/tools/k/"))
+            })
+        );
     }
 }
