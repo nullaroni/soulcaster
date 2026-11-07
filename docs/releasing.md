@@ -45,7 +45,7 @@ Only the owner can do these steps.
    | `APPLE_NOTARY_ISSUER_ID` | The Issuer ID from step 4 |
 
 6. **Set the Team ID in `install.sh`.** In `soulcaster_main`, set `local team_id=""` to your 10-character Apple Team ID, which is on the Membership page of your account. The release stops if the signing certificate's team doesn't match this value.
-7. **Review `CFBundleIdentifier` in `packaging/Info.plist`** before the first public release. It is `io.github.nullaroni.soulcaster` for now, and changing it later makes macOS treat the app as a different one.
+7. **Review `CFBundleIdentifier` in `packaging/Info.plist`** before the first public release. It is `com.nullworks.macflayer` for now, and changing it later makes macOS treat the app as a different one.
 8. **Tag it:**
 
    ```sh

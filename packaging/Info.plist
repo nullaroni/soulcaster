@@ -11,7 +11,7 @@
 	<key>CFBundleIconFile</key>
 	<string>Soulcaster</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.github.nullaroni.soulcaster</string>
+	<string>com.nullworks.macflayer</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
