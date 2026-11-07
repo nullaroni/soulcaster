@@ -347,27 +347,6 @@ impl<'a> GitHub<'a> {
         }
         Ok(decoded)
     }
-
-    /// Whether `newer` is built on `approved`. Anything but a clear yes counts as rewritten, which
-    /// starts every box off.
-    pub fn ancestry(&self, repo: &RepoId, approved: &CommitSha, newer: &CommitSha) -> Ancestry {
-        #[derive(Deserialize)]
-        struct Compare {
-            status: String,
-        }
-        let path = format!(
-            "repos/{}/compare/{approved}...{newer}?per_page=1",
-            repo.full_name()
-        );
-        let answer = self
-            .get(&path, 16 * MAX_ANSWER)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Compare>(&bytes).ok());
-        match answer.as_ref().map(|a| a.status.as_str()) {
-            Some("ahead" | "identical") => Ancestry::Ahead,
-            _ => Ancestry::Rewritten,
-        }
-    }
 }
 
 fn checked_size(bytes: Vec<u8>, max_bytes: usize) -> Result<Vec<u8>, FetchError> {

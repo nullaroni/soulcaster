@@ -10,7 +10,7 @@ use soulcaster_core::approval::{
 use soulcaster_core::catalog::{Catalog, Lookup};
 use soulcaster_core::config::{Config, Dotfiles, SettingValue};
 use soulcaster_core::lifecycle::SkipReason;
-use soulcaster_core::lint::{FindingKind, refused_links};
+use soulcaster_core::lint::{FindingKind, fold, refused_links};
 use soulcaster_core::plan::{NeedKind, Plan, Why};
 use soulcaster_core::recipe::{Effect, Recipe, tap_of};
 
@@ -60,7 +60,9 @@ pub struct TapCard {
 pub struct LinkRow {
     pub target: String,
     pub target_escaped: String,
+    /// The path as it is, because that's what gets linked. Never show this one.
     pub source: String,
+    pub source_escaped: String,
     /// What this location does by itself. It explains and doesn't decide.
     pub note: Option<&'static str>,
     pub lookalike: bool,
@@ -212,21 +214,26 @@ impl RunContents {
 }
 
 fn link_note(target: &str) -> Option<&'static str> {
+    // This volume treats `~/.ZSHENV` and `~/.zshenv` as one file, so the notes do too.
+    let folded = fold(target);
+    let target = folded.as_str();
     match target {
         "~/.zshenv" => Some("Runs for every zsh, even in scripts"),
         "~/.zshrc" | "~/.zprofile" | "~/.zlogin" | "~/.bashrc" | "~/.bash_profile"
         | "~/.profile" => Some("Runs whenever a terminal opens"),
-        "~/.gitconfig" | "~/.config/git/config" => {
+        "~/.gitconfig" | "~/.config/git" | "~/.config/git/config" => {
             Some("Can run programs during git commands and redirect clones")
         }
         "~/.ssh/authorized_keys" | "~/.ssh/authorized_keys2" => {
             Some("Lets whoever holds these keys log in to this Mac")
         }
-        "~/.ssh/config" => Some("Decides where SSH connects, and can run programs"),
+        "~/.ssh" | "~/.ssh/config" => Some("Decides where SSH connects, and can run programs"),
         "~/.local/bin/sudo" => Some("Can stand in for sudo and capture your password"),
-        _ if target.starts_with("~/Library/LaunchAgents/") => {
+        "~/library/launchagents" => Some("Starts a program every time you log in"),
+        _ if target.starts_with("~/library/launchagents/") => {
             Some("Starts a program every time you log in")
         }
+        "~/.local/bin" | "~/bin" => Some("Can stand in for a command you type"),
         _ if target.starts_with("~/.local/bin/") || target.starts_with("~/bin/") => {
             Some("Can stand in for a command you type")
         }
@@ -521,7 +528,10 @@ impl Review {
                 if link.lookalike {
                     signal(
                         "link-lookalike",
-                        format!("A link location mixes alphabets: {}", link.target_escaped),
+                        format!(
+                            "A link mixes alphabets: {} from {}",
+                            link.target_escaped, link.source_escaped
+                        ),
                     );
                 }
             }
@@ -590,7 +600,9 @@ impl Review {
             let same = approvals.dotfiles.as_ref().is_some_and(|held| {
                 held.repo == *key && held.commit == *commit && held.links == dotfiles.live_links()
             });
-            boxes.repo = same || dotfiles.own;
+            // Your own repo starts on only the first time. With an approval on record, a newer
+            // commit or one more link is a different approval, and the move screen handles it.
+            boxes.repo = same || (dotfiles.own && approvals.dotfiles.is_none());
             let script_same = approvals.script.as_ref().is_some_and(|held| {
                 held.repo == *key
                     && held.commit == *commit
@@ -931,8 +943,9 @@ fn dotfiles_card(
             target: target.clone(),
             target_escaped: escaped(target),
             source: repo_path.clone(),
+            source_escaped: escaped(repo_path),
             note: link_note(target),
-            lookalike: !lookalikes(target).is_empty(),
+            lookalike: !lookalikes(target).is_empty() || !lookalikes(repo_path).is_empty(),
             refused: clashes
                 .get(target)
                 .map(|kind| refused_words(*kind))

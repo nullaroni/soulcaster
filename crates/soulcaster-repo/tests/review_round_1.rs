@@ -484,7 +484,9 @@ fn the_install_script_does_not_run_twice_when_recording_it_fails() {
         UserStage::password_is_gone(),
         &mut |_, _| {},
     );
-    assert_eq!(once, ScriptOutcome::Ran { success: true }, "{once:?}");
+    // Changed from `Ran`: the record comes first now, so a script that can't be recorded doesn't
+    // start at all. That's stronger than running it once and asking again.
+    assert_eq!(once, ScriptOutcome::CouldNotRun, "{once:?}");
     let twice = step(&sandbox.gh, &sandbox.tools, &store).run_script(
         &links,
         UserStage::password_is_gone(),
@@ -492,8 +494,16 @@ fn the_install_script_does_not_run_twice_when_recording_it_fails() {
     );
     assert_eq!(
         twice,
-        ScriptOutcome::AlreadyRan,
-        "a failed record let the script run again: {twice:?}"
+        ScriptOutcome::CouldNotRun,
+        "a failed record let the script run: {twice:?}"
+    );
+    assert!(
+        !sandbox
+            .gh
+            .calls()
+            .iter()
+            .any(|command| command.program == sandbox.tools.zsh),
+        "a script ran with nothing to record it"
     );
 }
 
@@ -547,7 +557,8 @@ fn finishing_the_script_does_not_restore_a_revoked_approval() {
         UserStage::password_is_gone(),
         &mut |_, _| {},
     );
-    assert_eq!(outcome, ScriptOutcome::Ran { success: true }, "{outcome:?}");
+    // Changed from `Ran`: it reads again just before starting, so a revoked script doesn't start.
+    assert_eq!(outcome, ScriptOutcome::NotApproved, "{outcome:?}");
     let after = store.read().expect("the record can be read");
     assert!(
         after.dotfiles.is_none() && after.script.is_none(),
@@ -640,5 +651,59 @@ fn an_ambiguous_approval_record_approves_nothing() {
                 "the last duplicate key was approved: {linked:?}"
             );
         }
+    }
+}
+
+#[test]
+fn skip_worktree_cannot_hide_a_different_install_script_either() {
+    let repo = real_repo(&[("zsh/zshrc", "approved\n"), ("setup.sh", "exit 0\n")]);
+    let links = plan(&[("~/.zshrc", "zsh/zshrc")], Some("setup.sh"));
+    let clone = repo.home.join("Developer/dotfiles");
+    git(
+        &repo.home,
+        &clone,
+        &["update-index", "--skip-worktree", "setup.sh"],
+    );
+    fs::write(clone.join("setup.sh"), "touch pwned-marker\n").unwrap();
+    repo.store
+        .write(&Approvals {
+            dotfiles: Some(DotfilesApproval {
+                repo: KEY.to_string(),
+                commit: repo.commit.clone(),
+                links: links.links.clone(),
+            }),
+            script: Some(ScriptApproval {
+                repo: KEY.to_string(),
+                commit: repo.commit.clone(),
+                path: "setup.sh".to_string(),
+                ran: false,
+            }),
+            ..Approvals::default()
+        })
+        .unwrap();
+    let runner = soulcaster_repo::process::runner();
+    let outcome = step(&runner, &repo.tools, &repo.store).run_script(
+        &links,
+        UserStage::password_is_gone(),
+        &mut |_, _| {},
+    );
+    assert_eq!(outcome, ScriptOutcome::HeldForReview);
+    assert!(!clone.join("pwned-marker").exists());
+}
+
+#[test]
+fn a_link_over_a_whole_dangerous_folder_keeps_its_note() {
+    for target in [
+        "~/.ssh",
+        "~/Library/LaunchAgents",
+        "~/.local/bin",
+        "~/.config/git",
+    ] {
+        let body = format!(
+            r#"{{"schemaVersion":1,"name":"x","dotfiles":{{"repo":"example-you/dotfiles","links":{{"{target}":"folder"}}}}}}"#
+        );
+        let review = review_own(body.as_bytes(), &own_facts(sha()));
+        let row = &review.dotfiles.as_ref().unwrap().links[0];
+        assert!(row.note.is_some(), "{target} has no note");
     }
 }

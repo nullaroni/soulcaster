@@ -232,7 +232,7 @@ fn print_approvals(review: &Review, text: &mut String) {
             let _ = writeln!(
                 text,
                 "    {} <- {}{status}",
-                link.target_escaped, link.source
+                link.target_escaped, link.source_escaped
             );
         }
         if let Some(script) = &card.script {

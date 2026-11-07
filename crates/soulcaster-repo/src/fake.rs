@@ -416,7 +416,9 @@ impl ApprovalStore for FileApprovals {
     fn read(&self) -> Result<Approvals, ApprovalStoreError> {
         match std::fs::read(&self.path) {
             Ok(bytes) => {
-                serde_json::from_slice(&bytes).map_err(|e| ApprovalStoreError(e.to_string()))
+                let value =
+                    soulcaster_core::config::strict_parse(&bytes).map_err(ApprovalStoreError)?;
+                serde_json::from_value(value).map_err(|e| ApprovalStoreError(e.to_string()))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Approvals::default()),
             Err(e) => Err(ApprovalStoreError(e.to_string())),

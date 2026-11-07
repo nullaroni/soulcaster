@@ -16,12 +16,16 @@ fn link_row(target: &str, source: &str, status: &str, failed: bool) -> El {
         row()
             .help(status.to_string())
             .child(
-                text(format!("{target}  \u{2190}  {source}"))
-                    .font(kit::log_style())
-                    .color(kit::ink())
-                    .grow(1.0)
-                    .shrink()
-                    .truncate(),
+                text(format!(
+                    "{}  \u{2190}  {}",
+                    soulcaster_repo::text::escaped(target),
+                    soulcaster_repo::text::escaped(source)
+                ))
+                .font(kit::log_style())
+                .color(kit::ink())
+                .grow(1.0)
+                .shrink()
+                .truncate(),
             )
             .child(
                 text(status.to_string())
@@ -73,27 +77,28 @@ fn sentence(key: &str, words: &str, failed: bool) -> El {
 }
 
 fn preview_block(preview: &MovePreview, body: El) -> El {
-    body.child(sentence(
-        "behind",
-        "Dotfiles Repo: updates are available on GitHub.",
-        false,
-    ))
-    .child(
-        col()
-            .key("dot-diff")
-            .w_full()
-            .fill(kit::ink())
-            .px(14.0)
-            .py(10.0)
-            .child(
-                text(preview.text().to_string())
-                    .font(kit::log_style())
-                    .color(kit::paper())
-                    .selectable(true)
-                    .w_full()
-                    .wrap(),
-            ),
-    )
+    let words = if preview.is_complete() {
+        "Dotfiles Repo: updates are available on GitHub."
+    } else {
+        "These updates are too long to show in full, so they can't be approved here."
+    };
+    body.child(sentence("behind", words, !preview.is_complete()))
+        .child(
+            col()
+                .key("dot-diff")
+                .w_full()
+                .fill(kit::ink())
+                .px(14.0)
+                .py(10.0)
+                .child(
+                    text(preview.text().to_string())
+                        .font(kit::log_style())
+                        .color(kit::paper())
+                        .selectable(true)
+                        .w_full()
+                        .wrap(),
+                ),
+        )
 }
 
 pub fn screen(app: &App) -> El {
@@ -133,7 +138,7 @@ pub fn screen(app: &App) -> El {
             kit::primary(
                 "dot-move",
                 "Move to this version",
-                true,
+                preview.is_complete(),
                 |app: &mut App, _| {
                     app.move_dotfiles();
                 },

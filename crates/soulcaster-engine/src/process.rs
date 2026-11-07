@@ -91,6 +91,8 @@ impl CommandRunner for ProcessRunner {
         let mut stderr_done = false;
         let mut stalled = false;
         let mut exited: Option<ExitStatus> = None;
+        // Everything that arrived, kept or not. Separate from the buffers, which cap themselves.
+        let (mut stdout_seen, mut stderr_seen) = (0_usize, 0_usize);
         let mut last = Instant::now();
 
         loop {
@@ -112,12 +114,17 @@ impl CommandRunner for ProcessRunner {
             }
             match rx.recv_timeout(next_wait(command.stall_limit, last)) {
                 Ok(PipeMsg::Chunk(stream, bytes)) => {
-                    let (line, buf) = match stream {
-                        OutputStream::Stdout => (&mut stdout_line, &mut stdout_buf),
-                        OutputStream::Stderr => (&mut stderr_line, &mut stderr_buf),
+                    let (line, buf, seen) = match stream {
+                        OutputStream::Stdout => {
+                            (&mut stdout_line, &mut stdout_buf, &mut stdout_seen)
+                        }
+                        OutputStream::Stderr => {
+                            (&mut stderr_line, &mut stderr_buf, &mut stderr_seen)
+                        }
                     };
+                    *seen += bytes.len();
                     absorb(stream, &bytes, line, buf, self.output_limit, on_line);
-                    if self.kill_past_limit && buf.len() >= self.output_limit {
+                    if self.kill_past_limit && *seen > self.output_limit {
                         kill_group(pid);
                         stalled = true;
                         break;
@@ -146,10 +153,15 @@ impl CommandRunner for ProcessRunner {
                 match received {
                     Ok(PipeMsg::Chunk(stream, bytes)) => {
                         bytes_left = bytes_left.saturating_sub(bytes.len());
-                        let (line, buf) = match stream {
-                            OutputStream::Stdout => (&mut stdout_line, &mut stdout_buf),
-                            OutputStream::Stderr => (&mut stderr_line, &mut stderr_buf),
+                        let (line, buf, seen) = match stream {
+                            OutputStream::Stdout => {
+                                (&mut stdout_line, &mut stdout_buf, &mut stdout_seen)
+                            }
+                            OutputStream::Stderr => {
+                                (&mut stderr_line, &mut stderr_buf, &mut stderr_seen)
+                            }
                         };
+                        *seen += bytes.len();
                         absorb(stream, &bytes, line, buf, self.output_limit, on_line);
                     }
                     Ok(PipeMsg::Eof(OutputStream::Stdout)) => stdout_done = true,
@@ -173,6 +185,18 @@ impl CommandRunner for ProcessRunner {
             self.output_limit,
             on_line,
         );
+
+        // A finished command can still have been cut off: past the limit before this noticed, or
+        // with a pipe still open when the drain stopped. Neither is the whole answer.
+        if self.kill_past_limit
+            && !stalled
+            && (stdout_seen > self.output_limit
+                || stderr_seen > self.output_limit
+                || !(stdout_done && stderr_done))
+        {
+            kill_group(pid);
+            stalled = true;
+        }
 
         let status = if stalled {
             let _ = child.wait();

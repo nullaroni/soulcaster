@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use soulcaster_core::approval::{ApprovalStore, Approvals, CommitSha, DotfilesApproval};
-use soulcaster_core::command::{CommandOutput, CommandRunner, OutputStream};
+use soulcaster_core::command::{CommandEnd, CommandOutput, CommandRunner, OutputStream};
 use soulcaster_core::lint::{FindingKind, fold, refused_links};
 use soulcaster_core::plan::DotfilesPlan;
 
@@ -34,6 +34,8 @@ impl UserStage {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DotfilesError {
+    PreviewFailed,
+    PreviewCutOff,
     NotApproved,
     GitMissing,
     /// The clone location holds something else, or is reached through a symlink.
@@ -65,6 +67,12 @@ impl fmt::Display for DotfilesError {
                 "Something else is already where the Dotfiles Repo goes, so it was left alone."
             }
             Self::DifferentRepo => "A different repo is already where the Dotfiles Repo goes.",
+            Self::PreviewFailed => {
+                "Soulcaster couldn't work out what changed in the Dotfiles Repo, so nothing moved."
+            }
+            Self::PreviewCutOff => {
+                "These updates are too long to show in full, so they can't be approved here."
+            }
             Self::ChangesOnThisMac => {
                 "This Mac has its own changes, so Soulcaster won't update the Dotfiles Repo. Update it yourself in Terminal."
             }
@@ -104,12 +112,17 @@ pub enum LinkRefusal {
     },
     /// The path changed between the check and the write.
     PathChanged,
+    /// The files on this Mac aren't the approved version, whatever version it says it's at.
+    RepoChanged,
     Io,
 }
 
 impl fmt::Display for LinkRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RepoChanged => {
+                f.write_str("The files on this Mac aren't the version you approved")
+            }
             Self::Lint(FindingKind::LinkProtected) => {
                 f.write_str("This folder holds your data, so a link can't replace it")
             }
@@ -183,6 +196,7 @@ pub struct MovePreview {
     from: CommitSha,
     to: CommitSha,
     text: String,
+    complete: bool,
 }
 
 impl MovePreview {
@@ -193,6 +207,11 @@ impl MovePreview {
 
     pub fn to(&self) -> &CommitSha {
         &self.to
+    }
+
+    /// Whether this is all of it. What wasn't shown can't be approved.
+    pub fn is_complete(&self) -> bool {
+        self.complete
     }
 }
 
@@ -356,9 +375,19 @@ impl DotfilesStep<'_> {
         CommitSha::parse(output.stdout_text().trim()).ok_or(DotfilesError::LocationBusy)
     }
 
+    /// `status` can't see a file marked `assume-unchanged` or `skip-worktree`, so a different
+    /// install script could sit behind either. `ls-files -v` tags those, and only `H` is plain.
     fn is_clean(&self, clone: &Path) -> Result<bool, DotfilesError> {
-        let output = self.git(GitCred::None, clone, &["status", "--porcelain=v1"])?;
-        Ok(output.is_success() && output.stdout.is_empty())
+        let status = self.git(GitCred::None, clone, &["status", "--porcelain=v1"])?;
+        if !status.is_success() || !status.stdout.is_empty() {
+            return Ok(false);
+        }
+        let flags = self.git(GitCred::None, clone, &["ls-files", "-v"])?;
+        Ok(flags.is_success()
+            && flags
+                .stdout_text()
+                .lines()
+                .all(|line| line.starts_with("H ")))
     }
 
     fn fetch(
@@ -516,11 +545,17 @@ impl DotfilesStep<'_> {
         let clone = self.ensure_clone(plan, stage)?;
         let held = self.approval(plan).ok_or(DotfilesError::NotApproved)?;
         let root = SafeRoot::open(&self.tools.home).map_err(|_| DotfilesError::LocationBusy)?;
+        // The same rule a move uses. A file that was edited here isn't what was approved.
+        let clean = self.is_clean(&clone).unwrap_or(false);
         let clone = fs::canonicalize(&clone).map_err(|_| DotfilesError::LocationBusy)?;
         let refused = refused_links(plan.links.keys().map(String::as_str), self.clone_location);
         let mut rows = Vec::with_capacity(plan.links.len());
         for (target, source) in &plan.links {
-            let outcome = self.apply_one(&root, &clone, target, source, refused.get(target));
+            let outcome = if clean {
+                self.apply_one(&root, &clone, target, source, refused.get(target))
+            } else {
+                LinkOutcome::Refused(LinkRefusal::RepoChanged)
+            };
             rows.push(LinkRow {
                 target: target.clone(),
                 source: source.clone(),
@@ -607,16 +642,38 @@ impl DotfilesStep<'_> {
         if !is_plain_file || !inside {
             return ScriptOutcome::HeldForReview;
         }
-        let command = self.tools.script(&literal, &canonical_clone);
-        let Ok(output) = self.runner.run(&command, on_line) else {
+        // Once per commit, so it's on record before it runs. If that can't be stored, it doesn't
+        // run. This reads again so a revocation since the top of this function holds, and writes
+        // what it read, so nothing older goes back over the record.
+        let Ok(mut record) = self.store.read() else {
             return ScriptOutcome::CouldNotRun;
         };
-        let mut record = approvals.clone();
-        if let Some(script) = &mut record.script {
-            script.ran = true;
+        let Some(current) = record
+            .script
+            .as_mut()
+            .filter(|s| s.repo == held.repo && s.commit == held.commit && s.path == path)
+        else {
+            return ScriptOutcome::NotApproved;
+        };
+        if current.ran {
+            return ScriptOutcome::AlreadyRan;
         }
-        // Whether the write lands or not, this Run ran it. A failure here can only ask again.
-        let _ = self.store.write(&record);
+        current.ran = true;
+        if self.store.write(&record).is_err() {
+            return ScriptOutcome::CouldNotRun;
+        }
+        let command = self.tools.script(&literal, &canonical_clone);
+        let Ok(output) = self.runner.run(&command, on_line) else {
+            // It never started, so it's still owed. If this write fails, it stays marked as run,
+            // which is the safe side of "once".
+            if let Ok(mut record) = self.store.read()
+                && let Some(current) = record.script.as_mut()
+            {
+                current.ran = false;
+                let _ = self.store.write(&record);
+            }
+            return ScriptOutcome::CouldNotRun;
+        };
         ScriptOutcome::Ran {
             success: output.is_success(),
         }
@@ -651,12 +708,18 @@ impl DotfilesStep<'_> {
             args.push(script);
         }
         let output = self.git(GitCred::None, &clone, &args)?;
+        // 1 means there are differences. Anything else, a stall included, isn't a preview.
+        if !matches!(output.end, CommandEnd::Exited(0 | 1)) {
+            return Err(DotfilesError::PreviewFailed);
+        }
         let mut text = output.stdout;
+        let complete = text.len() <= MAX_PREVIEW;
         text.truncate(MAX_PREVIEW);
         Ok(MovePreview {
             from: held.commit,
             to: newer.clone(),
             text: escaped_lines(&String::from_utf8_lossy(&text)),
+            complete,
         })
     }
 
@@ -668,6 +731,9 @@ impl DotfilesStep<'_> {
         plan: &DotfilesPlan,
         preview: &MovePreview,
     ) -> Result<(), DotfilesError> {
+        if !preview.complete {
+            return Err(DotfilesError::PreviewCutOff);
+        }
         let held = self.approval(plan).ok_or(DotfilesError::NotApproved)?;
         if held.commit != preview.from {
             return Err(DotfilesError::NotApproved);
@@ -680,12 +746,17 @@ impl DotfilesStep<'_> {
         }
         self.fetch(&source, &clone, &preview.to)?;
         self.checkout(&clone, &preview.to)?;
+        // Read again and change only this approval, so a revocation since then holds.
         let mut approvals = self.approvals();
-        approvals.script = None;
-        if let Some(record) = &mut approvals.dotfiles {
+        if let Some(record) = approvals
+            .dotfiles
+            .as_mut()
+            .filter(|record| record.repo == held.repo && record.commit == preview.from)
+        {
             record.commit = preview.to.clone();
+            approvals.script = None;
+            let _ = self.store.write(&approvals);
         }
-        let _ = self.store.write(&approvals);
         Ok(())
     }
 

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use soulcaster_core::approval::CommitSha;
+use soulcaster_core::config::Config;
 
 use crate::import::{Fetched, Source};
 use crate::safe_fs::{PathTrouble, SafeRoot};
@@ -13,11 +14,20 @@ use crate::safe_fs::{PathTrouble, SafeRoot};
 pub(crate) const SUPPORT: &[&str] = &["Library", "Application Support", "Soulcaster"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CopyError;
+pub enum CopyError {
+    Write,
+    /// A different Config is already kept under this name's file. Both names make the same slug.
+    NameTaken,
+}
 
 impl std::fmt::Display for CopyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Soulcaster couldn't write to its folder on this Mac.")
+        f.write_str(match self {
+            Self::Write => "Soulcaster couldn't write to its folder on this Mac.",
+            Self::NameTaken => {
+                "Another Config is kept under the same file name. Choose a different name."
+            }
+        })
     }
 }
 
@@ -25,7 +35,7 @@ impl std::error::Error for CopyError {}
 
 impl From<PathTrouble> for CopyError {
     fn from(_: PathTrouble) -> Self {
-        Self
+        Self::Write
     }
 }
 
@@ -65,12 +75,19 @@ fn write_in_support(
 
 /// Your own Config, on this Mac, before anything is sent. `text` is already the canonical form.
 pub fn keep_own(home: &Path, name: &str, text: &str) -> Result<PathBuf, CopyError> {
-    write_in_support(
-        home,
-        "configs",
-        &format!("{}.json", slug(name)),
-        text.as_bytes(),
-    )
+    let file = format!("{}.json", slug(name));
+    let mut parts: Vec<&str> = SUPPORT.to_vec();
+    parts.push("configs");
+    parts.push(&file);
+    let there = SafeRoot::open(home)?.path().join(parts.join("/"));
+    // Only your own earlier save of this same Config can be replaced. A file that can't be read as
+    // one might be newer than this version understands, and it isn't this save's to lose.
+    if let Ok(bytes) = std::fs::read(&there)
+        && !Config::parse(&bytes).is_ok_and(|kept| kept.name == name)
+    {
+        return Err(CopyError::NameTaken);
+    }
+    write_in_support(home, "configs", &file, text.as_bytes())
 }
 
 /// The commit a copy was read at, beside the copy. No approval is recorded, and the file itself
@@ -100,7 +117,7 @@ pub fn keep_import(home: &Path, fetched: &Fetched) -> Result<PathBuf, CopyError>
         path: path.as_str(),
         commit,
     })
-    .map_err(|_| CopyError)?;
+    .map_err(|_| CopyError::Write)?;
     write_in_support(home, "imports", &format!("{stem}.source.json"), &source)?;
     Ok(kept)
 }

@@ -280,8 +280,9 @@ fn parse_record(path: &Path, bytes: &[u8]) -> Result<MachineRecord, EngineError>
     if bytes.is_empty() {
         return Err(corrupt(path, "the file is empty"));
     }
+    // Approvals live in here, and serde_json would keep the last of a duplicate key.
     let value: Value =
-        serde_json::from_slice(bytes).map_err(|error| corrupt(path, &error.to_string()))?;
+        soulcaster_core::config::strict_parse(bytes).map_err(|error| corrupt(path, &error))?;
     let Some(found) = value.get("schemaVersion").and_then(Value::as_u64) else {
         return Err(corrupt(path, "missing schemaVersion"));
     };

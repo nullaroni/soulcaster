@@ -440,7 +440,7 @@ fn link_row(link: &LinkRow) -> El {
             .child(
                 text(format!(
                     "{}  \u{2190}  {}",
-                    link.target_escaped, link.source
+                    link.target_escaped, link.source_escaped
                 ))
                 .font(kit::log_style())
                 .color(kit::ink())
