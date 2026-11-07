@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "Lint example",
+  "dotfiles": {
+    "repo": "example/dotfiles",
+    "links": {
+      "~/Documents": "documents",
+      "~/.ssh": "ssh"
+    }
+  }
+}

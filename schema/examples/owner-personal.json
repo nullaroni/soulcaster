@@ -1,0 +1,105 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nullaroni/soulcaster/main/schema/config-1.schema.json",
+  "schemaVersion": 1,
+  "name": "Personal Mac",
+  "items": [
+    "aerospace",
+    "android-emulator",
+    "android-sdk",
+    "dockutil",
+    "ghostty",
+    "git-identity",
+    "junie",
+    "kotlin",
+    "kotlin-lsp",
+    "opencode"
+  ],
+  "packages": {
+    "formulae": [
+      "basedpyright",
+      "eza",
+      "fzf",
+      "jj",
+      "lua-language-server",
+      "mobile-dev-inc/tap/maestro",
+      "neovim",
+      "starship",
+      "typescript-language-server",
+      "vscode-langservers-extracted",
+      "yazi",
+      "zoxide"
+    ],
+    "casks": [
+      "discord",
+      "jetbrains-toolbox",
+      "linearmouse"
+    ]
+  },
+  "settings": {
+    "dock.apps": [
+      "/System/Applications/Launchpad.app",
+      "/Applications/Safari.app",
+      "/System/Applications/Messages.app",
+      "/System/Applications/Notes.app",
+      "/System/Applications/App Store.app",
+      "/System/Applications/System Settings.app"
+    ],
+    "dock.autohide": true,
+    "dock.position": "left",
+    "dock.show-recents": false,
+    "finder.default-view": "list",
+    "finder.info-panes-expanded": [
+      "general",
+      "open-with",
+      "privileges"
+    ],
+    "finder.new-window-target": "documents",
+    "finder.search-scope": "current-folder",
+    "finder.show-library-folder": true,
+    "finder.show-path-bar": true,
+    "finder.show-recent-tags": false,
+    "finder.show-status-bar": true,
+    "finder.sidebar-favorites": [
+      "~/Developer",
+      "~/Documents",
+      "~/Downloads",
+      "~/Desktop",
+      "~/Pictures"
+    ],
+    "git.default-branch": "main",
+    "git.excludes-file": "~/.gitignore_global",
+    "git.pull-rebase": false,
+    "git.push-auto-setup-remote": true,
+    "git.rerere": true,
+    "hot-corners.bottom-left": "none",
+    "hot-corners.bottom-right": "none",
+    "hot-corners.top-left": "none",
+    "hot-corners.top-right": "none",
+    "keyboard.initial-key-repeat": 15,
+    "keyboard.key-repeat": 2,
+    "keyboard.press-and-hold": false,
+    "menu-bar.extras": [
+      "bluetooth",
+      "volume",
+      "battery",
+      "clock",
+      "airport"
+    ],
+    "menu-bar.show-spotlight": false,
+    "menu-bar.show-weather": true,
+    "mission-control.group-windows-by-app": false,
+    "spaces.auto-rearrange": false
+  },
+  "dotfiles": {
+    "repo": "your-github-username/dotfiles",
+    "links": {
+      "~/.config/aerospace/aerospace.toml": "aerospace/aerospace.toml",
+      "~/.config/ghostty": "ghostty",
+      "~/.config/nvim": "nvim",
+      "~/.config/starship.toml": "starship/starship.toml",
+      "~/.config/yazi": "yazi",
+      "~/.gitignore_global": "git/gitignore_global",
+      "~/.zshrc": "zsh/zshrc"
+    }
+  }
+}

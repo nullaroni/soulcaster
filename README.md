@@ -2,6 +2,29 @@
 
 A boring, rerunnable, inspectable macOS provisioning system for Apple Silicon Macs.
 
+## Soulcaster (in progress)
+
+The native Mac app replacing the Bash below. A Rust workspace, Apple Silicon only:
+
+```text
+crates/soulcaster-core/   Catalog, Config parsing, Plan, Item states, event stream, command-runner seam
+crates/soulcaster-cli/    `soulcaster`: validate a Config and print its plan
+app/                      The Rune window, with a simulated engine for now
+catalog/catalog.json      The launch Catalog
+schema/                   The Config and Recipe JSON Schemas, with their examples
+```
+
+```sh
+cargo test --workspace
+cargo run -p soulcaster-cli -- validate schema/examples/developer.json
+cargo run -p soulcaster-cli -- plan schema/examples/developer.json
+cargo run -p soulcaster-app                                    # the window
+cargo run -p soulcaster-app -- --list-scenes
+cargo run -p soulcaster-app -- --snap out.png --scene catalog-picked
+```
+
+None of this installs anything yet: the CLI only reads a Config, and the app plays a simulated Run.
+
 ## Quick Start
 
 One command on a bare Mac (installs Xcode Command Line Tools, clones this repo, runs bootstrap):
