@@ -1382,6 +1382,32 @@
       }
     },
     {
+      "id": "zen",
+      "name": "Zen Browser",
+      "section": "browsers",
+      "description": "Firefox-based browser focused on vertical tabs and workspaces.",
+      "tap": null,
+      "homepage": "https://zen-browser.app/",
+      "license": {
+        "model": "unverified",
+        "basis": "unverified",
+        "source": "The Homebrew cask JSON has no license field, and the plan text was not classified."
+      },
+      "install": {
+        "kind": "cask",
+        "token": "zen"
+      },
+      "needsFromPerson": [],
+      "opensAfter": [],
+      "conflictsWith": [],
+      "coversPackages": [],
+      "arm64": {
+        "status": "yes",
+        "basis": "verified",
+        "evidence": "supported_platforms includes an arm64 entry and caveats_rosetta is false"
+      }
+    },
+    {
       "id": "visual-studio-code",
       "name": "Visual Studio Code",
       "section": "editors",

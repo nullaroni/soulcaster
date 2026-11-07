@@ -4,7 +4,7 @@
 
 ## Conclusion
 
-The launch Catalog is **242 selectable Items in 15 sections**. Nothing is preselected. A person can scan a section, see the tools that overlap, and tick any of them. Homebrew, Command Line Tools, and `gh` are base Items. They are always installed, and they are not in the list.
+The launch Catalog is **243 selectable Items in 15 sections**. Nothing is preselected. A person can scan a section, see the tools that overlap, and tick any of them. Homebrew, Command Line Tools, and `gh` are base Items. They are always installed, and they are not in the list.
 
 Two rules do most of the organizing. A language's runtime, package managers, and version manager sit in one group, and the two polyglot version managers, mise and asdf, sit in their own group because each one covers many languages. An agentic editor, a terminal agent, a chat app, and a local model runner are four groups, so Cursor is not the same row as Cursor CLI, and Claude is not the same row as Claude Code.
 
@@ -15,7 +15,7 @@ Homebrew's published lists were downloaded at **2026-11-07T01:48:33Z** (the even
 | Section | Items | Why this cut |
 |---|---:|---|
 | Languages and runtimes | 34 | One current runtime per language, the package managers people actually tick, and the version managers that overlap them. |
-| Browsers | 9 | The browsers people install next to Safari. Safari itself ships with macOS. |
+| Browsers | 10 | The browsers people install next to Safari. Safari itself ships with macOS. |
 | Editors and IDEs | 21 | Editors and the JetBrains IDEs, including the open-source IntelliJ and PyCharm casks beside the paid editions. |
 | Agentic development | 16 | Editors built around an agent, terminal agents, the two chat apps those agents are confused with, and two local model apps. |
 | Terminals and shells | 11 | Terminal apps, shells other than the system zsh, Starship, tmux, and Zellij. |
@@ -73,7 +73,7 @@ The Catalog does not pick a winner and does not pre-select a stack. Overlap is s
 | `fleet` | cask disabled, `no_longer_available` |
 | `copilot` | formula deprecated, `repo_archived`. Its description is an Amazon ECS tool. GitHub Copilot CLI is the `copilot-cli` cask, which is included |
 
-**No official formula or cask, and not given a `curl \| sh` installer.** Oh My Zsh, SDKMAN, Windsurf, Codeium, Amazon Q, Zen Browser, and VMware Fusion. A search of the downloaded JSON found no token for these names. Windsurf may have been renamed or removed; that was not established.
+**No official formula or cask, and not given a `curl \| sh` installer.** Oh My Zsh, SDKMAN, Windsurf, Codeium, Amazon Q, and VMware Fusion. A search of the downloaded JSON found no token for these names. Windsurf may have been renamed or removed; that was not established.
 
 **Installable, and left out by judgment.** These exist, are not deprecated, and were still cut so the list stays scannable.
 
@@ -122,9 +122,9 @@ Run at 2026-11-07T01:48:33Z:
 catalog /Users/nullaroni/.t3/worktrees/macbook-setup/t3-7054ad6e/docs/prototypes/catalog/catalog.json
 live fetch started 2026-11-07T01:48:33Z
 formulae 8704 casks 7818 bytes 32227397 19381750
-items 242
+items 243
   languages              34
-  browsers               9
+  browsers               10
   editors                21
   agents                 16
   terminals              11
