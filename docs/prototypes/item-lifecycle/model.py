@@ -160,7 +160,7 @@ class Sim:
         # Rule: check every Item before assigning stages, so an Item that's already fine can't look
         # unfinished to something in an earlier stage. Skipping this was the first bug the model found.
         if "no-check-before-stages" not in self.m:
-            for i in plan:
+            for i in sorted(plan):
                 r = self.recipes[i]
                 open_here = {k for k in world.open_queue if k[0] == i and k not in world.person_done}
                 if self.passes_checks(world, r) and not open_here:
@@ -323,23 +323,23 @@ def check_run(sim, world, state, trace, outcomes):
             raise Violation("I0 a refused Run changed the Machine")
         return
     planned = trace["planned"]
-    for i in planned:
+    for i in sorted(planned):
         if state[i] not in TERMINAL and not trace["crashed"]:
             raise Violation(f"I1 {i} never reached a terminal state: {state[i]}")
     if trace["asks"] > 1:
         raise Violation("I2 the password was asked for more than once in a Run")
     if trace["third_party_while_held"]:
-        raise Violation(f"I3 third-party tap code ran while the password was held: {trace['third_party_while_held']}")
+        raise Violation(f"I3 third-party tap code ran while the password was held: {sorted(trace['third_party_while_held'])}")
     if trace["held_at_end"]:
         raise Violation("I4 the password was still held when the Run ended")
     if world.account_admin:
         if trace["admin_after_discard"]:
-            late = [i for i in trace["admin_after_discard"] if i not in world.learned_admin]
+            late = sorted(i for i in trace["admin_after_discard"] if i not in world.learned_admin)
             if late:
                 raise Violation(f"I5 an admin step was reached after the password was discarded: {late}")
     if trace["crashed"]:
         return
-    for i in planned:
+    for i in sorted(planned):
         r = sim.recipes[i]
         if state[i] == "blocked":
             bad = [q for q in r.requires if state.get(q, world.last.get(q)) not in OK and q not in world.installed]
@@ -361,11 +361,11 @@ def check_run(sim, world, state, trace, outcomes):
             if i not in downstream and any(q in downstream for q in sim.recipes[i].requires):
                 downstream.add(i)
                 changed = True
-    for i in planned - downstream:
+    for i in sorted(planned - downstream):
         if state[i] == "pending":
             raise Violation(f"I9 {i} was never tried because something else failed")
     # Only entries a person must finish. A retry may rightly close "stalled" or "needs-admin" by succeeding.
-    for k in world.ever_opened:
+    for k in sorted(world.ever_opened):
         if k[1] in RETRY_CLASS:
             continue
         if state.get(k[0]) == "satisfied" and k not in world.person_done:
@@ -374,7 +374,7 @@ def check_run(sim, world, state, trace, outcomes):
 
 def check_retry_reached_everything(sim, world, last, plan):
     """Nothing stays blocked by a requirement that has since finished."""
-    for i in plan:
+    for i in sorted(plan):
         if last[i] != "blocked" or i not in world.last:
             continue
         if all(last.get(q, world.last.get(q)) in OK for q in sim.recipes[i].requires):
@@ -395,7 +395,7 @@ def scenario(sim, rng, full_rerun):
     base_present = rng.random() < 0.2
     world = World(base_present=base_present, account_admin=rng.random() > 0.1)
     plan = sim.full_plan()
-    outcomes = {i: rng.choice(OUTCOMES) if rng.random() < 0.35 else "ok" for i in plan}
+    outcomes = {i: rng.choice(OUTCOMES) if rng.random() < 0.35 else "ok" for i in sorted(plan)}
     crash = rng.randrange(len(plan)) if rng.random() < 0.15 else None
     state, trace = sim.run(world, outcomes, github_ok=rng.random() > 0.1, crash_at=crash)
     check_run(sim, world, state, trace, outcomes)

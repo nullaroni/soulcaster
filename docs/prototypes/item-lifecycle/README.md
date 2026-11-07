@@ -326,7 +326,7 @@ Writes must be atomic and happen after every Item. The record is never Adopted a
 
 ## What the model found
 
-[`model.py`](model.py) runs the lifecycle over the real recipes, and it did change the design. It's a simplified simulation with no real processes. Its crashes land only between an Item's first and second steps, and 6,000 random scenarios aren't exhaustive.
+[`model.py`](model.py) runs the lifecycle over the real recipes, and it did change the design. It's a simplified simulation with no real processes. Its crashes land only between Items or between an Item's first two steps, and 6,000 random scenarios aren't exhaustive.
 
 **Running it found two problems in what I'd written:**
 
@@ -451,7 +451,7 @@ python3 docs/prototypes/item-lifecycle/model.py
 rm -rf "$TMP"
 ```
 
-All three exit 0. Each must-fail case makes one change to a recipe that passes, so that change is the only thing that can make it fail.
+All three exit 0, and the model's output is the same whatever Python's hash seed. Each must-fail case makes one change to a recipe that passes, so that change is the only thing that can make it fail.
 
 <details>
 <summary>Output of <code>check.py</code></summary>
@@ -530,14 +530,14 @@ PASS recipes as written: 6000 random scenarios
 
 mutations: each must trip an invariant
 PASS discard-at-run-end: expected I3, got "I3 third-party tap code ran while the password was held: ['aerospace', 'junie', 'maestro']" after 1 scenarios
-PASS no-learned-admin: expected I11, got "I11 reruns never finished: ['ghostty', 'menu-bar.extras']" after 7 scenarios
-PASS no-closure: expected I12, got 'I12 git.default-branch stayed blocked after its requirements finished' after 45 scenarios
-PASS trust-exit-code: expected I7, got 'I7 ghostty reported satisfied while its checks would fail' after 1 scenarios
-PASS stop-on-failure: expected I1, got 'I1 ghostty never reached a terminal state: pending' after 1 scenarios
+PASS no-learned-admin: expected I11, got "I11 reruns never finished: ['android-sdk', 'gh', 'menu-bar.extras']" after 16 scenarios
+PASS no-closure: expected I12, got 'I12 android-sdk stayed blocked after its requirements finished' after 29 scenarios
+PASS trust-exit-code: expected I7, got 'I7 aerospace reported satisfied while its checks would fail' after 1 scenarios
+PASS stop-on-failure: expected I1, got 'I1 aerospace never reached a terminal state: pending' after 1 scenarios
 PASS no-check-before-stages: expected I6, got 'I6 tailscale is blocked but no requirement ended badly' after 1 scenarios
-PASS delete-bootstrap-at-end: expected I8, got 'I8 the Run ended with no working gh' after 6 scenarios
-PASS ignore-open-queue: expected I10, got 'I10 aerospace became satisfied before a person finished grant-accessibility' after 7 scenarios
-PASS gh-check-without-hand-off: expected I8, got 'I8 after convergence: bootstrap=True, active gh=bootstrap' after 32 scenarios
+PASS delete-bootstrap-at-end: expected I8, got 'I8 the Run ended with no working gh' after 1 scenarios
+PASS ignore-open-queue: expected I10, got 'I10 aerospace became satisfied before a person finished grant-accessibility' after 6 scenarios
+PASS gh-check-without-hand-off: expected I8, got 'I8 after convergence: bootstrap=True, active gh=bootstrap' after 3 scenarios
 PASS admin-item-needing-a-user-item: expected I6, got 'I6 tailscale is blocked but no requirement ended badly' after 1 scenarios
 
 result: all invariants held and all mutations were caught
