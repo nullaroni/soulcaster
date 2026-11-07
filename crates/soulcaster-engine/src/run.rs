@@ -163,6 +163,15 @@ enum Verdict {
     Unset,
 }
 
+/// Only `gh` itself saying nobody is signed in counts as signed out. Anything that could also be a
+/// network problem, or a copy that can't be trusted to answer, can't tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GhSignIn {
+    SignedIn,
+    SignedOut,
+    CantTell,
+}
+
 enum CmdResult {
     Done(CommandOutput),
     Failed(FailureKind),
@@ -1216,28 +1225,41 @@ impl<'a> Engine<'a> {
     }
 
     fn gh_signed_in(&mut self, program: &Path) -> Result<bool, EngineError> {
+        Ok(self.gh_sign_in_state(program)? == GhSignIn::SignedIn)
+    }
+
+    fn gh_sign_in_state(&mut self, program: &Path) -> Result<GhSignIn, EngineError> {
         if !self.gh_may_run(program)? {
-            return Ok(false);
+            return Ok(GhSignIn::CantTell);
         }
         let status =
             act::quiet_gh(self.home, program).args(["auth", "status", "--hostname", "github.com"]);
-        let CmdResult::Done(output) = self.run_command(&status, "", false)? else {
-            return Ok(false);
+        // One try, read directly: the words on a failure are what tell these apart.
+        let Ok(output) = self.run_once(&status, "", false) else {
+            return Ok(GhSignIn::CantTell);
         };
-        if !output.is_success() {
-            return Ok(false);
-        }
         let said = format!(
             "{}{}",
             output.stdout_text(),
             String::from_utf8_lossy(&output.stderr)
         );
-        if said.contains("hosts.yml") {
-            self.emit(EventKind::RunWarning {
-                text: "Keychain refused the GitHub sign-in, so it's stored in a plain file.".into(),
-            });
+        if output.is_success() {
+            if said.contains("hosts.yml") {
+                self.emit(EventKind::RunWarning {
+                    text: "Keychain refused the GitHub sign-in, so it's stored in a plain file."
+                        .into(),
+                });
+            }
+            return Ok(GhSignIn::SignedIn);
         }
-        Ok(true)
+        Ok(
+            if output.end == CommandEnd::Exited(1) && said.to_lowercase().contains("not logged in")
+            {
+                GhSignIn::SignedOut
+            } else {
+                GhSignIn::CantTell
+            },
+        )
     }
 
     fn sign_in_to_github(&mut self, program: &Path) -> Result<(), EngineError> {
@@ -1332,11 +1354,16 @@ impl<'a> Engine<'a> {
             .map(|bootstrap| act::bootstrap_paths(self.home, &bootstrap).1)
             .filter(|binary| binary.exists());
         if let Some(early) = &early {
-            if !self.gh_signed_in(early)? {
+            match self.gh_sign_in_state(early)? {
+                GhSignIn::SignedIn => {}
                 // Nobody signed in, so there's nothing to carry over. Sign-in waits in the queue,
                 // and a later Run finishes it with Homebrew's `gh`.
-                self.remove_bootstrap()?;
-                return Ok(None);
+                GhSignIn::SignedOut => {
+                    self.remove_bootstrap()?;
+                    return Ok(None);
+                }
+                // Offline, stalled, or a copy that fails its pin. A real sign-in may be in there.
+                GhSignIn::CantTell => return Ok(Some(FailureKind::Verify)),
             }
             let Some(account) = self.gh_account(early)? else {
                 return Ok(Some(FailureKind::Verify));

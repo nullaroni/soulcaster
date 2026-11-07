@@ -3322,6 +3322,65 @@ mod admin_stage {
         );
     }
 
+    /// A real sign-in may still be in that copy. Only `gh` saying nobody is signed in lets it go.
+    fn hand_off_keeps_the_copy(reply: Reply, signature: Reply) {
+        let h = Harness::new();
+        let gh = hand_off_only(&h);
+        let copy = make_bootstrap_copy(&h, &gh);
+        accounts(&h, "someone", "someone");
+        h.runner.on(
+            |c| is_gh(c) && !c.program.starts_with("/opt/homebrew") && args_contain(c, "status"),
+            [reply],
+        );
+        h.runner.on(|c| file_name(c) == "codesign", [signature]);
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        let (report, _) = perform_with(&h, &mut p, &gate, &asks);
+        assert!(copy.exists(), "the copy was deleted");
+        assert!(matches!(state(&report, "gh"), ItemState::Failed { .. }));
+        assert!(
+            !h.runner
+                .calls()
+                .iter()
+                .any(|c| is_gh(c) && args_contain(c, "setup-git"))
+        );
+    }
+
+    #[test]
+    fn a_stalled_status_isnt_signed_out() {
+        hand_off_keeps_the_copy(Reply::Stall, Reply::ok(""));
+    }
+
+    #[test]
+    fn being_offline_isnt_signed_out() {
+        hand_off_keeps_the_copy(
+            Reply::fails(1, "error connecting to api.github.com"),
+            Reply::ok(""),
+        );
+    }
+
+    #[test]
+    fn a_token_github_refuses_isnt_signed_out() {
+        hand_off_keeps_the_copy(
+            Reply::fails(
+                1,
+                "Failed to log in to github.com account someone (keyring)\n- The token in keyring is invalid.",
+            ),
+            Reply::ok(""),
+        );
+    }
+
+    #[test]
+    fn a_status_that_wont_start_isnt_signed_out() {
+        hand_off_keeps_the_copy(Reply::SpawnFails("no such file".to_string()), Reply::ok(""));
+    }
+
+    #[test]
+    fn a_copy_that_fails_its_pin_isnt_signed_out() {
+        hand_off_keeps_the_copy(Reply::ok(""), Reply::fails(3, "failed to satisfy"));
+    }
+
     #[test]
     fn a_waiting_sign_in_finishes_with_homebrews_gh_on_a_later_run() {
         let h = Harness::new();
