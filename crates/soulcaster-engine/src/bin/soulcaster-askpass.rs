@@ -5,13 +5,15 @@
 //! It prints what the socket answers and nothing else. With no answer it prints nothing and fails,
 //! so `sudo` gets no password rather than a wrong one.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
+
+use zeroize::Zeroize;
 
 /// Longer than any password, and small enough that a wrong socket can't fill memory.
 const MOST: u64 = 4096;
@@ -31,14 +33,26 @@ fn answer() -> Option<Vec<u8>> {
     (!bytes.is_empty()).then_some(bytes)
 }
 
+/// It holds the password for a moment, and a core file would keep it.
+#[allow(unsafe_code)]
+fn no_core_dumps() {
+    let none = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `none` is a valid `rlimit` for the length of the call.
+    unsafe { libc::setrlimit(libc::RLIMIT_CORE, &none) };
+}
+
 fn main() -> ExitCode {
+    no_core_dumps();
     let Some(mut bytes) = answer() else {
         return ExitCode::FAILURE;
     };
     let wrote = std::io::stdout()
         .write_all(&bytes)
         .and_then(|()| std::io::stdout().flush());
-    bytes.fill(0);
+    bytes.zeroize();
     match wrote {
         Ok(()) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,

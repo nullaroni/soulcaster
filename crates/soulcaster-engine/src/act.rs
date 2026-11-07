@@ -179,11 +179,16 @@ pub fn step_beats(home: &Path, step: &Step) -> Vec<Beat> {
         }
         Step::BrewCask { name, admin, .. } => {
             let command = brew_command(home, name, true, *admin);
-            vec![if *admin {
-                Beat::AdminBrew(command)
+            if *admin {
+                // The download can take a long time, and it needs no helper. Nothing answers
+                // until the install itself.
+                vec![
+                    Beat::Run(brew_fetch_cask(home, name)),
+                    Beat::AdminBrew(command),
+                ]
             } else {
-                Beat::Run(command)
-            }]
+                vec![Beat::Run(command)]
+            }
         }
         Step::Download {
             tool,
@@ -284,6 +289,33 @@ fn pkg_beats(home: &Path, url: &str, sha256: &str, team: &str) -> Vec<Beat> {
     beats
 }
 
+fn brew_fetch_cask(home: &Path, name: &str) -> Command {
+    base_command(home, BREW)
+        .args(["fetch", "--cask", name])
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("HOMEBREW_NO_SUDO", "1")
+        .stall_limit(Duration::from_secs(10 * 60))
+}
+
+/// The copy on disk against its pin. Its signature seals its contents, so this covers both.
+pub fn bootstrap_check_beats(home: &Path, bootstrap: &Bootstrap) -> Vec<Beat> {
+    let (_, binary) = bootstrap_paths(home, bootstrap);
+    vec![
+        Beat::Run(signer_check(home, &bootstrap.signed_by, &binary)),
+        Beat::Team(bootstrap.signed_by.clone()),
+    ]
+}
+
+fn signer_check(home: &Path, team: &str, file: &Path) -> Command {
+    let requirement = format!("anchor apple generic and certificate leaf[subject.OU] = \"{team}\"");
+    base_command(home, "/usr/bin/codesign").args([
+        "--verify",
+        "--strict",
+        &format!("-R={requirement}"),
+        &file.to_string_lossy(),
+    ])
+}
+
 /// Fetch, check the SHA-256, extract, check the signer, then swap into place.
 #[allow(clippy::too_many_arguments)]
 fn download_into(
@@ -309,13 +341,7 @@ fn download_into(
     ));
     beats.push(Beat::Run(extract(home, archive, &archive_path, staging)));
     let signed = staging.join(signed_file);
-    let requirement = format!("anchor apple generic and certificate leaf[subject.OU] = \"{team}\"");
-    beats.push(Beat::Run(base_command(home, "/usr/bin/codesign").args([
-        "--verify",
-        "--strict",
-        &format!("-R={requirement}"),
-        &signed.to_string_lossy(),
-    ])));
+    beats.push(Beat::Run(signer_check(home, team, &signed)));
     beats.push(Beat::Team(team.to_string()));
     if let Some(parent) = tools.parent() {
         beats.push(Beat::Run(

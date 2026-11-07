@@ -59,6 +59,11 @@ done
 check "soulcaster validate" \
   "$("$contents/Helpers/soulcaster" validate "$root/schema/examples/developer.json" >/dev/null && echo runs)" runs
 
+# PeerRule::Signed answers only this identifier, so a wrong one means no Run can use the password.
+check "password helper identifier" \
+  "$(codesign -dv "$contents/Helpers/soulcaster-askpass" 2>&1 | sed -n 's/^Identifier=//p')" \
+  "com.nullworks.macflayer.askpass"
+
 if codesign --verify --deep --strict --verbose=2 "$app"; then
   echo "ok    codesign --verify --deep --strict"
 else

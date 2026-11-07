@@ -170,6 +170,15 @@ impl Harness {
     }
 
     fn perform(&self, plan: &mut Plan, admin: &dyn AdminGate) -> Vec<Command> {
+        self.perform_on(plan, admin, &ManualClock)
+    }
+
+    fn perform_on(
+        &self,
+        plan: &mut Plan,
+        admin: &dyn AdminGate,
+        clock: &dyn Clock,
+    ) -> Vec<Command> {
         self.runner.on(
             |command| file_name(command) == "id",
             [Reply::ok("staff admin\n")],
@@ -187,7 +196,7 @@ impl Harness {
             events: &mut events,
             asks: &AcceptsPassword,
             cancel: &self.cancel,
-            clock: &ManualClock,
+            clock,
             scope: RunScope::Full,
             config: ConfigRef::default(),
             catalog_version: "review",
@@ -443,42 +452,62 @@ fn sudo_is_forgotten_between_admin_steps() {
 
 #[test]
 fn an_admin_window_closes_before_a_network_retry() {
+    // Changed from checking at the retry's own command, which needs a window to run at all. What
+    // the finding is about is the wait: nothing may be listening while the engine backs off.
+    struct WatchingClock {
+        open: Arc<AtomicBool>,
+        waits: AtomicUsize,
+        open_during_wait: AtomicBool,
+    }
+
+    impl Clock for WatchingClock {
+        fn now_ms(&self) -> u64 {
+            1_000
+        }
+
+        fn wait(&self, _duration: Duration) {
+            self.waits.fetch_add(1, Ordering::SeqCst);
+            if self.open.load(Ordering::SeqCst) {
+                self.open_during_wait.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
     let h = Harness::new("retry-window");
     h.runner.on(
         |command| file_name(command) == "test",
         [Reply::fails(1, "")],
     );
-    let open = Arc::new(AtomicBool::new(false));
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let open_on_retry = Arc::new(AtomicBool::new(false));
-    let open_for_retry = Arc::clone(&open);
-    let attempts_for_retry = Arc::clone(&attempts);
-    let still_open = Arc::clone(&open_on_retry);
     h.runner.on(
-        move |command| {
-            if file_name(command) != "xcodebuild" {
-                return false;
-            }
-            let index = attempts_for_retry.fetch_add(1, Ordering::SeqCst);
-            if index >= 1 {
-                still_open.store(open_for_retry.load(Ordering::SeqCst), Ordering::SeqCst);
-            }
-            true
-        },
+        |command| file_name(command) == "xcodebuild",
         [Reply::fails(1, "operation timed out\n"), Reply::ok("")],
     );
+    let open = Arc::new(AtomicBool::new(false));
     let gate = HeldGate {
         open: Arc::clone(&open),
     };
+    let clock = WatchingClock {
+        open,
+        waits: AtomicUsize::new(0),
+        open_during_wait: AtomicBool::new(false),
+    };
     let mut planned = plan(vec![admin_xcode("xc")]);
-    let calls = h.perform(&mut planned, &gate);
+    let calls = h.perform_on(&mut planned, &gate, &clock);
+    let tries = calls
+        .iter()
+        .filter(|command| file_name(command) == "xcodebuild")
+        .count();
     assert!(
-        attempts.load(Ordering::SeqCst) >= 2,
+        tries >= 2,
         "the timed-out admin command was not retried: {calls:#?}"
     );
     assert!(
-        !open_on_retry.load(Ordering::SeqCst),
-        "the admin window was still open on the network retry, backoff included"
+        clock.waits.load(Ordering::SeqCst) >= 1,
+        "there was no backoff"
+    );
+    assert!(
+        !clock.open_during_wait.load(Ordering::SeqCst),
+        "the admin window was open during the backoff"
     );
 }
 

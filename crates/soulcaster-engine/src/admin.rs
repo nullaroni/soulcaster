@@ -100,6 +100,8 @@ impl SocketGate {
         Command::new(&self.sudo)
             .env("HOME", home.to_string_lossy())
             .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+            // Its messages are matched below, so they have to be in one language.
+            .env("LC_ALL", "C")
             .stall_limit(VALIDATE_STALL)
     }
 }
@@ -121,11 +123,18 @@ impl AdminGate for SocketGate {
                 Validation::Unavailable("sudo didn't answer in time".to_string())
             }
             Ok(output) => {
+                // Only `sudo` saying the password was wrong counts. Asking again after anything
+                // else, a locked account above all, tells the person the wrong thing and can make
+                // it worse.
                 let said = String::from_utf8_lossy(&output.stderr).to_lowercase();
-                if said.contains("not in the sudoers") || said.contains("not allowed") {
+                if said.contains("locked") {
+                    Validation::Unavailable("this account is locked".to_string())
+                } else if said.contains("sorry, try again") || said.contains("incorrect password") {
+                    Validation::Wrong
+                } else if said.contains("not in the sudoers") || said.contains("not allowed") {
                     Validation::Unavailable("this account can't use sudo".to_string())
                 } else {
-                    Validation::Wrong
+                    Validation::Unavailable("sudo didn't take the password".to_string())
                 }
             }
         }
@@ -372,7 +381,7 @@ impl Drop for Secret {
             // SAFETY: a valid, exclusive reference. Volatile so the write isn't optimized away.
             unsafe { std::ptr::write_volatile(byte, 0) };
         }
-        unlock_memory(self.0.as_ptr(), self.0.len());
+        unlock_memory(&self.0);
     }
 }
 
@@ -384,12 +393,10 @@ pub(crate) fn lock_in_memory(bytes: &[u8]) {
     }
 }
 
-/// Takes the address rather than a slice, because the password's memory is freed by now. This only
-/// tells the system about the range, and a page that has gone just returns an error.
-pub(crate) fn unlock_memory(address: *const u8, length: usize) {
-    if length > 0 {
-        // SAFETY: `munlock` doesn't read or write the range.
-        unsafe { libc::munlock(address.cast(), length) };
+pub(crate) fn unlock_memory(bytes: &[u8]) {
+    if !bytes.is_empty() {
+        // SAFETY: the range is a live slice. `munlock` only changes how the pages are kept.
+        unsafe { libc::munlock(bytes.as_ptr().cast(), bytes.len()) };
     }
 }
 

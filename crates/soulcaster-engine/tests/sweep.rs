@@ -1132,7 +1132,11 @@ fn check_run(
                         "seed {seed} pass {pass} ran third-party code while the password was held: {command:?}"
                     );
                     assert!(
-                        !(is_brew(command) && env_has(command, "HOMEBREW_NO_SUDO")),
+                        // Fetching a cask is the one unprivileged brew while it's held, and runs
+                        // no package's code.
+                        !(is_brew(command)
+                            && env_has(command, "HOMEBREW_NO_SUDO")
+                            && !command.args.iter().any(|arg| arg == "fetch")),
                         "seed {seed} pass {pass} ran a formula while the password was held: {command:?}"
                     );
                 }

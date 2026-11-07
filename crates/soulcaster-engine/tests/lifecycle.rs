@@ -2896,7 +2896,7 @@ mod admin_stage {
     }
 
     #[test]
-    fn discarding_the_password_also_ends_sudos_timestamp_once() {
+    fn sudos_timestamp_ends_after_checking_after_each_step_and_at_the_discard() {
         let h = Harness::new();
         h.runner.on(
             |c| file_name(c) == "test",
@@ -2906,7 +2906,7 @@ mod admin_stage {
         let asks = AsksInOrder::default();
         let mut p = plan(vec![admin_item("xc")]);
         perform_with(&h, &mut p, &gate, &asks);
-        assert_eq!(gate.forgotten.load(Ordering::Relaxed), 1);
+        assert_eq!(gate.forgotten.load(Ordering::Relaxed), 3);
     }
 
     #[test]
@@ -3297,6 +3297,74 @@ mod admin_stage {
                 .iter()
                 .any(|c| is_gh(c) && args_contain(c, "setup-git"))
         );
+    }
+
+    #[test]
+    fn nobody_signed_in_lets_the_hand_off_finish_and_sign_in_waits() {
+        let h = Harness::new();
+        let gh = hand_off_only(&h);
+        let copy = make_bootstrap_copy(&h, &gh);
+        h.runner.on(
+            |c| is_gh(c) && !c.program.starts_with("/opt/homebrew") && args_contain(c, "status"),
+            [Reply::fails(1, "not logged in")],
+        );
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        let (report, _) = perform_with(&h, &mut p, &gate, &asks);
+        assert!(!copy.exists());
+        assert!(!matches!(state(&report, "gh"), ItemState::Failed { .. }));
+        assert!(
+            !h.runner
+                .calls()
+                .iter()
+                .any(|c| is_gh(c) && args_contain(c, "setup-git"))
+        );
+    }
+
+    #[test]
+    fn a_waiting_sign_in_finishes_with_homebrews_gh_on_a_later_run() {
+        let h = Harness::new();
+        let gh = base_gh();
+        let mut record = MachineRecord::empty();
+        record.queue.push(soulcaster_engine::QueueItem {
+            id: "gh:sign-in".to_string(),
+            item: "gh".to_string(),
+            step_id: "sign-in".to_string(),
+            kind: QueueKind::Person,
+            text: "Sign in".to_string(),
+            link: None,
+            opened_at: 1,
+            finished_at: None,
+            finished_by: None,
+            needs_password: false,
+        });
+        record.save(h.home.path()).unwrap();
+        h.runner.on(
+            |c| file_name(c) == "test" && args_contain(c, "/opt/homebrew/bin/gh"),
+            vec![Reply::ok(""); 4],
+        );
+        h.runner.on(
+            |c| is_gh(c) && args_contain(c, "status"),
+            [
+                Reply::fails(1, "not logged in"),
+                Reply::ok("Logged in (keyring)\n"),
+            ],
+        );
+        h.runner
+            .on(|c| is_gh(c) && args_contain(c, "login"), [sign_in_output()]);
+        let gate = WatchedGate::default();
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![gh]);
+        let (report, _) = perform_with(&h, &mut p, &gate, &asks);
+        let login = h
+            .runner
+            .calls()
+            .into_iter()
+            .find(|c| is_gh(c) && args_contain(c, "login"))
+            .expect("sign-in ran");
+        assert_eq!(login.program, Path::new("/opt/homebrew/bin/gh"));
+        assert!(!report.queue.iter().any(|entry| entry.id == "gh:sign-in"));
     }
 
     #[test]
