@@ -1876,3 +1876,536 @@ fn xcode_stays_in_the_user_stage_until_its_gate_is_done() {
         assert!(discarded > held);
     }
 }
+
+// Review round 1. Each test asserts the design's behaviour and failed against a78447e.
+mod review {
+    use super::*;
+    use soulcaster_core::config::SettingValue;
+    use soulcaster_core::recipe::{GitKey as K, Store as S};
+
+    fn git_setting(id: &str, key: K, value: SettingValue) -> PlanEntry {
+        let mut e = dock_setting(id, "x", None, EvidenceGroup::Documented);
+        if let Recipe::Setting(s) = &mut e.recipe {
+            s.stores = vec![S::GitConfig { key }];
+        }
+        e.value = Some(value);
+        e
+    }
+
+    fn download(id: &str) -> PlanEntry {
+        let mut entry = formula(id, &[]);
+        if let Recipe::Install(install) = &mut entry.recipe {
+            install.checks = vec![Probe::ManagedTool {
+                tool: id.into(),
+                version: "1".into(),
+                file: "tool".into(),
+            }];
+            install.steps = vec![Step::Download {
+                tool: id.into(),
+                version: "1".into(),
+                url: "https://example.com/tool.zip".into(),
+                sha256: "abc123".into(),
+                archive: ArchiveKind::Zip,
+                signed_by: "2ZEFAR8TH3".into(),
+                signed_file: "tool".into(),
+                links: vec![],
+                unless: None,
+            }];
+        }
+        entry
+    }
+
+    #[test]
+    fn r01_git_boolean_setting_that_reads_back_true_is_satisfied() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "git" && args_contain(c, "--get"),
+            [Reply::ok("true\n")],
+        );
+        let mut p = plan(vec![git_setting(
+            "git.pull-rebase",
+            K::PullRebase,
+            SettingValue::Bool(true),
+        )]);
+        let (report, _) = h.run(&mut p);
+        assert!(
+            matches!(
+                state(&report, "git.pull-rebase"),
+                ItemState::Satisfied { .. }
+            ),
+            "got {:?}; git writes: {:?}",
+            state(&report, "git.pull-rebase"),
+            h.runner
+                .calls()
+                .iter()
+                .filter(|c| file_name(c) == "git" && !args_contain(c, "--get"))
+                .map(|c| c.args.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn r02_nothing_runs_the_git_stub_before_command_line_tools_exist() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test" && args_contain(c, "CommandLineTools"),
+            [Reply::fails(1, "")],
+        );
+        let config = Config::parse(br#"{"schemaVersion":1,"name":"probe","items":["git-identity"],"settings":{"git.pull-rebase":true}}"#).unwrap();
+        let mut p = Plan::new(&config, Catalog::shipped());
+        let _ = h.run(&mut p);
+        let calls = h.runner.calls();
+        let first_git = calls
+            .iter()
+            .position(|c| c.program == Path::new("/usr/bin/git"));
+        assert!(
+            first_git.is_none(),
+            "/usr/bin/git ran with CLT absent: {:?}",
+            calls[first_git.unwrap()].args
+        );
+    }
+
+    #[test]
+    fn r03_dock_setting_is_written_on_a_first_run_where_dockutil_is_not_there_yet() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "dockutil" && args_contain(c, "--list"),
+            [
+                Reply::SpawnFails("No such file or directory".into()),
+                Reply::ok("/Applications/Safari.app\n"),
+            ],
+        );
+        let config = Config::parse(br#"{"schemaVersion":1,"name":"probe","settings":{"dock.apps":["/Applications/Safari.app"]}}"#).unwrap();
+        let mut p = Plan::new(&config, Catalog::shipped());
+        let (report, _) = h.run(&mut p);
+        let wrote = h
+            .runner
+            .calls()
+            .iter()
+            .any(|c| file_name(c) == "dockutil" && args_contain(c, "--add"));
+        assert!(
+            wrote,
+            "never wrote; state {:?}",
+            state(&report, "dock.apps")
+        );
+    }
+
+    #[test]
+    fn r04_a_5xx_from_curl_is_a_network_failure_and_retries() {
+        let h = Harness::new();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        h.runner.on(
+            |c| file_name(c) == "curl",
+            [Reply::fails(
+                22,
+                "curl: (22) The requested URL returned error: 503\n",
+            )],
+        );
+        let (report, _) = h.run(&mut plan(vec![download("k")]));
+        assert_eq!(
+            state(&report, "k"),
+            &ItemState::Failed {
+                kind: FailureKind::Network
+            }
+        );
+        assert_eq!(h.clock.waits().len(), 2);
+    }
+
+    #[test]
+    fn r05_a_binary_that_merely_mentions_the_team_id_is_refused() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok("abc123  tool.zip\n")],
+        );
+        // Ad-hoc signed by an attacker, with the expected team only in a name they chose.
+        h.runner.on(
+            |c| file_name(c) == "codesign",
+            [Reply::Output {
+                code: 0,
+                stdout: String::new(),
+                stderr: "Identifier=2ZEFAR8TH3\nSignature=adhoc\nTeamIdentifier=not set\n".into(),
+            }],
+        );
+        let (report, _) = h.run(&mut plan(vec![download("k")]));
+        assert_eq!(
+            state(&report, "k"),
+            &ItemState::Failed {
+                kind: FailureKind::Signature
+            }
+        );
+    }
+
+    #[test]
+    fn r06_signature_is_verified_not_just_displayed() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok("abc123  tool.zip\n")],
+        );
+        h.runner.on(
+            |c| file_name(c) == "codesign",
+            [Reply::ok("TeamIdentifier=2ZEFAR8TH3\n")],
+        );
+        let _ = h.run(&mut plan(vec![download("k")]));
+        let code = h.runner.calls();
+        let c = code.iter().find(|c| file_name(c) == "codesign").unwrap();
+        assert!(args_contain(c, "--verify"), "codesign args: {:?}", c.args);
+    }
+
+    #[test]
+    fn r07_a_refused_download_never_lands_where_its_check_looks() {
+        let h = Harness::new();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        h.runner.on(
+            |c| file_name(c) == "shasum",
+            [Reply::ok("abc123  tool.zip\n")],
+        );
+        h.runner.on(
+            |c| file_name(c) == "codesign",
+            [Reply::fails(1, "code object is not signed at all\n")],
+        );
+        let _ = h.run(&mut plan(vec![download("k")]));
+        let calls = h.runner.calls();
+        let ditto = calls.iter().find(|c| file_name(c) == "ditto").unwrap();
+        let dest = ditto.args.last().unwrap();
+        assert!(
+            !dest.contains("/tools/k/1"),
+            "extracted straight into the tools folder: {dest}"
+        );
+    }
+
+    #[test]
+    fn r08_a_formula_is_never_privileged_even_while_the_password_is_held() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let mut e = admin_builtin("mix", &[]);
+        if let Recipe::Install(i) = &mut e.recipe {
+            i.steps.insert(
+                0,
+                Step::BrewFormula {
+                    name: "openjdk".into(),
+                    unless: None,
+                },
+            );
+        }
+        let _ = h.run(&mut plan(vec![e]));
+        let calls = h.runner.calls();
+        let brew = calls.iter().find(|c| is_install(c, "openjdk")).unwrap();
+        assert!(
+            brew.env
+                .iter()
+                .any(|(k, v)| k == "HOMEBREW_NO_SUDO" && v == "1"),
+            "{:?}",
+            brew.env
+        );
+    }
+
+    #[test]
+    fn r09_run_started_is_the_first_event() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "defaults" && c.args.first().map(String::as_str) == Some("read"),
+            [
+                Reply::fails(
+                    1,
+                    "The domain/default pair of (com.apple.dock, x) does not exist\n",
+                ),
+                Reply::ok("1\n"),
+            ],
+        );
+        let (_r, events) = h.run(&mut plan(vec![dock_setting(
+            "dock.x",
+            "x",
+            None,
+            EvidenceGroup::Documented,
+        )]));
+        assert!(
+            matches!(events[0].kind, EventKind::RunStarted { .. }),
+            "first event: {:?}",
+            events[0].kind
+        );
+    }
+
+    struct SharedSink(Arc<Mutex<Vec<Event>>>);
+    impl EventSink for SharedSink {
+        fn send(&mut self, event: Event) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+    struct Live {
+        inner: FakeRunner,
+        seen: Arc<Mutex<Vec<Event>>>,
+        live: AtomicBool,
+    }
+    impl CommandRunner for Live {
+        fn run(
+            &self,
+            c: &Command,
+            on_line: &mut dyn FnMut(OutputStream, &str),
+        ) -> Result<soulcaster_core::command::CommandOutput, soulcaster_core::command::SpawnError>
+        {
+            if is_install(c, "ripgrep") {
+                on_line(OutputStream::Stderr, "==> Downloading first");
+                std::thread::sleep(Duration::from_millis(250));
+                on_line(OutputStream::Stderr, "==> Downloading second");
+                std::thread::sleep(Duration::from_millis(250));
+                let got = self.seen.lock().unwrap().iter().any(|e| matches!(&e.kind, EventKind::ItemLog { lines, .. } if lines.iter().any(|l| l.contains("first"))));
+                self.live.store(got, Ordering::Relaxed);
+            }
+            self.inner.run(c, on_line)
+        }
+    }
+
+    #[test]
+    fn r10_log_lines_reach_the_stream_while_the_command_runs() {
+        let h = Harness::new();
+        h.script_machine();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let runner = Live {
+            inner: FakeRunner::new(),
+            seen: seen.clone(),
+            live: AtomicBool::new(false),
+        };
+        runner
+            .inner
+            .on(|c| file_name(c) == "id", [Reply::ok("staff admin\n")]);
+        runner
+            .inner
+            .on(|c| file_name(c) == "sw_vers", [Reply::ok("15.6.1\n")]);
+        runner.inner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let mut sink = SharedSink(seen.clone());
+        let mut p = plan(vec![formula("ripgrep", &[])]);
+        perform(RunInput {
+            plan: &mut p,
+            runner: &runner,
+            home: h.home.path(),
+            events: &mut sink,
+            asks: &h.asks,
+            cancel: &h.cancel,
+            clock: &h.clock,
+            scope: RunScope::Full,
+            config: ConfigRef::default(),
+            catalog_version: "t",
+            engine_version: "t",
+        })
+        .unwrap();
+        assert!(
+            runner.live.load(Ordering::Relaxed),
+            "no log line was delivered until the command ended"
+        );
+    }
+
+    #[test]
+    fn r11_mixed_streams_keep_their_own_labels() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        h.runner.on(
+            |c| is_install(c, "ripgrep"),
+            [Reply::Output {
+                code: 0,
+                stdout: "out-line\n".into(),
+                stderr: "err-line\n".into(),
+            }],
+        );
+        let (_r, events) = h.run(&mut plan(vec![formula("ripgrep", &[])]));
+        for e in &events {
+            if let EventKind::ItemLog { stream, lines, .. } = &e.kind {
+                if lines.iter().any(|l| l == "err-line") {
+                    assert_eq!(
+                        *stream,
+                        soulcaster_core::event::LogStream::Stderr,
+                        "{lines:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn r12_every_external_command_has_a_stall_limit() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let (_r, _e) = h.run(&mut plan(vec![admin_builtin("xc", &[])]));
+        let calls = h.runner.calls();
+        let xc = calls.iter().find(|c| file_name(c) == "xcodebuild").unwrap();
+        assert!(
+            xc.stall_limit.is_some(),
+            "an admin step with no stall limit can hang the Run forever: {:?}",
+            xc.args
+        );
+    }
+
+    #[test]
+    fn r13_a_package_approval_lets_that_package_run() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let mut rec = MachineRecord::empty();
+        rec.approvals
+            .packages
+            .insert("ada/tap/maestro".into(), TapApproval { approved_at: 1 });
+        rec.save(h.home.path()).unwrap();
+        let (report, _) = h.run(&mut plan(vec![tap_formula("maestro", "ada/tap/maestro")]));
+        assert!(
+            matches!(state(&report, "maestro"), ItemState::Satisfied { .. }),
+            "{:?}",
+            state(&report, "maestro")
+        );
+    }
+
+    #[test]
+    fn r14_a_batched_setting_with_a_failed_requirement_is_blocked() {
+        let h = Harness::new();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        h.runner
+            .on(|c| is_install(c, "dockutil"), [Reply::fails(1, "boom")]);
+        h.runner.on(
+            |c| file_name(c) == "dockutil",
+            [Reply::SpawnFails("No such file or directory".into())],
+        );
+        let config = Config::parse(br#"{"schemaVersion":1,"name":"probe","settings":{"dock.autohide":true,"dock.apps":["/Applications/Safari.app"]}}"#).unwrap();
+        let mut p = Plan::new(&config, Catalog::shipped());
+        let (report, _) = h.run(&mut p);
+        assert!(
+            matches!(state(&report, "dock.apps"), ItemState::Blocked { .. }),
+            "dock.apps ended {:?}",
+            state(&report, "dock.apps")
+        );
+    }
+
+    #[test]
+    fn r15_a_machine_with_nothing_to_do_as_admin_is_not_asked_for_a_password() {
+        let h = Harness::new();
+        let (_r, _e) = h.run(&mut plan(vec![formula("ripgrep", &[])]));
+        assert_eq!(
+            h.asks.asked(),
+            0,
+            "the map says the password is asked for only when the plan has admin work"
+        );
+    }
+
+    #[test]
+    fn r16_scoped_run_checks_a_requirement_even_if_the_record_says_it_was_fine() {
+        let h = Harness::new();
+        let mut rec = MachineRecord::empty();
+        rec.outcomes.insert(
+            "homebrew".into(),
+            ItemOutcome {
+                state: "satisfied".into(),
+                failure: None,
+                blocked_by: None,
+                assurance: None,
+                skip: None,
+            },
+        );
+        rec.save(h.home.path()).unwrap();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        let mut p = plan(vec![
+            formula("homebrew", &[]),
+            formula("ripgrep", &["homebrew"]),
+        ]);
+        let (report, _) = h
+            .run_scoped(
+                &mut p,
+                RunScope::Items {
+                    items: vec!["ripgrep".into()],
+                },
+            )
+            .unwrap();
+        assert!(
+            report.states.contains_key("homebrew"),
+            "the record, not a check, decided homebrew was installed"
+        );
+    }
+
+    #[test]
+    fn r17_a_key_forced_by_a_profile_is_skipped_as_managed() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| args_contain(c, "Managed Preferences"),
+            [Reply::ok("1\n")],
+        );
+        h.runner
+            .on(|c| file_name(c) == "defaults", [Reply::ok("0\n")]);
+        let (report, _) = h.run(&mut plan(vec![dock_setting(
+            "dock.x",
+            "x",
+            None,
+            EvidenceGroup::Documented,
+        )]));
+        assert_eq!(
+            state(&report, "dock.x"),
+            &ItemState::Skipped {
+                reason: SkipReason::ManagedByAdmin
+            }
+        );
+    }
+
+    #[test]
+    fn r18_dock_contents_are_compared_exactly_not_by_substring() {
+        let h = Harness::new();
+        // Extra tiles: a Dock with more apps than the Config is not a match either.
+        let h2 = Harness::new();
+        h2.runner.on(|c| file_name(c) == "dockutil" && args_contain(c, "--list"),
+            [Reply::ok("Safari\tfile:///Applications/Safari.app/\nMail\tfile:///System/Applications/Mail.app/\n")]);
+        let config = Config::parse(br#"{"schemaVersion":1,"name":"probe","settings":{"dock.apps":["/Applications/Safari.app"]}}"#).unwrap();
+        let mut p = Plan::new(&config, Catalog::shipped());
+        let _ = h2.run(&mut p);
+        let wrote = h2
+            .runner
+            .calls()
+            .iter()
+            .any(|c| file_name(c) == "dockutil" && args_contain(c, "--add"));
+        assert!(wrote, "a Dock with an extra tile compared as a match");
+    }
+
+    #[test]
+    fn r19_kept_logs_exist_for_a_failed_item() {
+        let h = Harness::new();
+        h.runner
+            .on(|c| file_name(c) == "test", [Reply::fails(1, "")]);
+        h.runner.on(
+            |c| is_install(c, "ripgrep"),
+            [Reply::fails(1, "Error: boom\n")],
+        );
+        let (report, _) = h.run(&mut plan(vec![formula("ripgrep", &[])]));
+        let log = h
+            .home
+            .path()
+            .join("Library/Application Support/Soulcaster/runs")
+            .join(&report.run_id)
+            .join("logs/ripgrep.log");
+        assert!(log.exists(), "missing {}", log.display());
+    }
+}
