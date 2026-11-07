@@ -134,9 +134,8 @@
         "checks": [
           { "type": "brew-cask", "name": "android-commandlinetools" },
           { "type": "file", "path": "~/Library/Android/sdk/platform-tools/package.xml" },
-          { "type": "file", "path": "~/Library/Android/sdk/platforms/android-{android.platform}/package.xml" },
-          { "type": "file", "path": "~/Library/Android/sdk/build-tools/{android.build-tools}/package.xml" },
-          { "type": "file", "path": "~/Library/Android/sdk/emulator/package.xml", "whenSetting": "android.emulator" }
+          { "type": "file", "path": "~/Library/Android/sdk/platforms/android-35/package.xml" },
+          { "type": "file", "path": "~/Library/Android/sdk/build-tools/35.0.0/package.xml" }
         ],
         "steps": [
           { "type": "brew-cask", "name": "android-commandlinetools" },
@@ -152,37 +151,19 @@
             "type": "sdkmanager",
             "packages": [
               { "literal": "platform-tools" },
-              { "template": "platforms;android-{}", "setting": "android.platform" },
-              { "template": "build-tools;{}", "setting": "android.build-tools" },
-              { "literal": "emulator", "whenSetting": "android.emulator" }
+              { "literal": "platforms;android-35" },
+              { "literal": "build-tools;35.0.0" }
             ]
           }
         ]
       },
       {
-        "id": "android.platform",
-        "kind": "setting",
-        "title": "Android platform level",
-        "valueType": "integer",
-        "appliedBy": "android-sdk",
-        "evidence": { "group": "probable", "confirmedOn": [] }
-      },
-      {
-        "id": "android.build-tools",
-        "kind": "setting",
-        "title": "Android build tools version",
-        "valueType": "string",
-        "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-        "appliedBy": "android-sdk",
-        "evidence": { "group": "probable", "confirmedOn": [] }
-      },
-      {
-        "id": "android.emulator",
-        "kind": "setting",
+        "id": "android-emulator",
+        "kind": "cli",
         "title": "Android emulator",
-        "valueType": "boolean",
-        "appliedBy": "android-sdk",
-        "evidence": { "group": "probable", "confirmedOn": [] }
+        "requires": ["android-sdk"],
+        "checks": [{ "type": "file", "path": "~/Library/Android/sdk/emulator/package.xml" }],
+        "steps": [{ "type": "sdkmanager", "packages": [{ "literal": "emulator" }] }]
       },
 
       {
@@ -263,7 +244,7 @@
         "kind": "cli",
         "title": "Junie",
         "requires": ["homebrew"],
-        "checks": [{ "type": "brew-formula", "name": "jetbrains/junie/junie" }],
+        "checks": [{ "type": "brew-cask", "name": "junie" }],
         "facts": [
           {
             "id": "signed-in",
@@ -271,7 +252,7 @@
             "probe": { "type": "unknowable", "reason": "Junie has no documented sign-in check." }
           }
         ],
-        "steps": [{ "type": "brew-formula", "name": "jetbrains/junie/junie" }],
+        "steps": [{ "type": "brew-cask", "name": "junie" }],
         "notes": ["Installed only. Sign in when you first open it."]
       },
       {
@@ -365,6 +346,18 @@
       },
 
       {
+        "id": "keyboard.key-repeat",
+        "kind": "setting",
+        "title": "Key repeat rate",
+        "valueType": "integer",
+        "minimum": 1,
+        "maximum": 120,
+        "stores": [{ "type": "defaults", "domain": "NSGlobalDomain", "key": "KeyRepeat", "storedType": "int" }],
+        "effect": "log-out",
+        "evidence": { "group": "probable", "confirmedOn": [] }
+      },
+
+      {
         "id": "git.default-branch",
         "kind": "setting",
         "title": "Default Git branch",
@@ -411,6 +404,9 @@
     { "name": "restart-cfprefsd", "why": "Restarts are a closed list.", "from": "dock.autohide", "patch": [{ "op": "replace", "path": "/effect", "value": "restart-cfprefsd" }] },
     { "name": "setting-without-evidence", "why": "A setting must say how much its read-back proves.", "from": "dock.autohide", "patch": [{ "op": "remove", "path": "/evidence" }] },
     { "name": "setting-without-read-path", "why": "A setting with no read path can't show Drift.", "from": "dock.autohide", "patch": [{ "op": "remove", "path": "/stores" }] },
+    { "name": "integer-setting-without-bounds", "why": "An integer setting must say what's in range, so -5 can't be written.", "from": "keyboard.key-repeat", "patch": [{ "op": "remove", "path": "/minimum" }] },
+    { "name": "builtin-store-outside-the-list", "why": "Builtin read and write paths are a closed list.", "from": "dock.autohide", "patch": [{ "op": "replace", "path": "/stores/0", "value": { "type": "builtin", "name": "run-anything" } }] },
+    { "name": "second-spelling-of-a-tap", "why": "jetbrains/homebrew-junie and jetbrains/junie are one tap, so only the short form is valid.", "from": "aerospace", "patch": [{ "op": "replace", "path": "/steps/0/name", "value": "nikitabobko/homebrew-tap/aerospace" }] },
     { "name": "item-without-read-path", "why": "An Item with no checks can't be verified.", "from": "ghostty", "patch": [{ "op": "replace", "path": "/checks", "value": [] }] },
     { "name": "needs-you-file-link", "why": "A person link can't open a local file or run a script.", "from": "aerospace", "patch": [{ "op": "replace", "path": "/steps/1/link", "value": "file:///tmp/run-me.command" }] },
     { "name": "unknown-builtin", "why": "Builtins are a closed list.", "from": "xcode", "patch": [{ "op": "replace", "path": "/steps/2/name", "value": "run-anything" }] },
@@ -424,7 +420,7 @@
     { "name": "git-without-command-line-tools", "why": "/usr/bin/git is a stub until Command Line Tools exist.", "from": "git-identity", "patch": [{ "op": "remove", "path": "/requires/0" }] },
     { "name": "admin-item-needing-a-user-item", "why": "It would have to wait for a stage that runs after the password is gone. This is the mas route for Xcode.", "from": "xcode", "patch": [{ "op": "add", "path": "/requires", "value": ["openjdk"] }] },
     { "name": "pkg-install-in-a-third-party-recipe", "why": "An Item that loads tap code can't also use the helper.", "from": "maestro", "patch": [{ "op": "add", "path": "/steps/-", "value": { "type": "pkg-install", "url": "https://example.com/x.pkg", "sha256": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062", "signedBy": "VEKTX9H2N7" } }] },
-    { "name": "template-with-unowned-setting", "why": "A recipe may only template settings it applies.", "from": "android-sdk", "patch": [{ "op": "replace", "path": "/steps/2/packages/1/setting", "value": "dock.position" }] },
+    { "name": "pattern-with-lookahead", "why": "Setting patterns must compile under Rust's plain regex crate.", "from": "git.default-branch", "patch": [{ "op": "replace", "path": "/pattern", "value": "^(?!-)[A-Za-z0-9._/-]+$" }] },
     { "name": "broken-setting-marked-confirmed", "why": "Broken and confirmed can't both be true.", "from": "menu-bar.extras", "patch": [{ "op": "replace", "path": "/evidence/confirmedOn", "value": ["27.2"] }] },
     { "name": "second-base-with-bootstrap", "why": "Only gh bypasses Homebrew.", "from": "homebrew", "patch": [{ "op": "add", "path": "/bootstrap", "value": { "version": "1.0.0", "url": "https://example.com/b.zip", "sha256": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062", "signedBy": "VEKTX9H2N7", "binary": "bin/b" } }] }
   ]

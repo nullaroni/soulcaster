@@ -39,16 +39,16 @@
       "pattern": "^(https://[a-z0-9.-]+(/[A-Za-z0-9._~+-]*)*|macappstore://apps\\.apple\\.com/app/id[0-9]+|x-apple\\.systempreferences:com\\.apple\\.settings\\.PrivacySecurity\\.extension(\\?Privacy_[A-Za-z]+)?)$"
     },
     "brewName": {
-      "description": "A bare name always means official Homebrew. Third-party names are owner/tap/name, which trusts only that one formula or cask. Same grammar as packages in the Config draft.",
+      "description": "A bare name always means official Homebrew. Third-party names are owner/tap/name, which trusts only that one formula or cask. Same grammar as packages in the Config draft, so a tap has one spelling (no homebrew- prefix) and a name can't look like a Ruby file or climb.",
       "type": "string",
       "pattern": "^([a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._+@-]*$",
-      "not": { "pattern": "^homebrew/" }
+      "not": { "pattern": "^homebrew/|^[^/]+/homebrew-[^/]*/|\\.rb$|\\.\\." }
     },
     "thirdPartyBrewName": { "type": "string", "pattern": "^[^/]+/[^/]+/[^/]+$" },
     "machinePath": {
       "description": "A location the engine may read. Segments can't begin with two dots, and the roots are fixed.",
       "type": "string",
-      "pattern": "^(~|/opt/homebrew|/Applications|/Library/Developer/CommandLineTools)(/\\.?[A-Za-z0-9_+@{}-][A-Za-z0-9._+@{} -]*)+$"
+      "pattern": "^(~|/opt/homebrew|/Applications|/Library/Developer/CommandLineTools)(/\\.?[A-Za-z0-9_+@-][A-Za-z0-9._+@ -]*)+$"
     },
     "relativePath": {
       "type": "string",
@@ -93,12 +93,10 @@
       "properties": { "type": { "const": "pkg-receipt" }, "pkgId": { "type": "string", "pattern": "^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$" } }
     },
     "probeFile": {
-      "description": "{setting.id} in the path is replaced with that setting's validated value. whenSetting limits the check to when a boolean setting is true.",
       "type": "object", "additionalProperties": false, "required": ["type", "path"],
       "properties": {
         "type": { "const": "file" },
-        "path": { "$ref": "#/$defs/machinePath" },
-        "whenSetting": { "$ref": "#/$defs/settingId" }
+        "path": { "$ref": "#/$defs/machinePath" }
       }
     },
     "probeManagedTool": {
@@ -230,22 +228,11 @@
       }
     },
     "sdkPackage": {
-      "oneOf": [
-        {
-          "type": "object", "additionalProperties": false, "required": ["literal"],
-          "properties": {
-            "literal": { "type": "string", "pattern": "^[a-z0-9.-]+(;[a-z0-9.-]+)*$" },
-            "whenSetting": { "$ref": "#/$defs/settingId" }
-          }
-        },
-        {
-          "type": "object", "additionalProperties": false, "required": ["template", "setting"],
-          "properties": {
-            "template": { "type": "string", "pattern": "^[a-z0-9.-]+(;[a-z0-9.-]*)*\\{\\}$" },
-            "setting": { "$ref": "#/$defs/settingId" }
-          }
-        }
-      ]
+      "description": "A fixed package name, pinned by the Catalog. The Config draft dropped android.* settings, so nothing from a Config reaches sdkmanager.",
+      "type": "object", "additionalProperties": false, "required": ["literal"],
+      "properties": {
+        "literal": { "type": "string", "pattern": "^[a-z0-9.-]+(;[a-z0-9.-]+)*$" }
+      }
     },
     "stepAcceptLicense": {
       "description": "Waits for a person to accept in the Needs-You Queue, records that on the Machine, then performs the built-in acceptance for that license. A Config can never accept for someone.",
@@ -332,10 +319,11 @@
     },
 
     "settingRecipe": {
-      "description": "A setting has a read and write path instead of steps. stores names where the value lives, and appliedBy names an install recipe that applies it.",
+      "description": "A setting has a read and write path instead of steps. stores names where the value lives, so a setting with no read path can't be accepted. An integer setting must declare its bounds.",
       "type": "object", "additionalProperties": false,
-      "required": ["id", "kind", "title", "valueType", "evidence"],
-      "oneOf": [{ "required": ["stores"] }, { "required": ["appliedBy"] }],
+      "required": ["id", "kind", "title", "valueType", "stores", "evidence"],
+      "if": { "properties": { "valueType": { "const": "integer" } }, "required": ["valueType"] },
+      "then": { "required": ["minimum", "maximum"] },
       "properties": {
         "id": { "$ref": "#/$defs/settingId" },
         "kind": { "const": "setting" },
@@ -346,13 +334,14 @@
           "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }
         },
         "pattern": { "type": "string", "maxLength": 120 },
+        "minimum": { "type": "integer" },
+        "maximum": { "type": "integer" },
         "unsetMeans": {
           "description": "The value an unset key behaves as. Without this, an unset key can't be compared, so a Drift check says unknown. A Run still writes the value the Config asks for.",
           "type": ["boolean", "integer", "string"]
         },
         "requires": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/anyId" } },
         "stores": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/store" } },
-        "appliedBy": { "$ref": "#/$defs/itemId" },
         "effect": {
           "description": "What must happen before the value takes effect. Restarts are batched and the setting is verified after them. The list is closed: cfprefsd isn't on it.",
           "enum": [
@@ -377,7 +366,15 @@
         "confirmedOn": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/macOSVersion" } }
       }
     },
-    "store": { "oneOf": [{ "$ref": "#/$defs/defaultsStore" }, { "$ref": "#/$defs/gitStore" }] },
+    "store": { "oneOf": [{ "$ref": "#/$defs/defaultsStore" }, { "$ref": "#/$defs/gitStore" }, { "$ref": "#/$defs/builtinStore" }] },
+    "builtinStore": {
+      "description": "A value whose read and write path isn't a defaults key or a Git key. The engine implements both. Adding a name needs an engine release.",
+      "type": "object", "additionalProperties": false, "required": ["type", "name"],
+      "properties": {
+        "type": { "const": "builtin" },
+        "name": { "enum": ["dock-tiles", "library-visible", "sidebar-favorites"] }
+      }
+    },
     "defaultsStore": {
       "description": "Read and written through CFPreferences. The domain list is closed, so a recipe can't reach login hooks or security settings. com.apple.spaces is left out because of the WindowServer warning in the settings research.",
       "type": "object", "additionalProperties": false, "required": ["type", "domain", "key", "storedType"],
@@ -407,7 +404,7 @@
       }
     },
     "gitStore": {
-      "description": "git config --global. The keys are a closed list because other keys run programs, such as core.sshCommand, core.pager, core.hooksPath, core.fsmonitor, credential.helper and alias.*.",
+      "description": "git config --file on the user's global config, which is checked first and never written through a link into the Dotfiles Repo. The keys are a closed list because other keys run programs, such as core.sshCommand, core.pager, core.hooksPath, core.fsmonitor, credential.helper and alias.*.",
       "type": "object", "additionalProperties": false, "required": ["type", "key"],
       "properties": {
         "type": { "const": "git-config" },

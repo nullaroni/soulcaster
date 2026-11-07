@@ -20,7 +20,7 @@ Every Item goes through one pipeline: **plan, check, act, verify, record**. A st
 | `sudo` | The parent's recommendation is adopted. One piece of the research doesn't work, though: **`sudo` closes inherited file descriptors before running the helper**, so the helper needs a per-step socket instead. |
 | Machine Record | Decides Drift's direction, approvals, the queue and what needs admin next time. It never decides whether something is installed. |
 
-Validation passed: all 23 recipes are accepted, and all 27 schema cases and 9 lint cases are refused. The state model ran 6,000 scenarios over the real recipes, and each of its 10 mutations was caught. Running it found 2 real problems, and writing it produced 3 more rules, listed under [What the model found](#what-the-model-found).
+Validation passed: all 22 recipes are accepted, and all 30 schema cases and 9 lint cases are refused. The state model ran 6,000 scenarios over the real recipes, and each of its 10 mutations was caught. Running it found 2 real problems, and writing it produced 3 more rules, listed under [What the model found](#what-the-model-found).
 
 **Evidence labels**, as in the research: **Ran** means I ran it on this Mac, which already has Command Line Tools. **Read** means I read it in a primary source without running it. **Inferred** is my own conclusion, untested.
 
@@ -28,7 +28,7 @@ Validation passed: all 23 recipes are accepted, and all 27 schema cases and 9 li
 
 The engine exposes three calls. `plan` reads the Machine with no password and produces what the review before a Run shows. `run` executes an approved plan. `check` is `plan` reported as Drift.
 
-1. **Resolve.** Follow Config to Catalog to recipe. Renames, retirement and unknown IDs behave as the Config draft says. A `broken` setting, or a Mac below `minMacOS`, ends `skipped` with a reason.
+1. **Resolve.** Follow Config to Catalog to recipe. Renames, retirement and unknown IDs behave as the Config draft says. A `broken` setting, or a Mac below `minMacOS`, ends `skipped` with a reason. A `skipped` reason about this Machine, such as `macos-too-old`, `managed-by-admin`, `broken-here`, `writes-through-link` or `marked-by-person`, is also the Config draft's **unavailable here** result: it's recorded per entry, shown apart from Drift, and never offers Adopt.
 2. **Check (detect).** Run the recipe's checks. No check runs `brew`, so a check can't load tap code: Homebrew state comes from reading `Cellar`, its install receipts and `Caskroom`.
 3. **Act.** Run steps in order. A step whose `unless` check passes is skipped. A needs-you step stops the Item there, and other Items carry on.
 4. **Verify.** Run the same checks again. A setting is verified after its batched restart, because a running app can overwrite a write ([settings research](https://github.com/nullaroni/soulcaster/blob/research/macos-settings/docs/research/macos-settings.md)).
@@ -109,7 +109,7 @@ A read-back proves storage, not effect, and nothing at run time can tell the dif
 
 ## 2. Recipes
 
-A recipe has no way to express a program. The engine holds the implementations, each with a fixed program, argv and environment, with no shell and stdin at `/dev/null`. **A new step or check type needs an engine release, which is the reviewable boundary.** See [`recipe.schema.json`](recipe.schema.json) and [`recipes-examples.json`](recipes-examples.json).
+A recipe has no way to express a program. The engine holds the implementations, each with a fixed program, argv and environment, with no shell and stdin at `/dev/null`. **A new step or check type needs an engine release, which is the reviewable boundary.** The engine's own `git` always runs with `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`, and any shell with `zsh -f`, because a linked `~/.gitconfig` or `~/.zshenv` runs code as soon as they start (Ran, in the Config draft's check). `git config --file` reads and writes the global config directly, without running its contents. See [`recipe.schema.json`](recipe.schema.json) and [`recipes-examples.json`](recipes-examples.json).
 
 | Step type | What the engine does |
 |---|---|
@@ -135,19 +135,19 @@ The check types are `brew-formula`, `brew-cask`, `app-bundle`, `pkg-receipt`, `f
 | Case | Recipe | Notes |
 |---|---|---|
 | Homebrew cask | `ghostty`: one `brew-cask` step and a `Caskroom` check | The engine reads official casks' JSON metadata when planning. A `pkg` artifact or `sudo: true` makes it admin, whatever the recipe says. `installer manual:` makes it needs-you. |
-| Third-party tap formula | `maestro`: fully qualified name in the step and check | Installing by full name trusts only that formula ([Tap Trust](https://github.com/Homebrew/brew/blob/88f401fb862a12a0a5a201f189de570efc2a9ff1/docs/Tap-Trust.md), Read). **Today's `packages.sh` trusts whole taps, and this drops that.** It needs a tap approval in the Machine Record, or it ends `needs-you`. |
+| Third-party tap formula | `maestro`: fully qualified name in the step and check. The engine generates this same recipe for a name in a Config's `packages`. | Installing by full name trusts only that formula ([Tap Trust](https://github.com/Homebrew/brew/blob/88f401fb862a12a0a5a201f189de570efc2a9ff1/docs/Tap-Trust.md), Read). **Today's `packages.sh` trusts whole taps, and this drops that.** It needs a tap approval in the Machine Record, or it ends `needs-you`. |
 | Kotlin LSP | `kotlin-lsp`: `download` with SHA-256 and signer `2ZEFAR8TH3` | **The URL in `scripts/kotlin-lsp.sh` returns 404 today** (Ran), so it now pins 263.7084.0. I downloaded that build: the SHA-256 matches JetBrains' published value, it's a zip despite the `.sit` name, and `intellij-server` is Developer ID signed (Ran). It moves out of `/opt/homebrew/opt`, which Homebrew owns. `xattr -c` is gone because the engine's download isn't quarantined. Its link is in `~/.local/bin`, and putting that on `PATH` is left to the Dotfiles Repo. |
-| Android SDK | `android-sdk`: cask, `accept-license`, then `sdkmanager` built from typed settings | `platforms;android-{}` is filled from the validated `android.platform` setting, and there's no shell for it to reach. **Today's script doesn't look like it works on a bare Mac:** Google's installer drops an `android` binary into `~/.local/bin` and runs it once (Read, and I didn't run it, so what that first run fetches is unknown), and nothing installs Java. So this uses Homebrew's `android-commandlinetools` cask and requires `openjdk`, shown in the review as pulled in by `android-sdk`. |
+| Android SDK | `android-sdk`: cask, `accept-license`, then `sdkmanager` with fixed package names. `android-emulator` is a separate Item. | The Config draft dropped `android.*`, because moving from 35 to 36 leaves both installed, so one value can't describe the Machine. The Catalog pins the platform and build tools. **Today's script doesn't look like it works on a bare Mac:** Google's installer drops an `android` binary into `~/.local/bin` and runs it once (Read, and I didn't run it, so what that first run fetches is unknown), and nothing installs Java. So this uses Homebrew's `android-commandlinetools` cask and requires `openjdk`, shown in the review as pulled in by `android-sdk`. |
 | Tailscale | `tailscale`: admin cask, `conflicts`, and a note | Conflicts catch the App Store copy and the formula, whose pre-install dialogs would stall a Run. Install-only, so approval and sign-in are a note, not a queue entry. See [spike 8](#required-spikes): the vendor's own post-install runs `open -a`, so Soulcaster not starting it may not mean it doesn't start. |
 | Full Xcode | `xcode`: needs-you, `accept-license`, `builtin`, the last two admin | **The App Store by hand, not `mas`.** See below. |
 | Dock setting | `dock.autohide`: `stores` is the read and write path, `effect` is `restart-dock` | Writes in a group, one restart, then verify all of them. There are no steps to write. |
-| Git identity | `git-identity`: `machine-values` naming two values and their Git keys | Values live in the Machine Record. The review before a Run offers the fields. If they're blank, the Item goes to the queue instead of adding a third up-front ask. Requires `command-line-tools`, because `/usr/bin/git` is a stub until then. |
+| Git identity | `git-identity`: `machine-values` naming two values and their Git keys | Filled without asking, in this order: existing `git config`, the local file, the GitHub account, then the queue. A Run never prompts for it. Values live in the Machine Record. Requires `command-line-tools`, because `/usr/bin/git` is a stub until then. |
 
 **Xcode by hand instead of `mas`, which departs from the tool-installs research.** `mas` calls `/usr/bin/sudo` without `-A` (Read), so it can't use the helper. The engine would have to run `mas` itself as root and hold the password open through a download of several gigabytes. Xcode already needs a person before its download starts. Sending them to the App Store's Get button removes that exposure, drops a dependency, and turns "are you signed in?" into "has Xcode appeared?", which the engine can actually check. The privileged part shrinks to the short first-launch step.
 
 ## 3. Dependencies and order
 
-**Only selected Items and the three base Items are installed, plus whatever those require.** `requires` is a hard ordering edge between Items. Anything required is pulled into the plan and labeled in the review with why it's there. The Machine Record notes it was pulled in, so Adopt doesn't treat it as a choice.
+**Only selected Items and the three base Items are installed, plus whatever those require.** A selected setting's `requires` counts too, so `dock.apps` pulls in `dockutil`. `requires` is a hard ordering edge between Items. Anything required is pulled into the plan and labeled in the review with why it's there. The Machine Record notes it was pulled in, so Adopt doesn't treat it as a choice.
 
 ### A Run on a bare Mac
 
@@ -162,7 +162,8 @@ Admin Stage      command-line-tools -> homebrew -> admin casks such as tailscale
                  Password discarded, even if everything here failed
 User Stage       gh (hand-off) -> official formulae and casks -> downloads -> settings,
                  with one restart per group -> approved third-party tap Items ->
-                 Dotfiles clone and links -> Git settings and identity -> Dotfiles script
+                 Dotfiles clone and links at the approved commit -> Git settings and identity ->
+                 Dotfiles script
 End              Report, the Needs-You Queue, and the offer to log out if a setting needs it
 ```
 
@@ -174,7 +175,7 @@ Rules that make this hold:
 2. **Stage is computed.** An Item is in the Admin Stage only if it would reach an admin step with no open person-gate before it. So Xcode on a first Run stops at its gate and holds nothing open.
 3. **An admin Item may require only other admin Items.** Otherwise it waits for a stage that runs after the password is gone. Lint enforces this.
 4. **Every step's effect must be visible to a check,** or a rerun won't redo it. The model found this too.
-5. **Dotfiles links run before Git settings.** If `~/.gitconfig` is a linked file, the engine won't write through it, because identity would land in the Dotfiles Repo. Those Items go to the queue.
+5. **Dotfiles links run before Git settings, and only after the password is gone.** If `~/.gitconfig` is a linked file, the engine won't write through it, because identity would land in the Dotfiles Repo. Those entries end `skipped` with reason `writes-through-link`. `gh auth setup-git` follows the same rule: it's skipped and reported if the file resolves into the repo.
 
 ### Does the early `gh` work on a bare Mac?
 
@@ -313,8 +314,9 @@ The parent's recommendation is adopted: give the helper only to the steps that n
 
 | Field | Requirement |
 |---|---|
-| `lastApplied[entryKey]` | Keyed with the draft's spellings: Item ID after renames, `formula:<name>`, `cask:<name>`, setting ID, link location. Holds the value, `appliedAt`, Run ID, Catalog version, macOS version, assurance and `priorValue`. **Updated only after a verify passes.** `priorValue` is captured before the first write and kept. |
-| `approvals` | The draft's keys: `owner/tap`, `owner/tap/name`, and repo, path and content hash for a script. |
+| `lastApplied[entryKey]` | Keyed with the draft's spellings: Item ID after renames, `formula:<name>` after aliases, `cask:<name>`, setting ID, link location. A package that later gains an Item migrates to the Item's key at read time. Holds the value, `appliedAt`, Run ID, Catalog version, macOS version, assurance and `priorValue`. **Updated only after a verify passes.** `priorValue` is captured before the first write and kept. |
+| `approvals` | The draft's keys: `owner/tap`, `owner/tap/name`, and for the `dotfiles` block the repo plus commit SHA, with whether its script is approved. The engine never pulls past that commit without a new preview. |
+| `unavailable{}` | Per entry, or per tile in a list setting: the reason it can't apply here. It can suppress an entry but never add or change one. |
 | `localValues` | Git identity and any other Catalog-declared values. Never logged. |
 | `queue[]` | Item, step ID, kind, opened and finished times, and who finished it. |
 | `accepted[]` | License and time. |
@@ -332,6 +334,8 @@ Writes must be atomic and happen after every Item. The record is never Adopted a
 
 1. **A satisfied requirement could look unfinished.** On a rerun where Command Line Tools were fine and Homebrew had failed, Homebrew ran in the Admin Stage first and saw its requirement still `pending`, so it was wrongly `blocked`. That's why every Item is now checked before stages are assigned.
 2. **A crash could strand the bootstrap `gh`.** With only a `brew-formula gh` check, a crash between `brew install gh` and the hand-off left a passing check, so the hand-off never ran again. That's why `gh-handed-off` exists, along with the rule that every step's effect must be visible to a check.
+
+**Changing the recipes later exposed one mistake in the model itself.** With `android-emulator` requiring `android-sdk`, a requirement could reach `needs-you` after its cask landed. Blocking on it is right, but invariant I6 wrongly called it unjustified, so I6 now mirrors the blocking rule.
 
 **Writing it produced three more rules,** before they could fail, and the mutations now show what breaks without them:
 
@@ -352,7 +356,7 @@ Writes must be atomic and happen after every Item. The record is never Adopted a
 | Running agent CLIs to read sign-in status | Install-only, and it may leave processes behind. Adding one is a new check type and a Catalog line. |
 | Hoisting user Items into the Admin Stage | Lint refuses that shape, and no real Item needs it now that Xcode doesn't use `mas`. |
 | Vendor `curl \| sh` installers | See below. |
-| Catalog lifecycle fields (`renamedTo`, `deprecated`, `retired`) | Owned by the Config draft. They'd be added to this schema when the two merge. |
+| Catalog fields `renamedTo`, `deprecated`, `retired`, `coversPackages`, `conflictsWith` | Owned by the Config draft, whose stub adds them to these recipes and passes this schema without them. They'd be added to this schema when the two merge. |
 
 ## Rejected alternatives
 
@@ -379,10 +383,10 @@ Each is decided so work can continue. **[security]** or **[cost]** says why it's
 5. **[security] 60-minute cap on holding the password.** A very slow link could push admin casks into the queue. Lifting the cap lengthens the window.
 6. **[security] `gh` is pinned by checksum and Team ID in the signed Catalog,** and doesn't follow GitHub's latest. If GitHub ever removes that asset, sign-in falls to the queue until a new release.
 7. **[security] The default GitHub token has `repo`, `read:org` and `gist`.** `repo` is full access to private repos. That's `gh`'s minimum, and the usual state for a `gh` user, but Soulcaster is what requests it.
-8. **[security] The engine runs `gh auth setup-git`,** which changes `~/.gitconfig`. It leaves an existing GitHub helper alone.
+8. **[security] The engine runs `gh auth setup-git`,** which changes `~/.gitconfig`. It leaves an existing GitHub helper alone, and skips the step if that file is a link into the Dotfiles Repo.
 9. **[security] Accepting licenses takes one click in the queue,** after which the engine answers `sdkmanager --licenses` or runs `xcodebuild -license accept`. A Config can never accept for someone.
 10. **[security] Unconfirmed settings are applied and labeled, not excluded.** The other option from the research is to leave them out until a toggle test passes. I kept them because the person selected them and `stored` tells the truth about them.
-11. **[security, cost] No vendor installers at all.** Junie comes from its tap formula, which lagged (3110.7 against 3959.5 at last check), but it's only a bootstrap that updates itself. Claude Code and Codex use casks, not vendors' recommended scripts. Android uses the cask. This keeps the sync model and avoids edits to shell startup files. The cost is lag and departing from what vendors recommend.
+11. **[security, cost] No vendor installers at all.** Junie comes from the official `junie` cask (3959.5 on 2026-11-06, from JetBrains' GitHub releases), not `jetbrains/junie/junie` (still 3110.7, the same vendor's asset behind a self-updating shim), so it needs no tap approval. Claude Code and Codex use casks, not vendors' recommended scripts. Android uses the cask. This keeps the sync model and avoids edits to shell startup files. The cost is lag and departing from what vendors recommend.
 12. **[cost] Xcode through the App Store by hand,** departing from the research's `mas` recommendation. It's one more manual click, and it can't choose an Xcode version.
 13. **[cost] Pinned direct downloads will rot.** Kotlin's old pin is already a 404, and JetBrains calls these pre-alpha weekly builds. The Item fails until the next Soulcaster release, and the rest of the Run is unaffected. The `jetbrains/utils` tap is the alternative, with its lag and a tap approval.
 14. **[cost] Kotlin LSP moves out of `/opt/homebrew/opt/kotlin-lsp/libexec`.** Your Dotfiles Repo may point at the old path. I couldn't check it.
@@ -407,18 +411,26 @@ Each runs on a clean Mac or VM, per [#9](https://github.com/nullaroni/soulcaster
 | 11 | `sdkmanager` from the cask with `openjdk`, with stdin at `/dev/null`, then the license flow. Does `intellij-server` run through a symlink, and does it answer `--version`? | `android-sdk` and `kotlin-lsp`. The `--version` check comes from today's script and I didn't run it. |
 | 12 | A real Run through sleep, display off and a locked screen, in a Rune app | `caffeinate` and App Nap, and whether the app survives |
 | 13 | How Homebrew words a `HOMEBREW_NO_SUDO` rejection, and `gh`'s sign-in lines, against the pinned versions | Classifying `needs-admin`, and parsing the code |
-| 14 | A Rust JSON Schema validator against these patterns | Build-time schema checks. I avoided lookahead for this reason. |
+| 14 | A Rust JSON Schema validator against these patterns | Build-time schema checks. The Config draft's check compiled this schema's patterns with Rust's plain `regex`, and the draft's own schema agreed across Rust, Ajv and Python. Recipes haven't been validated in Rust. |
+| 15 | With a hostile `~/.gitconfig` in place, `brew tap` and `brew install` during an Admin Stage on a later Run. Does Homebrew's own `git` read it, with `SUDO_ASKPASS` visible? | Whether already-linked dotfiles can reach the helper through Homebrew. The review didn't establish this, and it can't be run without changing Homebrew's tap folder. |
 
 ## Where this depends on the Config draft
 
-The [Config format](https://github.com/nullaroni/soulcaster/blob/prototype/config-format/docs/prototypes/config-format/README.md) is still under review. This design uses its Item and setting ID grammar, package name grammar, entry key spellings, approval keys, and the boundary in its section 5. If those change, the examples and the record fields change with them, and the lifecycle doesn't.
+The [Config format](https://github.com/nullaroni/soulcaster/blob/prototype/config-format/docs/prototypes/config-format/README.md) was independently reviewed, and both designs were updated together. This design uses its Item and setting ID grammar, package name grammar, entry key spellings, approval keys, and the boundary in its section 5. If those change, the examples and the record fields change with them, and the lifecycle doesn't.
 
-**Changes it implies for that draft:**
+**What that draft took from this one:**
 
-- **Drop `gh-sign-in` and `tailscale-sign-in`.** GitHub sign-in is a Run-level ask, and Tailscale is install-only. Existing IDs should go through its retirement rule.
-- **Replace the stub's `install`, `apply` and `needsYou` fields** with this recipe format.
-- **`junie` stays the fully qualified formula,** as the stub already has it.
-- **Its open risk 6 is answered:** `git.*` and `android.*` have read paths here.
+- **`gh-sign-in` and `tailscale-sign-in` are deleted.** GitHub sign-in is a Run-level ask, and Tailscale is install-only. Nothing has shipped, so there are no IDs to retire.
+- **Its stub uses this recipe format** in place of `install`, `apply` and `needsYou`, and its check validates the stub against this schema.
+- **Tailscale's system extension stays a note,** not a queue entry, until [spike 8](#required-spikes) says otherwise.
+- **Its open risk 6 is answered:** every setting has a read path here.
+
+**What this design took from that draft:**
+
+- **`android.*` is gone,** so `template`, `whenSetting` and `appliedBy` are gone from this schema, with fixed `sdkmanager` packages and an `android-emulator` Item instead.
+- **Settings need bounds and a read path:** integer settings declare `minimum` and `maximum`, and `builtin` stores cover the values that aren't defaults or Git keys, such as `finder.show-library-folder`.
+- **`junie` is the official cask.** Live Homebrew data showed it's current and needs no tap.
+- **Dotfiles approval is repo plus commit, Git identity never asks, and "unavailable here" is recorded.** See sections 2, 3 and 7.
 
 ## Problems found in today's scripts
 
@@ -460,7 +472,7 @@ All three exit 0, and the model's output is the same whatever Python's hash seed
 schema: valid against the 2020-12 metaschema
 
 == catalog: every hard case must pass the schema and lint
-PASS 23 recipes pass the schema
+PASS 22 recipes pass the schema
 PASS lint passes
 PASS every hard case is present (12 checked)
 
@@ -488,6 +500,9 @@ PASS windowserver-warning-domain: com.apple.spaces stays out until the macOS 26 
 PASS restart-cfprefsd: Restarts are a closed list.
 PASS setting-without-evidence: A setting must say how much its read-back proves.
 PASS setting-without-read-path: A setting with no read path can't show Drift.
+PASS integer-setting-without-bounds: An integer setting must say what's in range, so -5 can't be written.
+PASS builtin-store-outside-the-list: Builtin read and write paths are a closed list.
+PASS second-spelling-of-a-tap: jetbrains/homebrew-junie and jetbrains/junie are one tap, so only the short form is valid.
 PASS item-without-read-path: An Item with no checks can't be verified.
 PASS needs-you-file-link: A person link can't open a local file or run a script.
 PASS unknown-builtin: Builtins are a closed list.
@@ -500,13 +515,13 @@ PASS brew-without-homebrew: ghostty: a brew step must require homebrew
 PASS git-without-command-line-tools: git-identity: Git stores must require command-line-tools
 PASS admin-item-needing-a-user-item: xcode: an admin Item can't require openjdk, which runs after the password is gone
 PASS pkg-install-in-a-third-party-recipe: maestro: an Item that loads third-party tap code can't use the helper
-PASS template-with-unowned-setting: android-sdk: dock.position isn't a setting this recipe applies
+PASS pattern-with-lookahead: git.default-branch: a pattern must compile under Rust's plain regex, so no lookaround
 PASS broken-setting-marked-confirmed: menu-bar.extras: can't be both broken and confirmed
 PASS second-base-with-bootstrap: homebrew: only gh may bypass Homebrew
 
 == stages: what the Catalog implies
 can reach admin: command-line-tools, homebrew, tailscale, xcode
-load third-party tap code, so never get the helper: aerospace, maestro, junie
+load third-party tap code, so never get the helper: aerospace, maestro
 PASS no Item is in both lists
 
 result: all checks passed
@@ -517,8 +532,8 @@ result: all checks passed
 Ajv's output, using ECMA-262 regular expressions:
 
 ```text
-catalog: 23 recipes accepted
-mustFailSchema: 27/27 refused
+catalog: 22 recipes accepted
+mustFailSchema: 30/30 refused
 mustFailLint: 9/9 pass the schema, as they should
 ```
 
@@ -529,14 +544,14 @@ mustFailLint: 9/9 pass the schema, as they should
 PASS recipes as written: 6000 random scenarios
 
 mutations: each must trip an invariant
-PASS discard-at-run-end: expected I3, got "I3 third-party tap code ran while the password was held: ['aerospace', 'junie', 'maestro']" after 1 scenarios
-PASS no-learned-admin: expected I11, got "I11 reruns never finished: ['android-sdk', 'gh', 'menu-bar.extras']" after 16 scenarios
-PASS no-closure: expected I12, got 'I12 android-sdk stayed blocked after its requirements finished' after 29 scenarios
-PASS trust-exit-code: expected I7, got 'I7 aerospace reported satisfied while its checks would fail' after 1 scenarios
-PASS stop-on-failure: expected I1, got 'I1 aerospace never reached a terminal state: pending' after 1 scenarios
+PASS discard-at-run-end: expected I3, got "I3 third-party tap code ran while the password was held: ['aerospace', 'maestro']" after 1 scenarios
+PASS no-learned-admin: expected I11, got "I11 reruns never finished: ['ghostty', 'menu-bar.extras']" after 11 scenarios
+PASS no-closure: expected I12, got 'I12 android-emulator stayed blocked after its requirements finished' after 7 scenarios
+PASS trust-exit-code: expected I7, got 'I7 gh reported satisfied while its checks would fail' after 2 scenarios
+PASS stop-on-failure: expected I1, got 'I1 android-emulator never reached a terminal state: pending' after 1 scenarios
 PASS no-check-before-stages: expected I6, got 'I6 tailscale is blocked but no requirement ended badly' after 1 scenarios
-PASS delete-bootstrap-at-end: expected I8, got 'I8 the Run ended with no working gh' after 1 scenarios
-PASS ignore-open-queue: expected I10, got 'I10 aerospace became satisfied before a person finished grant-accessibility' after 6 scenarios
+PASS delete-bootstrap-at-end: expected I8, got 'I8 the Run ended with no working gh' after 2 scenarios
+PASS ignore-open-queue: expected I10, got 'I10 aerospace became satisfied before a person finished grant-accessibility' after 7 scenarios
 PASS gh-check-without-hand-off: expected I8, got 'I8 after convergence: bootstrap=True, active gh=bootstrap' after 3 scenarios
 PASS admin-item-needing-a-user-item: expected I6, got 'I6 tailscale is blocked but no requirement ended badly' after 1 scenarios
 
@@ -634,19 +649,8 @@ def lint(recipes):
         stores = list(r.get("stores", [])) + [v["store"] for v in r.get("values", []) if isinstance(v, dict)]
         if any(s["type"] == "git-config" for s in stores) and "command-line-tools" not in reaches(rid):
             problems.append(f"{rid}: Git stores must require command-line-tools")
-        def owned(sid):
-            return ids.get(sid, {}).get("appliedBy") == rid
-        for s in steps:
-            for p in s.get("packages", []):
-                for key in ("setting", "whenSetting"):
-                    if key in p and not owned(p[key]):
-                        problems.append(f"{rid}: {p[key]} isn't a setting this recipe applies")
-        for c in r.get("checks", []):
-            for sid in re.findall(r"\{([^}]+)\}", c.get("path", "")) + ([c["whenSetting"]] if "whenSetting" in c else []):
-                if not owned(sid):
-                    problems.append(f"{rid}: {sid} isn't a setting this recipe applies")
-        if "appliedBy" in r and r["appliedBy"] not in ids:
-            problems.append(f"{rid}: appliedBy names an unknown recipe")
+        if re.search(r"\(\?[=!<]", r.get("pattern", "")):
+            problems.append(f"{rid}: a pattern must compile under Rust's plain regex, so no lookaround")
         ev = r.get("evidence", {})
         if ev.get("group") == "broken" and ev.get("confirmedOn"):
             problems.append(f"{rid}: can't be both broken and confirmed")

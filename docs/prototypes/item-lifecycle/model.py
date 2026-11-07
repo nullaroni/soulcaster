@@ -28,7 +28,6 @@ class Recipe:
         self.steps = raw.get("steps", [])
         self.base = raw.get("base", False)
         self.broken = raw.get("evidence", {}).get("group") == "broken"
-        self.applied_by = raw.get("appliedBy")
         self.third_party = any(third_party(s.get("name", "")) for s in self.steps if s["type"].startswith("brew"))
         self.handoff_check = any(p.get("name") == "gh-handed-off" for p in raw.get("checks", []))
 
@@ -234,8 +233,6 @@ class Sim:
         r = self.recipes[i]
         if r.broken:
             return "skipped"
-        if r.applied_by:
-            return "satisfied"  # follows the recipe that applies it
         for q in r.requires:
             if q in state and state[q] not in OK:
                 return "blocked"
@@ -342,10 +339,13 @@ def check_run(sim, world, state, trace, outcomes):
     for i in sorted(planned):
         r = sim.recipes[i]
         if state[i] == "blocked":
-            bad = [q for q in r.requires if state.get(q, world.last.get(q)) not in OK and q not in world.installed]
+            # Mirrors run_item: a requirement in this Run counts by its state, even if its package landed
+            # before a person-gate stopped it, as android-sdk's cask does before its license.
+            bad = [q for q in r.requires
+                   if (state[q] not in OK if q in state else world.last.get(q) not in OK and q not in world.installed)]
             if not bad or all(state.get(q) == "pending" for q in bad):
                 raise Violation(f"I6 {i} is blocked but no requirement ended badly")
-        if state[i] == "satisfied" and not r.applied_by and i not in world.installed:
+        if state[i] == "satisfied" and i not in world.installed:
             raise Violation(f"I7 {i} reported satisfied while its checks would fail")
     if world.active_gh is None:
         raise Violation("I8 the Run ended with no working gh")
@@ -430,7 +430,7 @@ def sweep(recipes, mutations=frozenset(), runs=6000, seed=20261106, extra=None):
     rs = dict(recipes)
     if extra:
         rs = extra(rs)
-    selected = {i for i, r in rs.items() if not r.applied_by}
+    selected = set(rs)
     sim = Sim(rs, selected, mutations)
     rng = random.Random(seed)
     for n in range(runs):
