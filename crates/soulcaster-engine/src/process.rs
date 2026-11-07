@@ -17,8 +17,12 @@ const LINE_CAP: usize = 64 * 1024;
 /// After the child exits, stop once its pipes have been quiet this long. A grandchild that
 /// inherited a pipe must not keep `run` blocked.
 const DRAIN: Duration = Duration::from_millis(100);
-/// Output already written before the exit is still read, up to this long after it.
-const DRAIN_MAX: Duration = Duration::from_secs(5);
+/// A grandchild that trickles output stops being read after this much waiting on the pipes. Time
+/// spent handing lines to `on_line` doesn't count: a slow reader must not lose what was written.
+const DRAIN_WAIT_MAX: Duration = Duration::from_secs(5);
+/// A grandchild that floods stops being read after this much. It's more than a pipe and the
+/// channel can hold, so it can't cut off what the command wrote before it exited.
+const DRAIN_BYTES_MAX: usize = 1024 * 1024;
 /// How often to look at the child once both pipes have closed and it hasn't exited.
 const EXIT_POLL: Duration = Duration::from_millis(5);
 
@@ -73,54 +77,35 @@ impl CommandRunner for ProcessRunner {
         let mut stderr_done = false;
         let mut stalled = false;
         let mut exited: Option<ExitStatus> = None;
-        let mut exited_at: Option<Instant> = None;
-        let mut drain_until: Option<Instant> = None;
         let mut last = Instant::now();
 
         loop {
-            if exited.is_none()
-                && let Ok(Some(status)) = child.try_wait()
-            {
+            if let Ok(Some(status)) = child.try_wait() {
                 exited = Some(status);
-                let now = Instant::now();
-                exited_at = Some(now);
-                drain_until = Some(now + DRAIN);
-            }
-            let pipes_closed = stdout_done && stderr_done;
-            if pipes_closed && exited.is_some() {
                 break;
             }
-            if drain_until.is_some_and(|deadline| Instant::now() >= deadline) {
-                break;
-            }
-            if exited.is_none()
-                && let Some(limit) = command.stall_limit
+            if let Some(limit) = command.stall_limit
                 && last.elapsed() >= limit
             {
                 kill_group(pid);
                 stalled = true;
                 break;
             }
-
             // A process can close both pipes and carry on. Its stall limit still applies.
-            if pipes_closed {
+            if stdout_done && stderr_done {
                 thread::sleep(EXIT_POLL);
                 continue;
             }
-
-            let slice = next_wait(command.stall_limit, last, drain_until);
-            match rx.recv_timeout(slice) {
+            match rx.recv_timeout(next_wait(command.stall_limit, last)) {
                 Ok(PipeMsg::Chunk(stream, bytes)) => {
-                    // Any byte is progress, including a line that has not ended yet.
-                    last = Instant::now();
-                    if let Some(at) = exited_at {
-                        drain_until = Some((last + DRAIN).min(at + DRAIN_MAX));
-                    }
                     let (line, buf) = match stream {
                         OutputStream::Stdout => (&mut stdout_line, &mut stdout_buf),
                         OutputStream::Stderr => (&mut stderr_line, &mut stderr_buf),
                     };
                     absorb(stream, &bytes, line, buf, self.output_limit, on_line);
+                    // Any byte is progress, including a line that has not ended yet. Measured
+                    // after handing it on, so a slow reader isn't mistaken for a stall.
+                    last = Instant::now();
                 }
                 Ok(PipeMsg::Eof(OutputStream::Stdout)) => stdout_done = true,
                 Ok(PipeMsg::Eof(OutputStream::Stderr)) => stderr_done = true,
@@ -128,6 +113,29 @@ impl CommandRunner for ProcessRunner {
                 Err(RecvTimeoutError::Disconnected) => {
                     stdout_done = true;
                     stderr_done = true;
+                }
+            }
+        }
+
+        if exited.is_some() {
+            let mut wait_left = DRAIN_WAIT_MAX;
+            let mut bytes_left = DRAIN_BYTES_MAX;
+            while !(stdout_done && stderr_done) && bytes_left > 0 && !wait_left.is_zero() {
+                let waiting = Instant::now();
+                let received = rx.recv_timeout(DRAIN.min(wait_left));
+                wait_left = wait_left.saturating_sub(waiting.elapsed());
+                match received {
+                    Ok(PipeMsg::Chunk(stream, bytes)) => {
+                        bytes_left = bytes_left.saturating_sub(bytes.len());
+                        let (line, buf) = match stream {
+                            OutputStream::Stdout => (&mut stdout_line, &mut stdout_buf),
+                            OutputStream::Stderr => (&mut stderr_line, &mut stderr_buf),
+                        };
+                        absorb(stream, &bytes, line, buf, self.output_limit, on_line);
+                    }
+                    Ok(PipeMsg::Eof(OutputStream::Stdout)) => stdout_done = true,
+                    Ok(PipeMsg::Eof(OutputStream::Stderr)) => stderr_done = true,
+                    Err(_) => break,
                 }
             }
         }
@@ -173,19 +181,13 @@ impl CommandRunner for ProcessRunner {
     }
 }
 
-fn next_wait(stall: Option<Duration>, last: Instant, drain_until: Option<Instant>) -> Duration {
-    let mut slice = Duration::from_millis(50);
-    if let Some(limit) = stall {
-        slice = slice.min(limit.saturating_sub(last.elapsed()));
-    }
-    if let Some(deadline) = drain_until {
-        slice = slice.min(deadline.saturating_duration_since(Instant::now()));
-    }
-    if slice.is_zero() {
-        Duration::from_millis(1)
-    } else {
-        slice
-    }
+fn next_wait(stall: Option<Duration>, last: Instant) -> Duration {
+    let slice = Duration::from_millis(50);
+    let slice = match stall {
+        Some(limit) => slice.min(limit.saturating_sub(last.elapsed())),
+        None => slice,
+    };
+    slice.max(Duration::from_millis(1))
 }
 
 fn join_finished(handle: JoinHandle<()>) {
