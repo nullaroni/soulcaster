@@ -1,0 +1,18 @@
+[package]
+name = "soulcaster-ui-prototype"
+version = "0.0.0"
+edition = "2021"
+description = "Throwaway Rune prototype of Soulcaster's main screens. Everything is simulated: it installs nothing."
+publish = false
+
+[[bin]]
+name = "soulcaster-ui"
+path = "src/main.rs"
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826" }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace]

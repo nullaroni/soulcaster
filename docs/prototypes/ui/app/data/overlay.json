@@ -1,0 +1,36 @@
+{
+  "_note": "SAMPLE data the UI needs and the Catalog does not hold yet. Pricing is from memory and unverified. Replace each block when the Catalog grows the field (see the README's change list).",
+  "pricing": {
+    "sublime-text": "paid", "nova": "paid", "fork": "paid", "tower": "paid", "postico": "paid",
+    "sketch": "paid", "cleanshot": "paid", "burp-suite": "free-plan", "parallels": "paid",
+    "intellij-idea": "paid", "pycharm": "free-plan", "webstorm": "free-plan", "goland": "paid",
+    "rustrover": "free-plan", "clion": "free-plan", "rider": "free-plan", "phpstorm": "paid", "rubymine": "free-plan",
+    "cursor": "free-plan", "copilot-cli": "free-plan", "devin": "paid", "claude-code": "subscription", "codex": "subscription",
+    "warp": "free-plan", "tableplus": "free-plan", "gitkraken": "free-plan", "proxyman": "free-plan",
+    "alfred": "free-plan", "docker-desktop": "paid-at-work", "orbstack": "paid-at-work", "postman": "free-plan",
+    "figma": "free-plan", "slack": "free-plan", "zoom": "free-plan", "1password": "paid", "1password-cli": "paid"
+  },
+  "choices": [
+    { "id": "many-languages", "title": "Version managers for many languages", "members": ["mise", "asdf"],
+      "advice": "Pick one at most. Both do the same job. mise is faster and reads asdf's files. If you use one of these, you can skip the single-language managers below." },
+    { "id": "node-versions", "title": "Node.js version managers", "members": ["fnm", "nvm", "volta"],
+      "advice": "Pick one at most. All three decide which `node` runs, and two at once fight over your PATH. fnm is the fastest, nvm is the most widely documented." },
+    { "id": "python-tools", "title": "Python version and project tools", "members": ["uv", "pyenv", "poetry"],
+      "advice": "Usually one. uv covers Python versions and projects. pyenv only does versions. Poetry only does projects." },
+    { "id": "container-engines", "title": "Ways to run containers", "members": ["docker-desktop", "orbstack", "colima", "podman-desktop", "rancher"],
+      "advice": "Pick one. Each runs its own Linux VM, and most also claim the `docker` command. OrbStack is the lightest. Docker Desktop is what most teams document." },
+    { "id": "window-layout", "title": "Window layout", "members": ["rectangle", "aerospace", "yabai"],
+      "advice": "Pick one. Rectangle snaps windows with shortcuts. AeroSpace and yabai arrange every window for you, and they take more setup." },
+    { "id": "launchers", "title": "Launchers", "members": ["raycast", "alfred"],
+      "advice": "Pick one. Both replace Spotlight's shortcut." }
+  ],
+  "requires": {
+    "android-sdk": ["openjdk"],
+    "android-emulator": ["android-sdk"],
+    "kotlin": ["openjdk"]
+  },
+  "personSteps": {
+    "aerospace": { "id": "grant-accessibility", "title": "Allow AeroSpace under Accessibility", "detail": "macOS only lets you grant this yourself. Open System Settings, turn on AeroSpace, then come back.", "action": "Open System Settings", "kind": "permission" },
+    "xcode": { "id": "get-xcode", "title": "Get Xcode from the App Store", "detail": "Apple needs you signed in to your Apple Account for this download. When Xcode appears, Soulcaster finishes the rest and asks for your password once.", "action": "Open App Store", "kind": "apple-account" }
+  }
+}

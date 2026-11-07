@@ -1,0 +1,400 @@
+{
+ "_source": "Settings copied from prototype/config-format catalog-stub.json at 4ea7e9b. Replace with the real Catalog's settings when it has them.",
+ "settings": [
+  {
+   "id": "dock.apps",
+   "title": "Dock contents",
+   "valueType": "string-list",
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   },
+   "requires": [
+    "dockutil"
+   ],
+   "pattern": "^(?:/System/Applications|/Applications|~/Applications)(?:/[^/.][^/]*)+\\.app$"
+  },
+  {
+   "id": "dock.autohide",
+   "title": "Automatically hide the Dock",
+   "valueType": "boolean",
+   "unsetMeans": false,
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "dock.position",
+   "title": "Dock position",
+   "valueType": "string",
+   "values": [
+    "bottom",
+    "left",
+    "right"
+   ],
+   "unsetMeans": "bottom",
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "dock.show-recents",
+   "title": "Show suggested and recent apps",
+   "valueType": "boolean",
+   "unsetMeans": true,
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.default-view",
+   "title": "Finder default view",
+   "valueType": "string",
+   "values": [
+    "column",
+    "gallery",
+    "icon",
+    "list"
+   ],
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.info-panes-expanded",
+   "title": "Expanded Get Info sections",
+   "valueType": "string-list",
+   "values": [
+    "general",
+    "open-with",
+    "privileges"
+   ],
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.new-window-target",
+   "title": "New Finder window opens",
+   "valueType": "string",
+   "values": [
+    "documents"
+   ],
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.search-scope",
+   "title": "Finder search scope",
+   "valueType": "string",
+   "values": [
+    "current-folder"
+   ],
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.show-library-folder",
+   "title": "Show the Library folder",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.show-path-bar",
+   "title": "Show the path bar",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.show-recent-tags",
+   "title": "Show recent tags",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.show-status-bar",
+   "title": "Show the status bar",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "finder.sidebar-favorites",
+   "title": "Finder sidebar favorites",
+   "valueType": "string-list",
+   "evidence": {
+    "group": "broken",
+    "confirmedOn": []
+   },
+   "notes": [
+    "Skipped: sfltool add-item no longer works on macOS 27."
+   ],
+   "pattern": "^~(?:/\\.?[A-Za-z0-9_+@-][A-Za-z0-9._+@ -]*)+$"
+  },
+  {
+   "id": "git.default-branch",
+   "title": "Default Git branch",
+   "valueType": "string",
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   },
+   "requires": [
+    "command-line-tools"
+   ],
+   "pattern": "^[A-Za-z0-9._/-]+$"
+  },
+  {
+   "id": "git.excludes-file",
+   "title": "Global Git ignore file",
+   "valueType": "string",
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   },
+   "requires": [
+    "command-line-tools"
+   ],
+   "pattern": "^~(?:/\\.?[A-Za-z0-9_+@-][A-Za-z0-9._+@ -]*)+$"
+  },
+  {
+   "id": "git.pull-rebase",
+   "title": "Rebase on git pull",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   },
+   "requires": [
+    "command-line-tools"
+   ]
+  },
+  {
+   "id": "git.push-auto-setup-remote",
+   "title": "Set up the remote on first push",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   },
+   "requires": [
+    "command-line-tools"
+   ]
+  },
+  {
+   "id": "git.rerere",
+   "title": "Reuse recorded conflict resolutions",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "documented",
+    "confirmedOn": []
+   },
+   "requires": [
+    "command-line-tools"
+   ]
+  },
+  {
+   "id": "hot-corners.bottom-left",
+   "title": "Hot corner: bottom left",
+   "valueType": "string",
+   "values": [
+    "none",
+    "mission-control",
+    "application-windows",
+    "desktop",
+    "start-screensaver",
+    "disable-screensaver",
+    "display-sleep",
+    "launchpad",
+    "notification-center",
+    "lock-screen",
+    "quick-note"
+   ],
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "hot-corners.bottom-right",
+   "title": "Hot corner: bottom right",
+   "valueType": "string",
+   "values": [
+    "none",
+    "mission-control",
+    "application-windows",
+    "desktop",
+    "start-screensaver",
+    "disable-screensaver",
+    "display-sleep",
+    "launchpad",
+    "notification-center",
+    "lock-screen",
+    "quick-note"
+   ],
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "hot-corners.top-left",
+   "title": "Hot corner: top left",
+   "valueType": "string",
+   "values": [
+    "none",
+    "mission-control",
+    "application-windows",
+    "desktop",
+    "start-screensaver",
+    "disable-screensaver",
+    "display-sleep",
+    "launchpad",
+    "notification-center",
+    "lock-screen",
+    "quick-note"
+   ],
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "hot-corners.top-right",
+   "title": "Hot corner: top right",
+   "valueType": "string",
+   "values": [
+    "none",
+    "mission-control",
+    "application-windows",
+    "desktop",
+    "start-screensaver",
+    "disable-screensaver",
+    "display-sleep",
+    "launchpad",
+    "notification-center",
+    "lock-screen",
+    "quick-note"
+   ],
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "keyboard.initial-key-repeat",
+   "title": "Delay until key repeat",
+   "valueType": "integer",
+   "minimum": 10,
+   "maximum": 120,
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "keyboard.key-repeat",
+   "title": "Key repeat rate",
+   "valueType": "integer",
+   "minimum": 1,
+   "maximum": 120,
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "keyboard.press-and-hold",
+   "title": "Press and hold for accents",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "menu-bar.extras",
+   "title": "Menu bar extras",
+   "valueType": "string-list",
+   "values": [
+    "airport",
+    "battery",
+    "bluetooth",
+    "clock",
+    "volume"
+   ],
+   "evidence": {
+    "group": "broken",
+    "confirmedOn": []
+   },
+   "notes": [
+    "Skipped: most of these paths no longer exist on macOS 27."
+   ]
+  },
+  {
+   "id": "menu-bar.show-spotlight",
+   "title": "Show Spotlight in the menu bar",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "unconfirmed",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "menu-bar.show-weather",
+   "title": "Show Weather in the menu bar",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "unconfirmed",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "mission-control.group-windows-by-app",
+   "title": "Group windows by app",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "spaces.auto-rearrange",
+   "title": "Rearrange Spaces by recent use",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  },
+  {
+   "id": "trackpad.tap-to-click",
+   "title": "Tap to click",
+   "valueType": "boolean",
+   "evidence": {
+    "group": "probable",
+    "confirmedOn": []
+   }
+  }
+ ]
+}
