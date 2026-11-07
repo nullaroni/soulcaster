@@ -3176,6 +3176,8 @@ dependencies = [
  "serde",
  "serde_json",
  "soulcaster-core",
+ "soulcaster-repo",
+ "tempfile",
 ]
 
 [[package]]
@@ -3183,6 +3185,8 @@ name = "soulcaster-cli"
 version = "0.1.0"
 dependencies = [
  "soulcaster-core",
+ "soulcaster-repo",
+ "tempfile",
 ]
 
 [[package]]
@@ -3195,6 +3199,19 @@ dependencies = [
  "serde_json",
  "unicode-normalization",
  "zeroize",
+]
+
+[[package]]
+name = "soulcaster-repo"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "regex",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "soulcaster-core",
+ "tempfile",
 ]
 
 [[package]]

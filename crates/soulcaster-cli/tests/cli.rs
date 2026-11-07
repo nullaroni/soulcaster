@@ -1,4 +1,6 @@
-//! Runs the real binary on files only. It reads a Config and prints, so nothing here can touch a Machine.
+//! Runs the real binary on files only. It reads a Config and prints, so nothing here can touch a
+//! Machine. `import` and `save` are run only on input refused before any process starts, with `HOME`
+//! pointed at a temporary folder: the rest of their behaviour is tested on a fake, in the crate.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -95,4 +97,61 @@ fn a_missing_file_and_bad_usage_are_refused() {
     );
     assert_eq!(soulcaster(&["install"]).status.code(), Some(2));
     assert_eq!(soulcaster(&[]).status.code(), Some(2));
+}
+
+fn in_sandbox(home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_soulcaster"))
+        .args(args)
+        .env_clear()
+        .env("HOME", home)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn import_refuses_a_bad_address_before_anything_runs() {
+    let home = tempfile::tempdir().unwrap();
+    for paste in [
+        "http://github.com/a/b",
+        "https://user:hunter2@github.com/a/b",
+        "https://github.com.evil.example/a/b",
+        "--upload-pack=evil/b",
+        "a/b\nc",
+    ] {
+        let out = in_sandbox(home.path(), &["import", paste]);
+        assert_eq!(out.status.code(), Some(2), "{paste}");
+        assert!(!stderr(&out).contains("hunter2"), "{}", stderr(&out));
+    }
+    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn save_refuses_a_secret_or_a_bad_file_before_anything_runs() {
+    let home = tempfile::tempdir().unwrap();
+    let secret = home.path().join("secret.json");
+    std::fs::write(
+        &secret,
+        r#"{"schemaVersion":1,"name":"x","settings":{"example.note":"ghp_abcdefghijklmnopqrst"}}"#,
+    )
+    .unwrap();
+    let out = in_sandbox(home.path(), &["save", secret.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(!stderr(&out).contains("ghp_"), "{}", stderr(&out));
+    let bad = example("invalid/duplicate-key.json");
+    let out = in_sandbox(home.path(), &["save", bad.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!home.path().join("Library").exists());
+}
+
+#[test]
+fn import_and_save_refuse_bad_usage() {
+    let home = tempfile::tempdir().unwrap();
+    for args in [
+        &["import"][..],
+        &["import", "a/b", "--nope"][..],
+        &["save"][..],
+        &["save", "x.json", "--repo"][..],
+    ] {
+        assert_eq!(in_sandbox(home.path(), args).status.code(), Some(2), "{args:?}");
+    }
 }

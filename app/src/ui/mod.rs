@@ -2,11 +2,14 @@
 //! the engine is simulated.
 
 mod catalog;
+mod dotfiles;
 mod drift;
 mod finish;
+mod import;
 pub mod kit;
 mod review;
 mod run;
+mod save;
 
 use rune::{Cx, El, col, el, icon, row, text};
 use rune_kit::Toast;
@@ -27,6 +30,9 @@ pub fn view(app: &App, cx: &mut Cx<App>) -> El {
         Screen::Run => run::screen(app),
         Screen::Finish => finish::screen(app, k, &mut layer),
         Screen::Drift => drift::screen(app, k, &mut layer),
+        Screen::Import => import::screen(app, k),
+        Screen::Save => save::screen(app),
+        Screen::Dotfiles => dotfiles::screen(app),
     };
     if let Some(message) = &app.toast {
         layer.push(
@@ -75,7 +81,7 @@ fn titlebar(app: &App, leading: f32) -> El {
         Screen::Review => Some(1),
         Screen::Run => Some(2),
         Screen::Finish => Some(3),
-        Screen::Drift => None,
+        Screen::Drift | Screen::Import | Screen::Save | Screen::Dotfiles => None,
     };
     let mut path = row()
         .key("path")
@@ -156,9 +162,34 @@ fn titlebar(app: &App, leading: f32) -> El {
                 )
                 .child(path)
                 .child(el().grow(1.0))
+                .child(nav_action(app, Screen::Import, "Import", running))
+                .child(nav_action(app, Screen::Save, "Save", false))
+                .child(nav_action(app, Screen::Dotfiles, "Dotfiles", running))
                 .child(drift),
         )
         .child(kit::hairline())
+}
+
+/// A place beside the path. Saving is always here, because it never gets in a Run's way. Import and
+/// the Dotfiles Repo can change what a Run does, so they wait while one is going.
+fn nav_action(app: &App, to: Screen, words: &str, unavailable: bool) -> El {
+    let key = format!("nav-{}", words.to_lowercase());
+    if unavailable {
+        return row()
+            .key(key)
+            .px(2.0)
+            .help("Only one thing can change this Mac at a time.")
+            .child(text(words.to_string()).font(kit::ui_style()).color(kit::dim()));
+    }
+    kit::action(key, words, app.screen == to, move |app: &mut App, _| {
+        app.screen = if app.screen != to {
+            to
+        } else if app.run_finished {
+            Screen::Finish
+        } else {
+            Screen::Catalog
+        };
+    })
 }
 
 fn simulated_strip() -> El {

@@ -410,6 +410,17 @@ fn a_refused_link_is_skipped_and_the_other_links_stay() {
 }
 
 #[test]
+fn a_plan_keeps_neither_side_of_two_links_to_one_location() {
+    let plan = shipped(json!({"dotfiles": {
+        "repo": "a/b",
+        "links": {"~/.zshrc": "one", "~/.ZSHRC": "two", "~/.fine": "three"}
+    }}));
+    let dotfiles = plan.dotfiles.as_ref().unwrap();
+    assert_eq!(dotfiles.links.keys().collect::<Vec<_>>(), ["~/.fine"]);
+    assert_eq!(dotfiles.refused_links.len(), 2);
+}
+
+#[test]
 fn approvals_are_worked_out_from_the_file_and_the_catalog_alone() {
     let plan = from_example("owner-work.json");
     let taps: Vec<&String> = plan.taps.keys().collect();

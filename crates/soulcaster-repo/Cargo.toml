@@ -1,0 +1,17 @@
+[package]
+name = "soulcaster-repo"
+description = "The Config Repo, Import and the Dotfiles Repo: everything that reads or writes GitHub, or links files into a home folder. No GUI."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64 = "0.22"
+regex = "=1.13.1"
+rustix = { version = "1", features = ["fs", "process"] }
+serde.workspace = true
+serde_json.workspace = true
+soulcaster-core.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
