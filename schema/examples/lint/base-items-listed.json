@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "Lint example",
+  "items": [
+    "gh",
+    "ghostty",
+    "homebrew"
+  ],
+  "packages": {
+    "formulae": [
+      "evil/tap/gh",
+      "gh"
+    ]
+  }
+}

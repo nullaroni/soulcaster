@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "Invalid example",
+  "packages": {
+    "taps": [
+      "jetbrains/utils"
+    ]
+  }
+}

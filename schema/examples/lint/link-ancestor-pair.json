@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "Lint example",
+  "dotfiles": {
+    "repo": "example/dotfiles",
+    "links": {
+      "~/.config/nvim": "nvim",
+      "~/.config/nvim/init.lua": "nvim/init.lua"
+    }
+  }
+}

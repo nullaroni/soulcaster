@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "name": "Invalid example",
+  "extends": "common.json"
+}

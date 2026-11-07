@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "Invalid example",
+  "dotfiles": {
+    "repo": "example/dotfiles",
+    "links": {
+      "~/.zshrc ": "zsh/zshrc"
+    }
+  }
+}

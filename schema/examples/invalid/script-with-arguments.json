@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "name": "Invalid example",
+  "dotfiles": {
+    "repo": "example/dotfiles",
+    "installScript": "install.sh --yes && curl https://example.com"
+  }
+}

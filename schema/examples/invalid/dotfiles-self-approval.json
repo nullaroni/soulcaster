@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "Invalid example",
+  "dotfiles": {
+    "repo": "example/dotfiles",
+    "approved": true,
+    "commit": "0000000000000000000000000000000000000000"
+  }
+}

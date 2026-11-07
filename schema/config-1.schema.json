@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nullaroni/soulcaster/main/schema/config-1.schema.json",
+  "title": "Soulcaster Config, schema version 1",
+  "description": "PROTOTYPE. A Config lists what a Machine should have. Every object is closed: a field this schema doesn't name is an error, which is what keeps shell commands, trust grants, removal flags and includes out. Once published, this version is frozen: tightening a rule later would break files that are valid today, so it needs a new schemaVersion. Rules that can change between releases aren't here. Whether an ID exists, whether a value suits its Item, secret checks and link safety run after this schema passes, entry by entry. Patterns are plain ECMA-262 with no lookaround, so Rust's regex crate compiles them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name"],
+  "properties": {
+    "$schema": {
+      "description": "Editor hint for completion and checking. Any string, so a repo rename or a local path doesn't refuse the file. The app never fetches it or shows it.",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "description": "The format version. An app that doesn't know this number refuses the file and changes nothing.",
+      "const": 1
+    },
+    "name": {
+      "description": "Shown in the app, as data from the file's author. There is no description field: prose belongs in the Config Repo's README.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "allOf": [
+        { "$ref": "#/$defs/safeText" },
+        { "not": { "pattern": "^[ \\u00a0]|[ \\u00a0]$" } }
+      ]
+    },
+    "items": {
+      "description": "Catalog Items to install or complete: apps, CLIs and Machine-value Items such as git-identity. Settings go in `settings`.",
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/itemId" }
+    },
+    "packages": {
+      "description": "Homebrew packages the Catalog doesn't cover. Names only: no options, versions or trust.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "formulae": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 1000,
+          "items": { "$ref": "#/$defs/formulaName" }
+        },
+        "casks": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 1000,
+          "items": { "$ref": "#/$defs/caskName" }
+        }
+      }
+    },
+    "settings": {
+      "description": "Setting Item ID to desired value. Leaving an ID out means the app doesn't manage that setting.",
+      "type": "object",
+      "maxProperties": 500,
+      "propertyNames": { "$ref": "#/$defs/settingId" },
+      "additionalProperties": { "$ref": "#/$defs/settingValue" }
+    },
+    "dotfiles": {
+      "description": "The Dotfiles Repo. A Dotfiles Repo is code, so this whole block needs approval on the Machine, tied to the repo and a commit. The clone location and the approval are Machine-local, so neither is here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo"],
+      "properties": {
+        "repo": {
+          "description": "owner/repo on GitHub, or an https URL with no credentials in it. A port is allowed.",
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._][A-Za-z0-9._-]*|https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~-]+)+)$",
+          "allOf": [
+            { "$ref": "#/$defs/safeText" },
+            { "not": { "pattern": "/\\.{1,2}(?:/|$)" } }
+          ]
+        },
+        "links": {
+          "description": "Link location on the Machine to path inside the Dotfiles Repo, one link per line. The app also refuses overlapping locations and protected folders, per link.",
+          "type": "object",
+          "maxProperties": 500,
+          "propertyNames": { "$ref": "#/$defs/linkTarget" },
+          "additionalProperties": { "$ref": "#/$defs/repoPath" }
+        },
+        "installScript": {
+          "description": "Path of one script inside the Dotfiles Repo, with no arguments or spaces. It runs only after approval on the Machine, tied to the repo and a commit.",
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._+@-]+(?:/[A-Za-z0-9._+@-]+)*$",
+          "allOf": [
+            { "$ref": "#/$defs/safeText" },
+            { "$ref": "#/$defs/safePathSegments" },
+            { "not": { "pattern": "^-" } }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "safeText": {
+      "description": "Refuses control characters, line separators and invisible or bidi formatting characters, which can make a preview show something other than the file. This also stops Python's $ from accepting a trailing newline, so all three validators agree.",
+      "type": "string",
+      "not": {
+        "pattern": "[\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u034f\\u061c\\u115f\\u1160\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\u3164\\ufeff\\uffa0\\ufff9-\\ufffb\udb40\udc00-\udb40\udc7f]"
+      }
+    },
+    "safePathSegments": {
+      "description": "No . or .. segment, no .git segment in any case, and no space at the edge of a segment.",
+      "type": "string",
+      "not": {
+        "pattern": "(?:^|/)\\.{1,2}(?:/|$)|(?:^|/)\\.[Gg][Ii][Tt](?:/|$)|(?:^|/)[ \\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000]|[ \\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000](?:/|$)"
+      }
+    },
+    "itemId": {
+      "description": "Lowercase kebab-case product name with no category or delivery method in it, such as ghostty or git-identity. It has no dots, so a setting ID fails here.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "$ref": "#/$defs/safeText"
+    },
+    "settingId": {
+      "description": "<surface>.<name>, such as dock.autohide.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)+$",
+      "$ref": "#/$defs/safeText"
+    },
+    "settingValue": {
+      "description": "A value the Catalog types and checks. There is no null, because leaving the ID out is the only way to say unmanaged, and no nested objects.",
+      "anyOf": [
+        { "type": "boolean" },
+        { "type": "number" },
+        { "$ref": "#/$defs/settingString" },
+        {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/settingString" }
+        }
+      ]
+    },
+    "settingString": {
+      "description": "Any short printable string. Secret checks are a separate lint stage, not schema rules, so a false positive or a new token prefix can't refuse a whole file.",
+      "type": "string",
+      "maxLength": 256,
+      "$ref": "#/$defs/safeText"
+    },
+    "formulaName": {
+      "description": "A homebrew-core name, or owner/tap/name for a third-party formula. Lowercase, starts with a letter or digit, and has one written form: homebrew/core/x is written x, owner/homebrew-tap/x is written owner/tap/x. Homebrew aliases such as nvim pass here and are resolved from Homebrew's metadata.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?:[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._+@-]*$",
+      "allOf": [
+        { "$ref": "#/$defs/safeText" },
+        { "not": { "pattern": "^homebrew/|^[^/]+/homebrew-[^/]*/|\\.rb$|\\.\\." } }
+      ]
+    },
+    "caskName": {
+      "description": "A homebrew/cask name, or owner/tap/name for a third-party cask. Same rules as formulaName.",
+      "$ref": "#/$defs/formulaName"
+    },
+    "linkTarget": {
+      "description": "Inside the home folder, written with ~/. No absolute paths, no $HOME and no shell metacharacters. Allows non-ASCII letters, parentheses and ~ inside a segment, for real locations such as com~apple~CloudDocs.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^~/[^/\\\\:*?\"<>|`$;!#%^={}\\[\\]]+(?:/[^/\\\\:*?\"<>|`$;!#%^={}\\[\\]]+)*$",
+      "allOf": [
+        { "$ref": "#/$defs/safeText" },
+        { "$ref": "#/$defs/safePathSegments" }
+      ]
+    },
+    "repoPath": {
+      "description": "Relative to the Dotfiles Repo root, and can't climb out of it. Same characters as linkTarget. The app also refuses a repo symlink that resolves outside the repo.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^[^/\\\\:*?\"<>|`$;!#%^={}\\[\\]]+(?:/[^/\\\\:*?\"<>|`$;!#%^={}\\[\\]]+)*$",
+      "allOf": [
+        { "$ref": "#/$defs/safeText" },
+        { "$ref": "#/$defs/safePathSegments" },
+        { "not": { "pattern": "^-|^~(?:/|$)" } }
+      ]
+    }
+  }
+}
