@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Soulcaster design pass</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    color: var(--foreground);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+  .window {
+    background: var(--card);
+    color: var(--card-foreground);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    height: 560px;
+    display: flex;
+    flex-direction: column;
+  }
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 44px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; min-width: 118px; }
+  .brand svg { display: block; color: var(--foreground); }
+  .brand b { font-weight: 600; font-size: 13px; letter-spacing: 0; }
+  .path { display: flex; gap: 14px; flex: 1; }
+  .path button { color: var(--muted-foreground); }
+  .path button.on { color: var(--foreground); font-weight: 600; }
+  .drift-link { color: var(--muted-foreground); }
+  .drift-link.on { color: var(--foreground); font-weight: 600; }
+  .body { flex: 1; min-height: 0; display: flex; }
+  .side {
+    width: 196px;
+    flex: none;
+    border-right: 1px solid var(--border);
+    overflow: auto;
+    padding: 8px 0;
+  }
+  .side button {
+    display: flex;
+    width: 100%;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 14px;
+    color: var(--muted-foreground);
+  }
+  .side button b { font-weight: inherit; flex: 1; }
+  .side button.on { color: var(--foreground); font-weight: 600; }
+  .side span, .count { font-variant-numeric: tabular-nums; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .search {
+    flex: none;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    padding: 10px 14px;
+    outline: none;
+  }
+  .search::placeholder { color: var(--muted-foreground); }
+  .list { flex: 1; overflow: auto; }
+  .row, .drow, .qrow {
+    display: grid;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+    min-height: 34px;
+    border-bottom: 1px solid var(--border);
+  }
+  .row { grid-template-columns: 16px 1fr; }
+  .row button { display: contents; }
+  .box {
+    width: 14px; height: 14px;
+    border: 1px solid var(--foreground);
+    display: grid; place-items: center;
+  }
+  .box.off { border-color: var(--muted-foreground); }
+  .box i { width: 8px; height: 5px; border-left: 1.5px solid var(--foreground); border-bottom: 1.5px solid var(--foreground); transform: rotate(-45deg) translate(0, -1px); }
+  .locked { color: var(--muted-foreground); }
+  .foot {
+    flex: none;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    border-top: 1px solid var(--border);
+  }
+  .go {
+    background: var(--foreground);
+    color: var(--background);
+    padding: 6px 12px;
+    border-radius: 2px;
+  }
+  .go:disabled { opacity: 0.35; }
+  .screen { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  .screen.on { display: flex; }
+  h1 {
+    font: 600 22px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    margin: 0;
+    letter-spacing: 0;
+  }
+  .pad { padding: 18px 18px 0; flex: none; }
+  .split { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+  .pane { min-width: 0; min-height: 0; overflow: auto; }
+  .pane + .pane { border-left: 1px solid var(--border); }
+  .runrow, .drow, .qrow { width: 100%; }
+  .runrow { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 0 14px; min-height: 34px; align-items: center; border-bottom: 1px solid var(--border); }
+  .runrow.on { background: var(--muted); }
+  .fail { color: var(--destructive); }
+  .progress { height: 2px; background: var(--border); margin: 14px 18px 0; }
+  .progress b { display: block; height: 2px; background: var(--foreground); width: 12.5%; }
+  .meta { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+  .log {
+    margin: 0;
+    padding: 12px 14px 18px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+  }
+  .dhead, .drow { grid-template-columns: minmax(0, 1.2fr) 4.2rem 6.6rem auto; }
+  .qrow > span:first-child { min-width: 0; }
+  .dhead { color: var(--muted-foreground); min-height: 28px; }
+  .group {
+    padding: 14px 14px 4px;
+    color: var(--muted-foreground);
+  }
+  .choice { display: flex; gap: 10px; white-space: nowrap; }
+  .choice button { color: var(--muted-foreground); }
+  .choice button.on { color: var(--foreground); font-weight: 600; }
+  .qrow { grid-template-columns: 1fr auto; }
+  .switcher {
+    display: flex;
+    gap: 16px;
+    padding: 10px 2px 0;
+  }
+  .switcher button { color: var(--muted-foreground); }
+  .switcher button.on { color: var(--foreground); }
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <div class="brand">
+        <svg width="16" height="16" viewBox="0 0 64 64" aria-label="nullworks">
+          <defs>
+            <mask id="ring">
+              <rect width="64" height="64" fill="black"/>
+              <ellipse cx="32" cy="32" rx="22" ry="29" fill="white"/>
+              <ellipse cx="32" cy="32" rx="8" ry="23" fill="black"/>
+            </mask>
+          </defs>
+          <ellipse cx="32" cy="32" rx="22" ry="29" fill="currentColor" mask="url(#ring)"/>
+          <polygon fill="currentColor" points="17,54 12,48 43,10 48,16"/>
+        </svg>
+        <b>Soulcaster</b>
+      </div>
+      <nav class="path" id="path"></nav>
+      <button class="drift-link" id="driftLink" type="button">Drift</button>
+    </div>
+    <div class="body">
+      <section class="screen on" id="catalog">
+        <div class="body">
+          <nav class="side" id="side"></nav>
+          <div class="main">
+            <input class="search" id="search" placeholder="Search" aria-label="Search">
+            <div class="list" id="catalogList"></div>
+            <div class="foot">
+              <span class="meta" id="selectedCount"></span>
+              <button class="go" id="continue" type="button">Continue</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="review">
+        <div class="pad"><h1>Review</h1></div>
+        <div class="list" style="margin-top:12px">
+          <div class="qrow"><span>Password</span><input class="search" style="width:160px; text-align:right; padding:8px 0" type="password" aria-label="Password"></div>
+          <div class="qrow"><span>GitHub</span><button type="button">Sign in</button></div>
+          <div class="qrow"><span>fnm or nvm</span><span class="choice"><button type="button" class="on">fnm</button><button type="button">nvm</button></span></div>
+          <div class="qrow"><span>shaunsingh/SFMono-Nerd-Font-Ligatures</span><span class="choice"><button type="button">Allow</button></span></div>
+        </div>
+        <div class="foot">
+          <span class="meta">4 left</span>
+          <button class="go" id="start" type="button">Start</button>
+        </div>
+      </section>
+
+      <section class="screen" id="run">
+        <div class="pad">
+          <h1>GitHub CLI <span class="meta">6 of 48</span></h1>
+        </div>
+        <div class="progress" aria-hidden="true"><b></b></div>
+        <div class="split" style="margin-top:14px">
+          <div class="pane" id="runList"></div>
+          <div class="pane">
+            <div class="group">OpenJDK</div>
+            <pre class="log">brew install openjdk
+==&gt; Fetching openjdk
+curl: (28) Operation timed out
+Error: gave up after 3 tries</pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="needs">
+        <div class="pad"><h1>Needs you</h1></div>
+        <div class="list" style="margin-top:12px" id="needsList"></div>
+      </section>
+
+      <section class="screen" id="drift">
+        <div class="pad"><h1>Drift</h1></div>
+        <div class="list" id="driftList" style="margin-top:8px"></div>
+        <div class="foot">
+          <span class="meta" id="driftMeta"></span>
+          <button class="go" id="commit" type="button" disabled>Apply</button>
+        </div>
+      </section>
+    </div>
+  </div>
+  <div class="switcher" id="switcher"></div>
+<script>
+const sections = [
+  ["Always", [["Command Line Tools", true, true], ["Homebrew", true, true], ["GitHub CLI", true, true]]],
+  ["Languages and runtimes", [["Node.js", false, false], ["Deno", false, false], ["Bun", false, false], ["pnpm", false, false], ["Yarn", false, false], ["fnm", false, true], ["nvm", false, false]]],
+  ["Browsers", [["Zen", false, false], ["Firefox", false, false]]],
+  ["Editors and IDEs", [["Cursor", false, true], ["Neovim", false, false], ["Zed", false, false]]],
+  ["Agentic development", [["Claude Code", false, false], ["Codex", false, false]]],
+  ["Terminals and shells", [["Ghostty", false, true], ["starship", false, false]]],
+  ["Window management", [["AeroSpace", false, false]]],
+  ["macOS and Git", [["Hide the Dock", false, false], ["Key repeat", false, true]]]
+];
+const runItems = [
+  ["Command Line Tools", "Installed"],
+  ["Homebrew", "Installed"],
+  ["Tailscale", "Installed"],
+  ["OpenJDK", "Failed"],
+  ["GitHub CLI", "Installing"],
+  ["1Password", "Waiting"],
+  ["Android SDK command-line tools", "Waiting on OpenJDK"],
+  ["bat", "Waiting"],
+  ["Claude Code", "Waiting"]
+];
+const drift = [
+  ["On this Mac", [
+    ["Hide the Dock", "On", "Off"],
+    ["Key repeat", "2", "6"]
+  ]],
+  ["In the Config", [
+    ["Dock position", "Left", "Bottom"]
+  ]],
+  ["Both", [
+    ["Default branch", "main", "trunk"]
+  ]],
+  ["Missing here", [
+    ["Ghostty", "Installed", "Not installed"]
+  ]]
+];
+const needs = [
+  ["Finish 1Password", "Enter password"],
+  ["Get Xcode", "App Store"],
+  ["Allow AeroSpace", "System Settings"],
+  ["OpenJDK", "Try again"],
+  ["Android SDK command-line tools", "Waiting on OpenJDK"],
+  ["Kotlin", "Waiting on OpenJDK"]
+];
+let screen = "catalog";
+let section = 1;
+let query = "";
+const picks = {};
+sections.forEach((s, si) => s[1].forEach((it, ii) => { picks[si + ":" + ii] = it[2]; }));
+const driftPick = drift.flatMap(g => g[1]).map(() => "Later");
+
+const pathNames = [["catalog", "Catalog"], ["review", "Review"], ["run", "Run"], ["needs", "Needs you"]];
+function show(next) {
+  screen = next;
+  document.querySelectorAll(".screen").forEach(el => el.classList.toggle("on", el.id === next));
+  document.getElementById("path").innerHTML = pathNames.map(([id, name]) =>
+    `<button type="button" data-go="${id}" class="${id === next ? "on" : ""}">${name}</button>`).join("");
+  document.getElementById("driftLink").classList.toggle("on", next === "drift");
+  document.getElementById("switcher").innerHTML = [...pathNames, ["drift", "Drift"]].map(([id, name]) =>
+    `<button type="button" data-go="${id}" class="${id === next ? "on" : ""}">${name}</button>`).join("");
+}
+document.body.addEventListener("click", (e) => {
+  const go = e.target.closest("[data-go]");
+  if (go) show(go.dataset.go);
+});
+document.getElementById("continue").onclick = () => show("review");
+document.getElementById("start").onclick = () => show("run");
+
+function renderSide() {
+  document.getElementById("side").innerHTML = sections.map((s, i) => {
+    const n = s[1].filter((it, ii) => picks[i + ":" + ii] && !it[1]).length;
+    return `<button type="button" data-sec="${i}" class="${i === section ? "on" : ""}"><b>${s[0]}</b><span>${n || ""}</span></button>`;
+  }).join("");
+}
+function renderList() {
+  const items = sections[section][1]
+    .map((it, ii) => ({ it, ii }))
+    .filter(({ it }) => it[0].toLowerCase().includes(query));
+  document.getElementById("catalogList").innerHTML = items.map(({ it, ii }) => {
+    const on = picks[section + ":" + ii];
+    const lock = it[1] ? " locked" : "";
+    return `<div class="row${lock}"><button type="button" data-item="${ii}" ${it[1] ? "disabled" : ""}><span class="box ${on ? "" : "off"}">${on ? "<i></i>" : ""}</span><span>${it[0]}</span></button></div>`;
+  }).join("");
+  const selected = Object.entries(picks).filter(([k, v]) => v && !sections[+k.split(":")[0]][1][+k.split(":")[1]][1]).length;
+  document.getElementById("selectedCount").textContent = selected + " selected";
+}
+document.getElementById("side").onclick = (e) => {
+  const b = e.target.closest("[data-sec]");
+  if (!b) return;
+  section = +b.dataset.sec;
+  renderSide();
+  renderList();
+};
+document.getElementById("catalogList").onclick = (e) => {
+  const b = e.target.closest("[data-item]");
+  if (!b || b.disabled) return;
+  const k = section + ":" + b.dataset.item;
+  picks[k] = !picks[k];
+  renderSide();
+  renderList();
+};
+document.getElementById("search").oninput = (e) => { query = e.target.value.trim().toLowerCase(); renderList(); };
+
+document.getElementById("runList").innerHTML = runItems.map(([name, state]) =>
+  `<div class="runrow${state === "Installing" ? " on" : ""}"><span>${name}</span><span class="${state === "Failed" ? "fail" : "meta"}">${state}</span></div>`).join("");
+
+document.getElementById("needsList").innerHTML = needs.map(([name, act]) =>
+  `<div class="qrow"><span>${name}</span><span class="${act.startsWith("Waiting") ? "meta" : ""}">${act}</span></div>`).join("");
+
+function renderDrift() {
+  let i = 0;
+  const html = drift.map(([group, rows]) => {
+    const body = rows.map(([name, config, mac]) => {
+      const mine = i++;
+      const choice = driftPick[mine];
+      return `<div class="drow"><span>${name}</span><span>${config}</span><span>${mac}</span><span class="choice">${["Later", "Adopt", "Apply"].map(c =>
+        `<button type="button" data-drift="${mine}" data-choice="${c}" class="${c === choice ? "on" : ""}">${c}</button>`).join("")}</span></div>`;
+    }).join("");
+    return `<div class="group">${group}</div>${body}`;
+  }).join("");
+  document.getElementById("driftList").innerHTML = `<div class="drow dhead"><span></span><span>Config</span><span>This Mac</span><span></span></div>${html}`;
+  const chosen = driftPick.filter(c => c !== "Later");
+  const verbs = [...new Set(chosen)];
+  const commit = document.getElementById("commit");
+  commit.disabled = verbs.length === 0;
+  commit.textContent = verbs.length === 0 ? "Apply" : verbs.join(" and ");
+  document.getElementById("driftMeta").textContent = verbs.length ? chosen.length + " chosen" : "";
+}
+document.getElementById("driftList").onclick = (e) => {
+  const b = e.target.closest("[data-drift]");
+  if (!b) return;
+  driftPick[+b.dataset.drift] = b.dataset.choice;
+  renderDrift();
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input")) return;
+  const order = ["catalog", "review", "run", "needs", "drift"];
+  const i = order.indexOf(screen);
+  if (e.key === "ArrowRight") show(order[(i + 1) % order.length]);
+  if (e.key === "ArrowLeft") show(order[(i + 4) % order.length]);
+});
+
+renderSide();
+renderList();
+renderDrift();
+show("catalog");
+</script>
+</body>
+</html>

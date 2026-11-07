@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Soulcaster</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Playfair+Display:wght@900&display=swap">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 1.35;
+    color: #14130F;
+  }
+  .window {
+    background: #FBF6EA;
+    color: #14130F;
+    border: 1px solid rgba(20, 19, 15, 0.22);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .window + .window { margin-top: 16px; }
+  .titlebar {
+    display: flex; align-items: center; gap: 14px;
+    height: 44px; padding: 0 14px; flex: none;
+    border-bottom: 1px solid rgba(20, 19, 15, 0.22);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; min-width: 132px; }
+  .brand svg { display: block; color: #015D47; }
+  .brand b { font-weight: 700; }
+  .path { display: flex; gap: 12px; flex: 1; }
+  .path span, .drift { color: #14130F; }
+  .on { color: #015D47; font-weight: 700; }
+  .split { flex: 1; min-height: 0; display: flex; }
+  .side { width: 188px; flex: none; border-right: 1px solid rgba(20, 19, 15, 0.22); padding: 6px 0; overflow: auto; }
+  .side div { display: flex; gap: 8px; align-items: baseline; padding: 5px 12px; }
+  .side div b { font-weight: inherit; flex: 1; }
+  .side .on b { font-weight: 700; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+  .search { flex: none; border-bottom: 1px solid rgba(20, 19, 15, 0.22); padding: 10px 14px; }
+  .rows { flex: 1; min-height: 0; overflow: auto; }
+  .row, .drow, .qrow, .runrow {
+    display: grid; align-items: center; gap: 10px;
+    min-height: 32px; padding: 0 14px;
+    border-bottom: 1px solid rgba(20, 19, 15, 0.14);
+  }
+  .row { grid-template-columns: 14px 1fr; }
+  .box {
+    width: 13px; height: 13px;
+    border: 1px solid #14130F;
+    display: grid; place-items: center;
+  }
+  .box.on { background: #015D47; border-color: #015D47; }
+  .box i {
+    width: 7px; height: 4px;
+    border-left: 1.5px solid #FBF6EA;
+    border-bottom: 1.5px solid #FBF6EA;
+    transform: rotate(-45deg) translate(0, -1px);
+  }
+  .foot {
+    margin-top: auto; height: 48px; flex: none;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14px; border-top: 1px solid rgba(20, 19, 15, 0.22);
+  }
+  .go {
+    background: #E0F354; color: #14130F;
+    font-weight: 700; padding: 6px 14px; border-radius: 999px;
+  }
+  .go.off { background: transparent; box-shadow: inset 0 0 0 1px #14130F; }
+  h1 {
+    font-family: "Playfair Display", Georgia, serif;
+    font-weight: 900; font-size: 28px; line-height: 0.92;
+    color: #015D47; margin: 0;
+  }
+  .pad { padding: 16px 16px 0; flex: none; }
+  .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+  .pane { min-width: 0; overflow: auto; }
+  .pane + .pane { border-left: 1px solid rgba(20, 19, 15, 0.22); background: #14130F; color: #FBF6EA; }
+  .runrow { grid-template-columns: minmax(0, 1fr) auto; }
+  .runrow span:first-child, .qrow > span:first-child {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fail { color: #FD550A; font-weight: 700; }
+  .bar { height: 2px; background: rgba(20, 19, 15, 0.15); margin: 14px 16px 0; flex: none; }
+  .bar b { display: block; width: 12.5%; height: 2px; background: #015D47; }
+  .log {
+    margin: 0; padding: 10px 14px 16px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; color: #FBF6EA;
+  }
+  .log .hot { color: #FD550A; }
+  .log .dim { color: #80AEA3; }
+  .group { padding: 12px 14px 2px; color: #015D47; font-weight: 700; }
+  .dhead, .drow { grid-template-columns: minmax(0, 1.15fr) 4.6rem 6.6rem auto; }
+  .dhead { min-height: 26px; }
+  .choice { display: flex; gap: 8px; white-space: nowrap; }
+  .qrow { grid-template-columns: minmax(0, 1fr) auto; }
+  .field { border-bottom: 1px solid #14130F; width: 120px; height: 18px; }
+</style>
+</head>
+<body>
+  <section class="window" style="height:400px">
+    <div class="titlebar">
+      <div class="brand">
+        <svg width="16" height="16" viewBox="0 0 64 64" aria-label="nullworks"><defs><mask id="a"><rect width="64" height="64" fill="black"/><ellipse cx="32" cy="32" rx="22" ry="29" fill="white"/><ellipse cx="32" cy="32" rx="8" ry="23" fill="black"/></mask></defs><ellipse cx="32" cy="32" rx="22" ry="29" fill="currentColor" mask="url(#a)"/><polygon fill="currentColor" points="17,54 12,48 43,10 48,16"/></svg>
+        <b>Soulcaster</b>
+      </div>
+      <div class="path"><span class="on">Catalog</span><span>Review</span><span>Run</span><span>Needs you</span></div>
+      <span class="drift">Drift</span>
+    </div>
+    <div class="split">
+      <div class="side">
+        <div>Always</div>
+        <div class="on"><b>Languages and runtimes</b><span>1</span></div>
+        <div><b>Browsers</b></div>
+        <div><b>Editors and IDEs</b><span>1</span></div>
+        <div><b>Agentic development</b></div>
+        <div><b>Terminals and shells</b><span>1</span></div>
+        <div><b>Window management</b></div>
+        <div><b>macOS and Git</b><span>1</span></div>
+      </div>
+      <div class="main">
+        <div class="search">Search</div>
+        <div class="rows">
+          <div class="row"><span class="box"></span><span>Node.js</span></div>
+          <div class="row"><span class="box"></span><span>Deno</span></div>
+          <div class="row"><span class="box"></span><span>Bun</span></div>
+          <div class="row"><span class="box"></span><span>pnpm</span></div>
+          <div class="row"><span class="box"></span><span>Yarn</span></div>
+          <div class="row"><span class="box on"><i></i></span><span>fnm</span></div>
+          <div class="row"><span class="box"></span><span>nvm</span></div>
+        </div>
+        <div class="foot"><span>4 selected</span><span class="go">Continue</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="window" style="height:300px">
+    <div class="titlebar">
+      <div class="brand">
+        <svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true"><ellipse cx="32" cy="32" rx="22" ry="29" fill="currentColor" mask="url(#a)"/><polygon fill="currentColor" points="17,54 12,48 43,10 48,16"/></svg>
+        <b>Soulcaster</b>
+      </div>
+      <div class="path"><span>Catalog</span><span class="on">Review</span><span>Run</span><span>Needs you</span></div>
+      <span class="drift">Drift</span>
+    </div>
+    <div class="pad"><h1>Review</h1></div>
+    <div class="qrow" style="margin-top:14px"><span>Password</span><span class="field"></span></div>
+    <div class="qrow"><span>GitHub</span><span>Sign in</span></div>
+    <div class="qrow"><span>fnm or nvm</span><span class="choice"><span class="on">fnm</span><span>nvm</span></span></div>
+    <div class="qrow"><span title="shaunsingh/SFMono-Nerd-Font-Ligatures">shaunsingh/SFMono-Nerd-Font-Ligatures</span><span>Allow</span></div>
+    <div class="foot"><span>4 left</span><span class="go">Start</span></div>
+  </section>
+
+  <section class="window" style="height:430px">
+    <div class="titlebar">
+      <div class="brand">
+        <svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true"><ellipse cx="32" cy="32" rx="22" ry="29" fill="currentColor" mask="url(#a)"/><polygon fill="currentColor" points="17,54 12,48 43,10 48,16"/></svg>
+        <b>Soulcaster</b>
+      </div>
+      <div class="path"><span>Catalog</span><span>Review</span><span class="on">Run</span><span>Needs you</span></div>
+      <span class="drift">Drift</span>
+    </div>
+    <div class="pad"><h1>GitHub CLI <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:400;color:#14130F">6 of 48</span></h1></div>
+    <div class="bar"><b></b></div>
+    <div class="cols" style="margin-top:12px">
+      <div class="pane">
+        <div class="runrow"><span>Command Line Tools</span><span>Installed</span></div>
+        <div class="runrow"><span>Homebrew</span><span>Installed</span></div>
+        <div class="runrow"><span>Tailscale</span><span>Installed</span></div>
+        <div class="runrow"><span>OpenJDK</span><span class="fail">Failed</span></div>
+        <div class="runrow"><span class="on">GitHub CLI</span><span class="on">Installing</span></div>
+        <div class="runrow"><span>1Password</span><span>Waiting</span></div>
+        <div class="runrow"><span title="Android SDK command-line tools">Android SDK command-line tools</span><span>Waiting on OpenJDK</span></div>
+        <div class="runrow"><span>bat</span><span>Waiting</span></div>
+        <div class="runrow"><span>Claude Code</span><span>Waiting</span></div>
+      </div>
+      <div class="pane">
+        <div class="group" style="color:#80AEA3">OpenJDK</div>
+        <pre class="log"><span class="dim">$</span> brew install openjdk
+<span class="dim">==&gt;</span> Fetching openjdk
+<span class="hot">curl: (28) Operation timed out</span>
+<span class="hot">Error: gave up after 3 tries</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="window" style="height:320px">
+    <div class="titlebar">
+      <div class="brand">
+        <svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true"><ellipse cx="32" cy="32" rx="22" ry="29" fill="currentColor" mask="url(#a)"/><polygon fill="currentColor" points="17,54 12,48 43,10 48,16"/></svg>
+        <b>Soulcaster</b>
+      </div>
+      <div class="path"><span>Catalog</span><span>Review</span><span>Run</span><span class="on">Needs you</span></div>
+      <span class="drift">Drift</span>
+    </div>
+    <div class="pad"><h1>Needs you</h1></div>
+    <div class="qrow" style="margin-top:14px"><span>Finish 1Password</span><span>Enter password</span></div>
+    <div class="qrow"><span>Get Xcode</span><span>App Store</span></div>
+    <div class="qrow"><span>Allow AeroSpace</span><span>System Settings</span></div>
+    <div class="qrow"><span>OpenJDK</span><span class="fail">Try again</span></div>
+    <div class="qrow"><span>Android SDK command-line tools</span><span>Waiting on OpenJDK</span></div>
+    <div class="qrow"><span>Kotlin</span><span>Waiting on OpenJDK</span></div>
+  </section>
+
+  <section class="window" style="height:470px">
+    <div class="titlebar">
+      <div class="brand">
+        <svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true"><ellipse cx="32" cy="32" rx="22" ry="29" fill="currentColor" mask="url(#a)"/><polygon fill="currentColor" points="17,54 12,48 43,10 48,16"/></svg>
+        <b>Soulcaster</b>
+      </div>
+      <div class="path"><span>Catalog</span><span>Review</span><span>Run</span><span>Needs you</span></div>
+      <span class="drift on">Drift</span>
+    </div>
+    <div class="pad"><h1>Drift</h1></div>
+    <div class="drow dhead" style="margin-top:10px"><span></span><span>Config</span><span>This Mac</span><span></span></div>
+    <div class="group">On this Mac</div>
+    <div class="drow"><span>Hide the Dock</span><span>On</span><span>Off</span><span class="choice"><span class="on">Later</span><span>Adopt</span><span>Apply</span></span></div>
+    <div class="drow"><span>Key repeat</span><span>2</span><span>6</span><span class="choice"><span class="on">Later</span><span>Adopt</span><span>Apply</span></span></div>
+    <div class="group">In the Config</div>
+    <div class="drow"><span>Dock position</span><span>Left</span><span>Bottom</span><span class="choice"><span class="on">Later</span><span>Adopt</span><span>Apply</span></span></div>
+    <div class="group">Both</div>
+    <div class="drow"><span>Default branch</span><span>main</span><span>trunk</span><span class="choice"><span class="on">Later</span><span>Adopt</span><span>Apply</span></span></div>
+    <div class="group">Missing here</div>
+    <div class="drow"><span>Ghostty</span><span>Installed</span><span>Not installed</span><span class="choice"><span class="on">Later</span><span>Adopt</span><span>Apply</span></span></div>
+    <div class="foot"><span></span><span class="go off">Apply</span></div>
+  </section>
+</body>
+</html>
