@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "Lint example",
+  "items": [
+    "opencode",
+    "tailscale"
+  ],
+  "packages": {
+    "formulae": [
+      "anomalyco/tap/opencode-v2",
+      "tailscale"
+    ]
+  }
+}

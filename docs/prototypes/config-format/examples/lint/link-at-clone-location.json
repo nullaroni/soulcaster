@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "name": "Lint example",
+  "dotfiles": {
+    "repo": "example/dotfiles",
+    "links": {
+      "~/Developer": "dev",
+      "~/Developer/dotfiles": "self",
+      "~/Developer/dotfiles/x": "x"
+    }
+  }
+}

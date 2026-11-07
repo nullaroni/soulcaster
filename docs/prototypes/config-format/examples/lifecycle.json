@@ -11,6 +11,8 @@
   "settings": {
     "dock.autohide": "yes",
     "dock.position": "left",
-    "example.from-a-newer-catalog": true
+    "example.from-a-newer-catalog": true,
+    "example.old-setting": false,
+    "example.retired-setting": true
   }
 }

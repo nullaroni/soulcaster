@@ -1,7 +1,9 @@
 {
   "schemaVersion": 1,
   "name": "Invalid example",
-  "settings": {
-    "git.user.email": "you@example.com"
+  "packages": {
+    "formulae": [
+      "evil.rb"
+    ]
   }
 }

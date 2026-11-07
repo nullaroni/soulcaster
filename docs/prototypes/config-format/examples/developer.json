@@ -5,17 +5,14 @@
   "items": [
     "claude-code",
     "codex",
-    "gh",
-    "gh-sign-in",
     "ghostty",
     "git-identity",
+    "opencode",
     "tailscale",
-    "tailscale-sign-in",
     "xcode"
   ],
   "packages": {
     "formulae": [
-      "anomalyco/tap/opencode-v2",
       "fd",
       "jq",
       "node",
@@ -39,7 +36,6 @@
     "repo": "https://git.example.com/dev/dotfiles",
     "links": {
       "~/.config/nvim": "nvim",
-      "~/.gitconfig": "git/gitconfig",
       "~/.zshrc": "zsh/zshrc",
       "~/Library/Application Support/Code/User/settings.json": "vscode/settings.json"
     },

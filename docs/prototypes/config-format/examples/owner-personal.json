@@ -4,9 +4,9 @@
   "name": "Personal Mac",
   "items": [
     "aerospace",
+    "android-emulator",
     "android-sdk",
-    "gh",
-    "gh-sign-in",
+    "dockutil",
     "ghostty",
     "git-identity",
     "junie",
@@ -17,7 +17,6 @@
   "packages": {
     "formulae": [
       "basedpyright",
-      "dockutil",
       "eza",
       "fzf",
       "jj",
@@ -34,15 +33,9 @@
       "discord",
       "jetbrains-toolbox",
       "linearmouse"
-    ],
-    "taps": [
-      "jetbrains/utils"
     ]
   },
   "settings": {
-    "android.build-tools": "35.0.0",
-    "android.emulator": true,
-    "android.platform": 35,
     "dock.apps": [
       "/System/Applications/Launchpad.app",
       "/Applications/Safari.app",

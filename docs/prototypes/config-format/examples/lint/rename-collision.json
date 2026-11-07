@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "name": "Lint example",
+  "settings": {
+    "dock.show-recents": true,
+    "example.old-setting": false
+  }
+}

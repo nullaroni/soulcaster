@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "name": "Lint example",
+  "items": [
+    "git-identity"
+  ],
+  "settings": {
+    "git.rerere": true
+  },
+  "dotfiles": {
+    "repo": "example/dotfiles",
+    "links": {
+      "~/.gitconfig": "git/gitconfig"
+    }
+  }
+}
