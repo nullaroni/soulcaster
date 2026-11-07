@@ -428,6 +428,27 @@ mod tests {
         assert!(output.stdout.len() <= 1024);
     }
 
+    /// A command that writes past the cap and then exits never trips the in-loop check: the
+    /// overflow sits in the unfinished line, and the drain after `try_wait` keeps it as a normal
+    /// exit. A cut-off body must not come back as the whole answer.
+    #[test]
+    fn killing_past_a_finished_command_is_not_a_truncated_success() {
+        let output = ProcessRunner::killing_past(64)
+            .run(
+                &Command::new("/bin/sh").args(["-c", "printf '%010000d' 0"]),
+                &mut |_, _| {},
+            )
+            .unwrap();
+        assert_eq!(
+            output.end,
+            CommandEnd::Stalled,
+            "exited {:?} keeping {} bytes of a 10000-byte answer",
+            output.end,
+            output.stdout.len()
+        );
+        assert!(output.stdout.len() <= 64, "{}", output.stdout.len());
+    }
+
     #[test]
     fn lines_past_the_memory_cap_still_reach_the_log() {
         let mut seen = 0;

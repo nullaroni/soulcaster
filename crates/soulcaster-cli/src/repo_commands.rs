@@ -500,4 +500,46 @@ mod tests {
                 .any(|c| c.args.iter().any(|a| a.contains("upload-pack")))
         );
     }
+
+    #[test]
+    fn a_mixed_alphabet_repo_path_is_not_printed_as_itself() {
+        use soulcaster_core::approval::CommitSha;
+        use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
+        use soulcaster_repo::address::{ConfigPath, RepoId};
+        use soulcaster_repo::import::{Fetched, Source};
+        use soulcaster_repo::review::DotfilesFacts;
+
+        let es = '\u{0441}';
+        let json = format!(
+            r#"{{"schemaVersion":1,"name":"Work","dotfiles":{{"repo":"example-you/dotfiles","links":{{"~/.zshrc":"zsh/zshr{es}"}}}}}}"#
+        );
+        let config = Config::parse(json.as_bytes()).expect("the schema allows this path");
+        let review = Review::build(
+            &Fetched {
+                source: Source {
+                    repo: RepoId::new("example-you", "dotfiles").unwrap(),
+                    path: ConfigPath::parse("configs/work.json").unwrap(),
+                    commit: CommitSha::parse("a1b2c3d000000000000000000000000000000000").unwrap(),
+                },
+                config,
+            },
+            Some("example-you"),
+            &DotfilesFacts {
+                commit: CommitSha::parse("a1b2c3d000000000000000000000000000000000"),
+                current_owner: Some("example-you".to_string()),
+                script_text: None,
+            },
+            Catalog::shipped(),
+            DEFAULT_CLONE_LOCATION,
+        );
+        let text = print_review(&review);
+        assert!(
+            text.contains("\\u0441"),
+            "the lookalike letter must be written as a code point:\n{text}"
+        );
+        assert!(
+            !text.contains(es),
+            "the review prints the lookalike as a plain c:\n{text}"
+        );
+    }
 }
