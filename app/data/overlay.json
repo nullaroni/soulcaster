@@ -1,0 +1,59 @@
+{
+  "_note": "Competing Items the Catalog doesn't group yet. Move this to the Catalog when it grows the field.",
+  "choices": [
+    {
+      "id": "many-languages",
+      "title": "Version managers for many languages",
+      "members": [
+        "mise",
+        "asdf"
+      ]
+    },
+    {
+      "id": "node-versions",
+      "title": "Node.js version managers",
+      "members": [
+        "fnm",
+        "nvm",
+        "volta"
+      ]
+    },
+    {
+      "id": "python-tools",
+      "title": "Python version and project tools",
+      "members": [
+        "uv",
+        "pyenv",
+        "poetry"
+      ]
+    },
+    {
+      "id": "container-engines",
+      "title": "Ways to run containers",
+      "members": [
+        "docker-desktop",
+        "orbstack",
+        "colima",
+        "podman-desktop",
+        "rancher"
+      ]
+    },
+    {
+      "id": "window-layout",
+      "title": "Window layout",
+      "members": [
+        "rectangle",
+        "aerospace",
+        "yabai"
+      ]
+    },
+    {
+      "id": "launchers",
+      "title": "Launchers",
+      "members": [
+        "raycast",
+        "alfred"
+      ]
+    }
+  ]
+}

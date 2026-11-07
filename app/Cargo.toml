@@ -1,0 +1,17 @@
+[package]
+name = "soulcaster-app"
+description = "The Soulcaster window. It reads the engine's event stream. The engine behind it is still simulated: this app installs nothing."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "soulcaster-app"
+path = "src/main.rs"
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826" }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826" }
+serde.workspace = true
+serde_json.workspace = true
+soulcaster-core.workspace = true
