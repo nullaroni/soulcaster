@@ -1,0 +1,450 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nullaroni/soulcaster/prototype/item-lifecycle/docs/prototypes/item-lifecycle/recipe.schema.json",
+  "title": "Soulcaster Catalog recipes (prototype)",
+  "description": "A recipe is data that selects from a closed set of operations built into the signed engine. Nothing here can name a program to run, pass arguments, or set environment variables. Patterns avoid lookahead so that the Rust regex crate can use them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "recipes"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "recipes": { "type": "array", "items": { "$ref": "#/$defs/recipe" } }
+  },
+  "$defs": {
+    "recipe": {
+      "oneOf": [
+        { "$ref": "#/$defs/installRecipe" },
+        { "$ref": "#/$defs/settingRecipe" },
+        { "$ref": "#/$defs/machineValuesRecipe" }
+      ]
+    },
+
+    "itemId": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "settingId": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)+$" },
+    "anyId": { "anyOf": [{ "$ref": "#/$defs/itemId" }, { "$ref": "#/$defs/settingId" }] },
+    "text": { "type": "string", "minLength": 1, "maxLength": 240, "pattern": "^[^\\x00-\\x1f\\x7f]+$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "teamId": { "type": "string", "pattern": "^[A-Z0-9]{10}$" },
+    "version": { "type": "string", "pattern": "^[0-9A-Za-z][0-9A-Za-z.+_-]*$" },
+    "macOSVersion": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)*$" },
+    "url": {
+      "description": "HTTPS only, with a fixed path and no query string, so nothing about a download can vary at run time.",
+      "type": "string",
+      "pattern": "^https://[a-z0-9.-]+(/[A-Za-z0-9._~+-]+)+$"
+    },
+    "personLink": {
+      "description": "A link shown to a person. Never opened without them.",
+      "type": "string",
+      "pattern": "^(https://[a-z0-9.-]+(/[A-Za-z0-9._~+-]*)*|macappstore://apps\\.apple\\.com/app/id[0-9]+|x-apple\\.systempreferences:com\\.apple\\.settings\\.PrivacySecurity\\.extension(\\?Privacy_[A-Za-z]+)?)$"
+    },
+    "brewName": {
+      "description": "A bare name always means official Homebrew. Third-party names are owner/tap/name, which trusts only that one formula or cask. Same grammar as packages in the Config draft.",
+      "type": "string",
+      "pattern": "^([a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._+@-]*$",
+      "not": { "pattern": "^homebrew/" }
+    },
+    "thirdPartyBrewName": { "type": "string", "pattern": "^[^/]+/[^/]+/[^/]+$" },
+    "machinePath": {
+      "description": "A location the engine may read. Segments can't begin with two dots, and the roots are fixed.",
+      "type": "string",
+      "pattern": "^(~|/opt/homebrew|/Applications|/Library/Developer/CommandLineTools)(/\\.?[A-Za-z0-9_+@{}-][A-Za-z0-9._+@{} -]*)+$"
+    },
+    "relativePath": {
+      "type": "string",
+      "pattern": "^\\.?[A-Za-z0-9_+@-][A-Za-z0-9._+@-]*(/\\.?[A-Za-z0-9_+@-][A-Za-z0-9._+@-]*)*$"
+    },
+
+    "probe": {
+      "description": "Read-only checks. Each answers pass, fail or unknown. Only tool-version runs a third-party program, and only one the Item itself installed.",
+      "oneOf": [
+        { "$ref": "#/$defs/probeBrewFormula" },
+        { "$ref": "#/$defs/probeBrewCask" },
+        { "$ref": "#/$defs/probeAppBundle" },
+        { "$ref": "#/$defs/probePkgReceipt" },
+        { "$ref": "#/$defs/probeFile" },
+        { "$ref": "#/$defs/probeManagedTool" },
+        { "$ref": "#/$defs/probeToolVersion" },
+        { "$ref": "#/$defs/probeBuiltin" },
+        { "$ref": "#/$defs/probeUnknowable" }
+      ]
+    },
+    "probeBrewFormula": {
+      "description": "Read from Cellar and INSTALL_RECEIPT.json without running brew, so a check never loads tap code.",
+      "type": "object", "additionalProperties": false, "required": ["type", "name"],
+      "properties": { "type": { "const": "brew-formula" }, "name": { "$ref": "#/$defs/brewName" } }
+    },
+    "probeBrewCask": {
+      "description": "Read from Caskroom without running brew.",
+      "type": "object", "additionalProperties": false, "required": ["type", "name"],
+      "properties": { "type": { "const": "brew-cask" }, "name": { "$ref": "#/$defs/brewName" } }
+    },
+    "probeAppBundle": {
+      "description": "Reads Info.plist at a fixed path. Spotlight isn't reliable on a new Mac.",
+      "type": "object", "additionalProperties": false, "required": ["type", "bundleId", "path"],
+      "properties": {
+        "type": { "const": "app-bundle" },
+        "bundleId": { "type": "string", "pattern": "^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$" },
+        "path": { "$ref": "#/$defs/machinePath" }
+      }
+    },
+    "probePkgReceipt": {
+      "type": "object", "additionalProperties": false, "required": ["type", "pkgId"],
+      "properties": { "type": { "const": "pkg-receipt" }, "pkgId": { "type": "string", "pattern": "^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$" } }
+    },
+    "probeFile": {
+      "description": "{setting.id} in the path is replaced with that setting's validated value. whenSetting limits the check to when a boolean setting is true.",
+      "type": "object", "additionalProperties": false, "required": ["type", "path"],
+      "properties": {
+        "type": { "const": "file" },
+        "path": { "$ref": "#/$defs/machinePath" },
+        "whenSetting": { "$ref": "#/$defs/settingId" }
+      }
+    },
+    "probeManagedTool": {
+      "description": "A file inside the engine's own tools folder for this tool and version.",
+      "type": "object", "additionalProperties": false, "required": ["type", "tool", "version", "file"],
+      "properties": {
+        "type": { "const": "managed-tool" },
+        "tool": { "$ref": "#/$defs/itemId" },
+        "version": { "$ref": "#/$defs/version" },
+        "file": { "$ref": "#/$defs/relativePath" }
+      }
+    },
+    "probeToolVersion": {
+      "description": "Runs an installed binary with one fixed flag and no shell, and checks that it exits 0 within the time limit. Used for tools that can expire or break after install.",
+      "type": "object", "additionalProperties": false, "required": ["type", "path", "flag"],
+      "properties": {
+        "type": { "const": "tool-version" },
+        "path": { "$ref": "#/$defs/machinePath" },
+        "flag": { "enum": ["--version", "-version", "version"] }
+      }
+    },
+    "probeBuiltin": {
+      "type": "object", "additionalProperties": false, "required": ["type", "name"],
+      "properties": {
+        "type": { "const": "builtin" },
+        "name": { "enum": ["command-line-tools", "homebrew", "gh-handed-off", "github-signed-in", "xcode-ready"] }
+      }
+    },
+    "probeUnknowable": {
+      "description": "Always answers unknown. Says plainly that the engine can't check this, and why.",
+      "type": "object", "additionalProperties": false, "required": ["type", "reason"],
+      "properties": { "type": { "const": "unknowable" }, "reason": { "$ref": "#/$defs/text" } }
+    },
+
+    "fact": {
+      "description": "Reported but never gates the Item, creates Drift or adds to the queue.",
+      "type": "object", "additionalProperties": false, "required": ["id", "label", "probe"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "label": { "$ref": "#/$defs/text" },
+        "probe": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "conflict": {
+      "description": "If this probe passes, nothing is installed and the Item goes to the Needs-You Queue.",
+      "type": "object", "additionalProperties": false, "required": ["probe", "message"],
+      "properties": { "probe": { "$ref": "#/$defs/probe" }, "message": { "$ref": "#/$defs/text" } }
+    },
+
+    "step": {
+      "description": "The closed set of operations. Each is implemented in the engine, and any process it starts has a fixed program, argv and environment.",
+      "oneOf": [
+        { "$ref": "#/$defs/stepBrewFormula" },
+        { "$ref": "#/$defs/stepBrewCask" },
+        { "$ref": "#/$defs/stepDownload" },
+        { "$ref": "#/$defs/stepPkgInstall" },
+        { "$ref": "#/$defs/stepSdkmanager" },
+        { "$ref": "#/$defs/stepAcceptLicense" },
+        { "$ref": "#/$defs/stepNeedsYou" },
+        { "$ref": "#/$defs/stepBuiltin" }
+      ]
+    },
+    "stepBrewFormula": {
+      "description": "brew install <name>. Never privileged: it always runs with HOMEBREW_NO_SUDO=1 and no SUDO_ASKPASS.",
+      "type": "object", "additionalProperties": false, "required": ["type", "name"],
+      "properties": {
+        "type": { "const": "brew-formula" },
+        "name": { "$ref": "#/$defs/brewName" },
+        "unless": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "stepBrewCask": {
+      "description": "brew install --cask <name>. admin is the Catalog's expectation, and the engine also reads official casks' metadata when planning. A third-party cask can never be admin.",
+      "type": "object", "additionalProperties": false, "required": ["type", "name"],
+      "properties": {
+        "type": { "const": "brew-cask" },
+        "name": { "$ref": "#/$defs/brewName" },
+        "admin": { "type": "boolean" },
+        "unless": { "$ref": "#/$defs/probe" }
+      },
+      "if": { "properties": { "name": { "$ref": "#/$defs/thirdPartyBrewName" } }, "required": ["name"] },
+      "then": { "properties": { "admin": { "const": false } } }
+    },
+    "stepDownload": {
+      "description": "Fetch, check SHA-256, extract with the matching tool, check the signature, then atomically move into the engine's tools folder. The checksum, signer and version are required. A recipe can't choose the destination.",
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "tool", "version", "url", "sha256", "archive", "signedBy", "signedFile", "links"],
+      "properties": {
+        "type": { "const": "download" },
+        "tool": { "$ref": "#/$defs/itemId" },
+        "version": { "$ref": "#/$defs/version" },
+        "url": { "$ref": "#/$defs/url" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "archive": { "enum": ["zip", "tar.gz"] },
+        "signedBy": { "$ref": "#/$defs/teamId" },
+        "signedFile": { "$ref": "#/$defs/relativePath" },
+        "links": {
+          "description": "Symlinks in ~/.local/bin that point into the tool's folder.",
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "target"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+              "target": { "$ref": "#/$defs/relativePath" }
+            }
+          }
+        },
+        "unless": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "stepPkgInstall": {
+      "description": "Fetch, check SHA-256 and the installer signature, then run /usr/sbin/installer under sudo -A. Always admin, so it always runs in the Admin Stage.",
+      "type": "object", "additionalProperties": false, "required": ["type", "url", "sha256", "signedBy"],
+      "properties": {
+        "type": { "const": "pkg-install" },
+        "url": { "$ref": "#/$defs/url" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "signedBy": { "$ref": "#/$defs/teamId" },
+        "unless": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "stepSdkmanager": {
+      "description": "Runs the sdkmanager from the android-commandlinetools cask with a fixed SDK root and JAVA_HOME, and stdin at /dev/null.",
+      "type": "object", "additionalProperties": false, "required": ["type", "packages"],
+      "properties": {
+        "type": { "const": "sdkmanager" },
+        "packages": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sdkPackage" } },
+        "unless": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "sdkPackage": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["literal"],
+          "properties": {
+            "literal": { "type": "string", "pattern": "^[a-z0-9.-]+(;[a-z0-9.-]+)*$" },
+            "whenSetting": { "$ref": "#/$defs/settingId" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["template", "setting"],
+          "properties": {
+            "template": { "type": "string", "pattern": "^[a-z0-9.-]+(;[a-z0-9.-]*)*\\{\\}$" },
+            "setting": { "$ref": "#/$defs/settingId" }
+          }
+        }
+      ]
+    },
+    "stepAcceptLicense": {
+      "description": "Waits for a person to accept in the Needs-You Queue, records that on the Machine, then performs the built-in acceptance for that license. A Config can never accept for someone.",
+      "type": "object", "additionalProperties": false, "required": ["type", "id", "license", "text"],
+      "properties": {
+        "type": { "const": "accept-license" },
+        "id": { "$ref": "#/$defs/itemId" },
+        "license": { "enum": ["android-sdk", "xcode"] },
+        "text": { "$ref": "#/$defs/text" },
+        "link": { "$ref": "#/$defs/personLink" },
+        "admin": { "type": "boolean" },
+        "unless": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "stepNeedsYou": {
+      "description": "Something only a person can do. Later steps wait, and other Items carry on. The person either says it's done (confirm), or the engine checks (until).",
+      "type": "object", "additionalProperties": false, "required": ["type", "id", "text", "completion"],
+      "properties": {
+        "type": { "const": "needs-you" },
+        "id": { "$ref": "#/$defs/itemId" },
+        "text": { "$ref": "#/$defs/text" },
+        "link": { "$ref": "#/$defs/personLink" },
+        "completion": {
+          "oneOf": [
+            {
+              "type": "object", "additionalProperties": false, "required": ["confirm"],
+              "properties": { "confirm": { "const": true } }
+            },
+            {
+              "type": "object", "additionalProperties": false, "required": ["until"],
+              "properties": { "until": { "$ref": "#/$defs/probe" } }
+            }
+          ]
+        },
+        "unless": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "stepBuiltin": {
+      "description": "Sequences too specific to generalize. Adding a name needs an engine release, not just a Catalog change.",
+      "type": "object", "additionalProperties": false, "required": ["type", "name"],
+      "properties": {
+        "type": { "const": "builtin" },
+        "name": { "enum": ["command-line-tools", "gh-hand-off", "xcode-first-launch"] },
+        "admin": { "type": "boolean" },
+        "unless": { "$ref": "#/$defs/probe" }
+      }
+    },
+
+    "installRecipe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "title", "checks", "steps"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "kind": { "enum": ["app", "cli"] },
+        "title": { "$ref": "#/$defs/text" },
+        "base": { "description": "Always installed, never selected.", "const": true },
+        "requires": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/anyId" } },
+        "minMacOS": { "$ref": "#/$defs/macOSVersion" },
+        "conflicts": { "type": "array", "items": { "$ref": "#/$defs/conflict" } },
+        "checks": {
+          "description": "The Item's read path, used for detect, verify and Drift. An Item with no read path can't be accepted.",
+          "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/probe" }
+        },
+        "facts": { "type": "array", "items": { "$ref": "#/$defs/fact" } },
+        "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } },
+        "notes": {
+          "description": "Shown in the final report. Unlike a needs-you step, they don't leave the Item unfinished.",
+          "type": "array", "items": { "$ref": "#/$defs/text" }
+        },
+        "bootstrap": {
+          "description": "How the engine gets this tool before Homebrew exists. Only gh uses it, and only a base Item can.",
+          "type": "object", "additionalProperties": false,
+          "required": ["version", "url", "sha256", "signedBy", "binary"],
+          "properties": {
+            "version": { "$ref": "#/$defs/version" },
+            "url": { "$ref": "#/$defs/url" },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "signedBy": { "$ref": "#/$defs/teamId" },
+            "binary": { "$ref": "#/$defs/relativePath" }
+          }
+        }
+      },
+      "dependentRequired": { "bootstrap": ["base"] }
+    },
+
+    "settingRecipe": {
+      "description": "A setting has a read and write path instead of steps. stores names where the value lives, and appliedBy names an install recipe that applies it.",
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "title", "valueType", "evidence"],
+      "oneOf": [{ "required": ["stores"] }, { "required": ["appliedBy"] }],
+      "properties": {
+        "id": { "$ref": "#/$defs/settingId" },
+        "kind": { "const": "setting" },
+        "title": { "$ref": "#/$defs/text" },
+        "valueType": { "enum": ["boolean", "integer", "string", "string-list"] },
+        "values": {
+          "description": "The readable values a Config may use. A store's encode maps them to what macOS holds.",
+          "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }
+        },
+        "pattern": { "type": "string", "maxLength": 120 },
+        "unsetMeans": {
+          "description": "The value an unset key behaves as. Without this, an unset key can't be compared, so a Drift check says unknown. A Run still writes the value the Config asks for.",
+          "type": ["boolean", "integer", "string"]
+        },
+        "requires": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/anyId" } },
+        "stores": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/store" } },
+        "appliedBy": { "$ref": "#/$defs/itemId" },
+        "effect": {
+          "description": "What must happen before the value takes effect. Restarts are batched and the setting is verified after them. The list is closed: cfprefsd isn't on it.",
+          "enum": [
+            "none",
+            "restart-dock",
+            "restart-finder",
+            "restart-systemuiserver",
+            "restart-controlcenter",
+            "restart-affected-apps",
+            "log-out"
+          ]
+        },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "notes": { "type": "array", "items": { "$ref": "#/$defs/text" } }
+      }
+    },
+    "evidence": {
+      "description": "group comes from the settings research. confirmedOn lists macOS versions where a toggle-and-diff test proved the key still works. It starts empty, and only a Catalog release can add to it.",
+      "type": "object", "additionalProperties": false, "required": ["group", "confirmedOn"],
+      "properties": {
+        "group": { "enum": ["documented", "probable", "unconfirmed", "broken"] },
+        "confirmedOn": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/macOSVersion" } }
+      }
+    },
+    "store": { "oneOf": [{ "$ref": "#/$defs/defaultsStore" }, { "$ref": "#/$defs/gitStore" }] },
+    "defaultsStore": {
+      "description": "Read and written through CFPreferences. The domain list is closed, so a recipe can't reach login hooks or security settings. com.apple.spaces is left out because of the WindowServer warning in the settings research.",
+      "type": "object", "additionalProperties": false, "required": ["type", "domain", "key", "storedType"],
+      "properties": {
+        "type": { "const": "defaults" },
+        "domain": {
+          "enum": [
+            "NSGlobalDomain",
+            "com.apple.dock",
+            "com.apple.finder",
+            "com.apple.AppleMultitouchTrackpad",
+            "com.apple.driver.AppleBluetoothMultitouch.trackpad",
+            "com.apple.screencapture",
+            "com.apple.menuextra.clock",
+            "com.apple.systemuiserver",
+            "com.apple.controlcenter",
+            "com.apple.Spotlight",
+            "com.apple.WindowManager",
+            "com.apple.desktopservices",
+            "com.apple.HIToolbox"
+          ]
+        },
+        "key": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9._ -]*$" },
+        "storedType": { "enum": ["bool", "int", "float", "string", "string-array", "dict"] },
+        "hostScope": { "enum": ["any", "current"] },
+        "encode": { "type": "object", "additionalProperties": { "type": ["string", "integer", "boolean"] } }
+      }
+    },
+    "gitStore": {
+      "description": "git config --global. The keys are a closed list because other keys run programs, such as core.sshCommand, core.pager, core.hooksPath, core.fsmonitor, credential.helper and alias.*.",
+      "type": "object", "additionalProperties": false, "required": ["type", "key"],
+      "properties": {
+        "type": { "const": "git-config" },
+        "key": {
+          "enum": [
+            "user.name",
+            "user.email",
+            "init.defaultBranch",
+            "core.excludesfile",
+            "rerere.enabled",
+            "push.autoSetupRemote",
+            "pull.rebase"
+          ]
+        }
+      }
+    },
+
+    "machineValuesRecipe": {
+      "description": "Values that are personal to the Machine. They live in the Machine Record, never in the Catalog or a Config. A missing value sends the Item to the Needs-You Queue.",
+      "type": "object", "additionalProperties": false, "required": ["id", "kind", "title", "values"],
+      "properties": {
+        "id": { "$ref": "#/$defs/itemId" },
+        "kind": { "const": "machine-values" },
+        "title": { "$ref": "#/$defs/text" },
+        "requires": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/anyId" } },
+        "values": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "label", "store"],
+            "properties": {
+              "name": { "$ref": "#/$defs/settingId" },
+              "label": { "$ref": "#/$defs/text" },
+              "store": { "$ref": "#/$defs/gitStore" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
