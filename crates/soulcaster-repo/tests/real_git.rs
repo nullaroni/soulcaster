@@ -15,7 +15,7 @@ use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
 use soulcaster_core::plan::DotfilesPlan;
 use soulcaster_repo::dotfiles::{DotfilesError, DotfilesStep, LinkOutcome, UserStage};
 use soulcaster_repo::fake::{FakeGitHub, FileApprovals, RepoShape};
-use soulcaster_repo::process::ProcessRunner;
+use soulcaster_repo::process::runner;
 use soulcaster_repo::save::{CONFIG_REPO_NAME, SaveOutcome, SaveRequest, save};
 use soulcaster_repo::tools::Tools;
 
@@ -23,7 +23,7 @@ const GIT: &str = "/usr/bin/git";
 
 /// Plain commands for building the test's own repos.
 fn sh(cwd: &Path, args: &[&str]) -> String {
-    let out = ProcessRunner
+    let out = runner()
         .run(
             &Command::new(GIT)
                 .args(args.iter().copied())
@@ -78,7 +78,7 @@ impl CommandRunner for LocalServer {
                 *value = "file".to_string();
             }
         }
-        let mut output = ProcessRunner.run(&real, on_line)?;
+        let mut output = runner().run(&real, on_line)?;
         // The repo on disk names the local path, and the code under test asks which repo it is.
         if command.args.iter().any(|a| a == "--get") {
             output.stdout = format!("{}\n", self.from).into_bytes();

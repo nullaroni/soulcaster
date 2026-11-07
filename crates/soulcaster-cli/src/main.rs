@@ -11,7 +11,7 @@ use soulcaster_core::catalog::Catalog;
 use soulcaster_core::config::Config;
 use soulcaster_core::lifecycle::Stage;
 use soulcaster_core::plan::{NeedKind, Plan, Why};
-use soulcaster_repo::process::ProcessRunner;
+use soulcaster_repo::process::runner;
 use soulcaster_repo::tools::Tools;
 
 use crate::repo_commands::{Done, ImportArgs, SaveArgs};
@@ -85,7 +85,7 @@ fn import(rest: &[&str]) -> ExitCode {
         return refuse_usage();
     };
     finish(repo_commands::import(
-        &ProcessRunner,
+        &runner(),
         &tools,
         Catalog::shipped(),
         &ImportArgs {
@@ -106,7 +106,7 @@ fn save(rest: &[&str]) -> ExitCode {
         return refuse_usage();
     };
     finish(repo_commands::save_config(
-        &ProcessRunner,
+        &runner(),
         &tools,
         Catalog::shipped(),
         &SaveArgs { path, repo },

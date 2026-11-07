@@ -825,8 +825,9 @@ fn review(page_data: &ReviewPage, k: &Kit) -> El {
             "to install"
         },
         review.settings.len(),
+        // A warned page's actions leave less room, and this line can't afford to be cut off.
         if warned {
-            "settings could change"
+            "settings"
         } else {
             "settings to change"
         },

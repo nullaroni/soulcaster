@@ -3202,6 +3202,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "soulcaster-engine"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "soulcaster-core",
+]
+
+[[package]]
 name = "soulcaster-repo"
 version = "0.1.0"
 dependencies = [
@@ -3211,6 +3221,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soulcaster-core",
+ "soulcaster-engine",
  "tempfile",
 ]
 
