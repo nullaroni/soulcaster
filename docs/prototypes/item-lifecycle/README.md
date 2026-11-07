@@ -317,6 +317,7 @@ The parent's recommendation is adopted: give the helper only to the steps that n
 | `lastApplied[entryKey]` | Keyed with the draft's spellings: Item ID after renames, `formula:<name>` after aliases, `cask:<name>`, setting ID, link location. A package that later gains an Item migrates to the Item's key at read time. Holds the value, `appliedAt`, Run ID, Catalog version, macOS version, assurance and `priorValue`. **Updated only after a verify passes.** `priorValue` is captured before the first write and kept. |
 | `approvals` | The draft's keys: `owner/tap`, `owner/tap/name`, and for the `dotfiles` block the repo plus commit SHA, with whether its script is approved. The engine never pulls past that commit without a new preview. |
 | `unavailable{}` | Per entry, or per tile in a list setting: the reason it can't apply here. It can suppress an entry but never add or change one. |
+| `unknownAtReview[]` | IDs shown as unknown when this Config was last reviewed. One that later resolves is held for review as a new selection, not installed. |
 | `localValues` | Git identity and any other Catalog-declared values. Never logged. |
 | `queue[]` | Item, step ID, kind, opened and finished times, and who finished it. |
 | `accepted[]` | License and time. |
