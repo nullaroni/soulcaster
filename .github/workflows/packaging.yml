@@ -1,0 +1,71 @@
+name: Packaging
+
+# The packaging proof. Only for changes that could break the bundle or the installer, because a
+# release build takes minutes that most pull requests don't need to spend.
+on:
+  pull_request:
+    paths:
+      - install.sh
+      - packaging/**
+      - .github/workflows/packaging.yml
+      - .github/workflows/release.yml
+      - Cargo.toml
+      - Cargo.lock
+      - app/Cargo.toml
+      - app/assets/**
+      - crates/soulcaster-cli/Cargo.toml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: shellcheck --version
+      - run: shellcheck install.sh packaging/*.sh
+
+  bundle:
+    name: bundle, signature, installer
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: packaging-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: packaging-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build, ad-hoc sign and check the bundle
+        run: packaging/build-app.sh
+
+      - name: Make the archive and verify it round trips
+        run: packaging/archive-app.sh target/package/Soulcaster.app target/package/dist
+
+      - name: Test the installer in a sandbox
+        run: /bin/bash packaging/test-install.sh
