@@ -1,0 +1,125 @@
+name: Release
+
+# Runs when a v* tag is pushed. docs/releasing.md has the secrets and the steps.
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build, test, package
+    runs-on: macos-15
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      notarized: ${{ steps.apple.outputs.notarized }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version
+
+      - name: The tag must match the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          expected="v$(packaging/version.sh)"
+          if [ "$TAG" != "$expected" ]; then
+            echo "::error::The tag is $TAG, but Cargo.toml says $expected"
+            exit 1
+          fi
+
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+      - name: Build the app, ad-hoc signed
+        run: packaging/build-app.sh
+
+      # Yields only true or false. All or none: half a set of secrets is a mistake, not a choice.
+      - name: Check for the Apple secrets
+        id: apple
+        env:
+          HAS_ALL: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_NOTARY_KEY_P8_BASE64 != '' && secrets.APPLE_NOTARY_KEY_ID != '' && secrets.APPLE_NOTARY_ISSUER_ID != '' }}
+          HAS_ANY: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' || secrets.APPLE_CERTIFICATE_PASSWORD != '' || secrets.APPLE_NOTARY_KEY_P8_BASE64 != '' || secrets.APPLE_NOTARY_KEY_ID != '' || secrets.APPLE_NOTARY_ISSUER_ID != '' }}
+        run: |
+          if [ "$HAS_ALL" = "true" ]; then
+            echo "notarized=true" >>"$GITHUB_OUTPUT"
+          elif [ "$HAS_ANY" = "true" ]; then
+            echo "::error::Some Apple secrets are set and some aren't. See docs/releasing.md."
+            exit 1
+          else
+            echo "No Apple secrets: this will be an ad-hoc signed prerelease, not notarized."
+            echo "notarized=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign with Developer ID, notarize and staple
+        if: steps.apple.outputs.notarized == 'true'
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: packaging/notarize-app.sh target/package/Soulcaster.app
+
+      - name: Make the archive and checksum
+        run: packaging/archive-app.sh target/package/Soulcaster.app target/package/dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: target/package/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Separate so that the only job that can write to the repo runs no project code and sees no secrets.
+  publish:
+    name: Publish the GitHub release
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+
+      # A prerelease is never what releases/latest points to, so the installer can't reach one.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          NOTARIZED: ${{ needs.package.outputs.notarized }}
+        run: |
+          if [ "$NOTARIZED" = "true" ]; then
+            kind=(--latest)
+            title="Soulcaster $TAG"
+            notes="Signed with Developer ID and notarized by Apple. Install it with:
+
+          \`\`\`sh
+          /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/nullaroni/soulcaster/main/install.sh)\"
+          \`\`\`"
+          else
+            kind=(--prerelease)
+            title="Soulcaster $TAG (not notarized)"
+            notes="**Not notarized and not signed with Developer ID.** This build is ad-hoc signed because the release ran without the Apple secrets. The installer refuses it and macOS will block it when downloaded in a browser. It exists for testing. To run Soulcaster, build it from source: see the README."
+          fi
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "$title" --notes "$notes" "${kind[@]}"
