@@ -152,6 +152,10 @@ fn import_and_save_refuse_bad_usage() {
         &["save"][..],
         &["save", "x.json", "--repo"][..],
     ] {
-        assert_eq!(in_sandbox(home.path(), args).status.code(), Some(2), "{args:?}");
+        assert_eq!(
+            in_sandbox(home.path(), args).status.code(),
+            Some(2),
+            "{args:?}"
+        );
     }
 }

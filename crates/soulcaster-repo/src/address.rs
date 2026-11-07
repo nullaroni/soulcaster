@@ -46,7 +46,9 @@ impl std::error::Error for AddressError {}
 fn is_owner(text: &str) -> bool {
     let bytes = text.as_bytes();
     (1..=39).contains(&bytes.len())
-        && bytes.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
         && bytes[0] != b'-'
         && bytes[bytes.len() - 1] != b'-'
 }
@@ -144,9 +146,9 @@ impl GitRef {
 fn is_safe_segment(segment: &str) -> bool {
     !segment.is_empty()
         && segment.len() <= 128
-        && segment
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'+' | b'@' | b'~'))
+        && segment.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'+' | b'@' | b'~')
+        })
         && !segment.starts_with('-')
         && segment != "."
         && segment != ".."
@@ -202,7 +204,9 @@ impl ImportTarget {
         if text.contains("::") {
             return Err(AddressError::NotHttps);
         }
-        let url = lower.strip_prefix("https://").map(|_| &text["https://".len()..]);
+        let url = lower
+            .strip_prefix("https://")
+            .map(|_| &text["https://".len()..]);
         let looks_like_host = text
             .split('/')
             .next()
@@ -269,7 +273,10 @@ impl DotfilesSource {
             return None;
         }
         let lower = repo.to_ascii_lowercase();
-        let Some(rest) = lower.strip_prefix("https://").map(|_| &repo["https://".len()..]) else {
+        let Some(rest) = lower
+            .strip_prefix("https://")
+            .map(|_| &repo["https://".len()..])
+        else {
             if repo.contains("://") {
                 return None;
             }

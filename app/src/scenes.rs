@@ -6,7 +6,7 @@ use soulcaster_core::lifecycle::ItemState;
 use soulcaster_repo::address::ConfigPath;
 use soulcaster_repo::review::Tick;
 
-use crate::repo_flow::{DotfilesPhase, RepoFlow};
+use crate::repo_flow::DotfilesPhase;
 use crate::sim::{Scenario, SimEngine, SimMachine};
 use crate::state::{App, GithubState, PasswordState, Screen};
 
@@ -172,6 +172,6 @@ pub const SCENES: &[Scene] = &[
     }),
     ("dotfiles-rewritten", |a| {
         a.screen = Screen::Dotfiles;
-        a.repo.dotfiles = DotfilesPhase::Rewritten(RepoFlow::own_newer());
+        a.repo.dotfiles = DotfilesPhase::Rewritten;
     }),
 ];

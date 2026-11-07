@@ -179,7 +179,11 @@ fn nav_action(app: &App, to: Screen, words: &str, unavailable: bool) -> El {
             .key(key)
             .px(2.0)
             .help("Only one thing can change this Mac at a time.")
-            .child(text(words.to_string()).font(kit::ui_style()).color(kit::dim()));
+            .child(
+                text(words.to_string())
+                    .font(kit::ui_style())
+                    .color(kit::dim()),
+            );
     }
     kit::action(key, words, app.screen == to, move |app: &mut App, _| {
         app.screen = if app.screen != to {

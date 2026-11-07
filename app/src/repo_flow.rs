@@ -4,8 +4,6 @@
 //! Wiring a real runner, the real home and the Machine Record is the wiring ticket's one change here,
 //! in [`RepoSim`], along with moving these calls off the window's thread.
 
-use std::path::PathBuf;
-
 use rune::TextEdit;
 use soulcaster_core::approval::{ApprovalStore, Approvals, CommitSha, DotfilesApproval};
 use soulcaster_core::command::Reply;
@@ -13,9 +11,7 @@ use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
 use soulcaster_core::plan::DotfilesPlan;
 use soulcaster_repo::address::ConfigPath;
 use soulcaster_repo::copies::keep_import;
-use soulcaster_repo::dotfiles::{
-    DotfilesStep, LinkReport, MovePreview, MoveStanding, UserStage, standing,
-};
+use soulcaster_repo::dotfiles::{DotfilesStep, LinkReport, MovePreview, UserStage};
 use soulcaster_repo::fake::{FakeGitHub, FileApprovals, RepoShape};
 use soulcaster_repo::import::{ImportError, Importer, Opened, Picker, Refusal};
 use soulcaster_repo::review::{Boxes, Review, Tick};
@@ -24,7 +20,6 @@ use soulcaster_repo::tools::Tools;
 
 use crate::catalog_view::view;
 use crate::state::{App, Screen};
-
 
 /// What's on the Import screen.
 pub enum ImportPhase {
@@ -52,7 +47,7 @@ pub enum DotfilesPhase {
     Applied(LinkReport),
     Failed(String),
     Behind(MovePreview),
-    Rewritten(CommitSha),
+    Rewritten,
 }
 
 pub struct RepoFlow {
@@ -87,7 +82,8 @@ const OWN_NEWER: &str = "88bb123000000000000000000000000000000000";
 /// The outside world, simulated. Everything it writes is under `dir`, a temporary folder removed
 /// when the window closes.
 pub struct RepoSim {
-    pub dir: tempfile::TempDir,
+    /// Held so the folder lasts as long as the window.
+    _dir: tempfile::TempDir,
     pub github: FakeGitHub,
     pub tools: Tools,
     pub store: FileApprovals,
@@ -103,7 +99,7 @@ impl RepoSim {
             github: seeded_github(),
             tools,
             store,
-            dir,
+            _dir: dir,
         }
     }
 
@@ -142,9 +138,12 @@ impl RepoSim {
         std::fs::create_dir_all(clone.join(".git")).expect("a test folder");
         std::fs::write(home.join(".zshrc"), "# what was here before\n").expect("a test file");
         std::fs::create_dir_all(home.join("Documents")).expect("a test folder");
+        self.github.on_git(
+            "--get",
+            Reply::ok("https://github.com/example-you/dotfiles.git\n"),
+        );
         self.github
-            .on_git("--get", Reply::ok("https://github.com/example-you/dotfiles.git\n"));
-        self.github.on_git("rev-parse", Reply::ok(format!("{OWN_DOTS}\n")));
+            .on_git("rev-parse", Reply::ok(format!("{OWN_DOTS}\n")));
         self.github.on_git(
             "diff",
             Reply::ok(
@@ -170,8 +169,18 @@ fn seeded_github() -> FakeGitHub {
         };
     }
     repo("example-dev", "mac-setup");
-    file("example-dev", "mac-setup", "configs/laptop.json", sample!("clean.json"));
-    file("example-dev", "mac-setup", "configs/mobile.json", sample!("one-tap.json"));
+    file(
+        "example-dev",
+        "mac-setup",
+        "configs/laptop.json",
+        sample!("clean.json"),
+    );
+    file(
+        "example-dev",
+        "mac-setup",
+        "configs/mobile.json",
+        sample!("one-tap.json"),
+    );
     file(
         "example-dev",
         "mac-setup",
@@ -179,7 +188,12 @@ fn seeded_github() -> FakeGitHub {
         sample!("refused-self-approval.json"),
     );
     repo("example-dev", "one-config");
-    file("example-dev", "one-config", "configs/mobile.json", sample!("one-tap.json"));
+    file(
+        "example-dev",
+        "one-config",
+        "configs/mobile.json",
+        sample!("one-tap.json"),
+    );
     repo("example-stranger", "setup");
     file(
         "example-stranger",
@@ -200,8 +214,17 @@ fn seeded_github() -> FakeGitHub {
         b"#!/bin/sh\n# script/setup\nset -e\nbrew bundle --file=./Brewfile\nmkdir -p ~/.config\ncurl -fsSL https://example.invalid/theme.tar.gz | tar -xz -C ~/.config\n./script/lib/post-install.sh\n",
     );
     repo("example-you", "setup");
-    file("example-you", "setup", "configs/other-mac.json", sample!("own-dotfiles.json"));
-    gh.add_repo("example-you", "dotfiles", RepoShape::public("main", OWN_DOTS));
+    file(
+        "example-you",
+        "setup",
+        "configs/other-mac.json",
+        sample!("own-dotfiles.json"),
+    );
+    gh.add_repo(
+        "example-you",
+        "dotfiles",
+        RepoShape::public("main", OWN_DOTS),
+    );
     gh.add_file(
         "example-you",
         "dotfiles",
@@ -217,13 +240,33 @@ fn seeded_github() -> FakeGitHub {
         sample!("hostile.json"),
     );
     repo("example-dev", "odd-config");
-    file("example-dev", "odd-config", "configs/x.json", sample!("refused-bidi.json"));
+    file(
+        "example-dev",
+        "odd-config",
+        "configs/x.json",
+        sample!("refused-bidi.json"),
+    );
     repo("evil-tools", "preapproved");
-    file("evil-tools", "preapproved", "configs/x.json", sample!("refused-self-approval.json"));
+    file(
+        "evil-tools",
+        "preapproved",
+        "configs/x.json",
+        sample!("refused-self-approval.json"),
+    );
     repo("evil-tools", "two-answers");
-    file("evil-tools", "two-answers", "configs/x.json", sample!("refused-duplicate-key.json"));
+    file(
+        "evil-tools",
+        "two-answers",
+        "configs/x.json",
+        sample!("refused-duplicate-key.json"),
+    );
     repo("example-dev", "future");
-    file("example-dev", "future", "configs/x.json", sample!("refused-newer-version.json"));
+    file(
+        "example-dev",
+        "future",
+        "configs/x.json",
+        sample!("refused-newer-version.json"),
+    );
     gh.on_git("rev-parse", Reply::ok(format!("{SHA}\n")));
     gh
 }
@@ -257,11 +300,6 @@ impl RepoFlow {
         }
     }
 
-    pub fn dotfiles_standing(&self, head: &CommitSha, ancestor: bool) -> MoveStanding {
-        let approvals = self.sim.store.read().unwrap_or_default();
-        standing(&approvals, &Self::dotfiles_plan(), head, ancestor, None)
-    }
-
     pub fn own_dots() -> CommitSha {
         CommitSha::parse(OWN_DOTS).expect("a fixed commit")
     }
@@ -287,7 +325,7 @@ impl RepoFlow {
 
 impl App {
     pub fn read_paste(&mut self) {
-        let paste = self.repo.paste.text().to_string();
+        let paste = self.repo.paste.text.clone();
         let opened = self.repo.sim.importer().open(&paste);
         self.repo.import = match opened {
             Ok(Opened::One(fetched)) => self.review_page(&fetched),
@@ -398,8 +436,13 @@ impl App {
         self.selected = run.config.items.iter().cloned().collect();
         self.settings = run.config.settings.clone();
         self.packages = run.config.packages.formulae.iter().cloned().collect();
-        self.packages
-            .extend(run.config.packages.casks.iter().map(|c| format!("cask:{c}")));
+        self.packages.extend(
+            run.config
+                .packages
+                .casks
+                .iter()
+                .map(|c| format!("cask:{c}")),
+        );
         self.answers.taps = run.taps.iter().cloned().collect();
         self.answers.licenses = run.licenses.clone();
         self.rebuild_rows();
@@ -469,7 +512,10 @@ impl App {
             return;
         };
         let preview = preview.clone();
-        self.repo.sim.github.on_git("rev-parse", Reply::ok(format!("{OWN_NEWER}\n")));
+        self.repo
+            .sim
+            .github
+            .on_git("rev-parse", Reply::ok(format!("{OWN_NEWER}\n")));
         let plan = RepoFlow::dotfiles_plan();
         let moved = self.repo.sim.step().move_after_review(&plan, &preview);
         match moved {
@@ -482,11 +528,6 @@ impl App {
     }
 }
 
-/// For the scenes. The temporary home, so a screenshot can show a path that isn't this Mac's.
-pub fn sim_home(app: &App) -> PathBuf {
-    app.repo.sim.tools.home.clone()
-}
-
 #[cfg(test)]
 mod tests {
     use soulcaster_repo::review::Primary;
@@ -496,7 +537,10 @@ mod tests {
     use crate::state::with_engine;
 
     fn app() -> App {
-        with_engine(Box::new(SimEngine::new(Scenario::AllGood, SimMachine::Bare)))
+        with_engine(Box::new(SimEngine::new(
+            Scenario::AllGood,
+            SimMachine::Bare,
+        )))
     }
 
     fn page(app: &App) -> &ReviewPage {
@@ -524,11 +568,26 @@ mod tests {
         app.read_sample("example-stranger/setup");
         let stranger = page(&app);
         assert!(!stranger.boxes.repo && !stranger.boxes.script);
-        assert!(stranger.review.dotfiles.as_ref().unwrap().script_text.is_some());
+        assert!(
+            stranger
+                .review
+                .dotfiles
+                .as_ref()
+                .unwrap()
+                .script_text
+                .is_some()
+        );
 
-        for refused in ["example-dev/odd-config", "evil-tools/two-answers", "example-dev/future"] {
+        for refused in [
+            "example-dev/odd-config",
+            "evil-tools/two-answers",
+            "example-dev/future",
+        ] {
             app.read_sample(refused);
-            assert!(matches!(app.repo.import, ImportPhase::Refused { .. }), "{refused}");
+            assert!(
+                matches!(app.repo.import, ImportPhase::Refused { .. }),
+                "{refused}"
+            );
         }
 
         app.read_sample("example-dev/private-setup");
@@ -536,7 +595,10 @@ mod tests {
             panic!("expected a failure");
         };
         assert!(words.contains("can't see"), "{words}");
-        assert_eq!(app.repo.paste.text(), "example-dev/private-setup", "the paste stays");
+        assert_eq!(
+            &app.repo.paste.text, "example-dev/private-setup",
+            "the paste stays"
+        );
     }
 
     #[test]
@@ -577,7 +639,12 @@ mod tests {
         let mut app = app();
         app.fill_typical();
         app.save_config();
-        let SavePhase::Done(SaveOutcome::Sent { public, created_repo, .. }) = &app.repo.save else {
+        let SavePhase::Done(SaveOutcome::Sent {
+            public,
+            created_repo,
+            ..
+        }) = &app.repo.save
+        else {
             panic!("expected it to be sent");
         };
         assert!(!public);
@@ -592,8 +659,12 @@ mod tests {
             panic!("expected a report");
         };
         assert_eq!(report.rows.len(), 4);
-        let home = sim_home(&app);
-        assert!(std::fs::read_link(home.join(".zshrc")).unwrap().starts_with(&home));
+        let home = app.repo.sim.tools.home.clone();
+        assert!(
+            std::fs::read_link(home.join(".zshrc"))
+                .unwrap()
+                .starts_with(&home)
+        );
         assert!(home.join("Documents").is_dir(), "a protected folder stays");
     }
 }

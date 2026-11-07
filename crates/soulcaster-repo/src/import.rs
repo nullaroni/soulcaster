@@ -121,9 +121,9 @@ impl fmt::Display for ImportError {
             Self::Address(error) => error.fmt(f),
             Self::Fetch(error) => error.fmt(f),
             Self::Refused(refusal) => f.write_str(refusal.words()),
-            Self::NoConfigs => {
-                f.write_str("No Configs there. Paste a link to the file if it lives somewhere else.")
-            }
+            Self::NoConfigs => f.write_str(
+                "No Configs there. Paste a link to the file if it lives somewhere else.",
+            ),
             Self::NotOffered => f.write_str("That Config wasn't offered."),
         }
     }
@@ -166,7 +166,7 @@ pub struct Picker {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Opened {
-    One(Fetched),
+    One(Box<Fetched>),
     Pick(Picker),
 }
 
@@ -209,7 +209,11 @@ impl<'a> Importer<'a> {
             } => {
                 let facts = self.github.repo_facts(&repo)?;
                 let commit = self.github.commit(&facts.repo, &git_ref)?;
-                Ok(Opened::One(self.fetch(&facts.repo, &commit, &path)?))
+                Ok(Opened::One(Box::new(self.fetch(
+                    &facts.repo,
+                    &commit,
+                    &path,
+                )?)))
             }
         }
     }
@@ -239,7 +243,7 @@ impl<'a> Importer<'a> {
         paths.truncate(MAX_LISTED);
         match paths.as_slice() {
             [] => Err(ImportError::NoConfigs),
-            [only] => Ok(Opened::One(self.fetch(&repo, &commit, only)?)),
+            [only] => Ok(Opened::One(Box::new(self.fetch(&repo, &commit, only)?))),
             _ => {
                 let mut rows = Vec::with_capacity(paths.len());
                 for path in paths {
@@ -384,10 +388,10 @@ impl<'a> Importer<'a> {
 
     /// A Dotfiles Repo on another host. Git's own answer, with no sign-in offered to that host.
     fn ask_git_for_commit(&self, url: &str) -> Option<CommitSha> {
-        let command =
-            self.tools
-                .git(GitCred::None, None)?
-                .args(["ls-remote", "--", url, "HEAD"]);
+        let command = self
+            .tools
+            .git(GitCred::None, None)?
+            .args(["ls-remote", "--", url, "HEAD"]);
         let output = self.runner.run(&command, &mut |_, _| {}).ok()?;
         if !output.is_success() {
             return None;

@@ -21,8 +21,12 @@ const FOLDER: OFlags = OFlags::RDONLY
 /// Why a path couldn't be used. `at` is the part of the path where it stopped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PathTrouble {
-    SymlinkInPath { at: String },
-    NotAFolder { at: String },
+    SymlinkInPath {
+        at: String,
+    },
+    NotAFolder {
+        at: String,
+    },
     /// It stopped being what was checked between the check and the write.
     Changed,
     Io,
@@ -37,7 +41,9 @@ impl From<Errno> for PathTrouble {
 /// What a link landed on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Placed {
-    Linked { backup: Option<PathBuf> },
+    Linked {
+        backup: Option<PathBuf>,
+    },
     AlreadyLinked,
     /// A link into the repo for some other file is already there.
     AnotherLink,
@@ -111,7 +117,9 @@ impl SafeRoot {
                 let at = parts[..=depth].join("/");
                 match (error, statat(parent, *part, AtFlags::SYMLINK_NOFOLLOW)) {
                     (Errno::NOENT, _) => PathTrouble::Changed,
-                    (_, Ok(stat)) if FileType::from_raw_mode(stat.st_mode as RawMode).is_symlink() => {
+                    (_, Ok(stat))
+                        if FileType::from_raw_mode(stat.st_mode as RawMode).is_symlink() =>
+                    {
                         PathTrouble::SymlinkInPath { at }
                     }
                     (Errno::LOOP | Errno::NOTDIR, _) => PathTrouble::NotAFolder { at },
@@ -183,7 +191,12 @@ impl SafeRoot {
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
         // A leftover from a crash with this process's ID is ours to replace.
         let _ = unlinkat(&parent, temp.as_str(), AtFlags::empty());
-        let fd = openat(&parent, temp.as_str(), flags, Mode::from_raw_mode(mode as RawMode))?;
+        let fd = openat(
+            &parent,
+            temp.as_str(),
+            flags,
+            Mode::from_raw_mode(mode as RawMode),
+        )?;
         let mut file = File::from(fd);
         let wrote = file.write_all(bytes).and_then(|()| file.sync_all());
         drop(file);
@@ -326,7 +339,11 @@ mod tests {
             "{result:?}"
         );
         assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
-        assert_eq!(fs::read_dir(&moved).unwrap().count(), 0, "nothing was written");
+        assert_eq!(
+            fs::read_dir(&moved).unwrap().count(),
+            0,
+            "nothing was written"
+        );
     }
 
     #[test]
@@ -358,11 +375,15 @@ mod tests {
             fs::write(&target, "written by something else").unwrap();
         });
         assert_eq!(result, Err(PathTrouble::Changed));
-        assert_eq!(fs::read_to_string(&target).unwrap(), "written by something else");
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "written by something else"
+        );
     }
 
     #[test]
-    fn a_file_swapped_for_a_symlink_right_before_the_write_is_not_backed_up_as_if_it_were_the_file() {
+    fn a_file_swapped_for_a_symlink_right_before_the_write_is_not_backed_up_as_if_it_were_the_file()
+    {
         let home = home();
         let root = SafeRoot::open(&home.path).unwrap();
         let target = home.path.join(".zshrc");
@@ -386,7 +407,9 @@ mod tests {
         for words in ["first", "second"] {
             let _ = fs::remove_file(&target);
             fs::write(&target, words).unwrap();
-            let Placed::Linked { backup: Some(backup) } = root
+            let Placed::Linked {
+                backup: Some(backup),
+            } = root
                 .place_link(&[".zshrc"], &home.source, &home.repo, BACKUP, &mut || {})
                 .unwrap()
             else {
@@ -408,8 +431,15 @@ mod tests {
         symlink(&victim, home.path.join("copy.json")).unwrap();
         root.write_file(&["copy.json"], b"new", 0o600).unwrap();
         assert_eq!(fs::read_to_string(&victim).unwrap(), "victim");
-        assert_eq!(fs::read_to_string(home.path.join("copy.json")).unwrap(), "new");
-        assert!(!fs::symlink_metadata(home.path.join("copy.json")).unwrap().is_symlink());
+        assert_eq!(
+            fs::read_to_string(home.path.join("copy.json")).unwrap(),
+            "new"
+        );
+        assert!(
+            !fs::symlink_metadata(home.path.join("copy.json"))
+                .unwrap()
+                .is_symlink()
+        );
 
         symlink(home.path.join("repo"), home.path.join("linked")).unwrap();
         assert_eq!(

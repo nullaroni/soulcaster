@@ -46,9 +46,14 @@ pub enum DotfilesError {
     /// GitHub no longer has the approved commit, or won't say.
     CommitGone,
     /// The repo on disk is past what was approved, so it needs a new preview.
-    PastApproved { head: CommitSha },
+    PastApproved {
+        head: CommitSha,
+    },
     /// Git landed somewhere other than the approved commit.
-    CommitMismatch { wanted: CommitSha, found: CommitSha },
+    CommitMismatch {
+        wanted: CommitSha,
+        found: CommitSha,
+    },
 }
 
 impl fmt::Display for DotfilesError {
@@ -91,8 +96,12 @@ pub enum LinkRefusal {
     /// One of this repo's links, for another file, is already there.
     AnotherLinkHere,
     /// A symlink above the location would carry the write somewhere else.
-    SymlinkInPath { at: String },
-    NotAFolder { at: String },
+    SymlinkInPath {
+        at: String,
+    },
+    NotAFolder {
+        at: String,
+    },
     /// The path changed between the check and the write.
     PathChanged,
     Io,
@@ -119,7 +128,11 @@ impl fmt::Display for LinkRefusal {
             Self::SourceLeavesRepo => f.write_str("Leads outside the Dotfiles Repo"),
             Self::AnotherLinkHere => f.write_str("Another link from this repo is already there"),
             Self::SymlinkInPath { at } => {
-                write!(f, "~/{} is a link, so this would land somewhere else", crate::text::escaped(at))
+                write!(
+                    f,
+                    "~/{} is a link, so this would land somewhere else",
+                    crate::text::escaped(at)
+                )
             }
             Self::NotAFolder { at } => {
                 write!(f, "~/{} isn't a folder", crate::text::escaped(at))
@@ -153,7 +166,9 @@ pub struct LinkReport {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScriptOutcome {
     /// It ran, once, for this commit. A failure doesn't stop the Run.
-    Ran { success: bool },
+    Ran {
+        success: bool,
+    },
     AlreadyRan,
     NotApproved,
     /// The repo on disk isn't what was approved. `dotfiles.script-held` is the words for this.
@@ -244,7 +259,8 @@ fn safe_parts(path: &str) -> Option<Vec<&str>> {
         return None;
     }
     let parts: Vec<&str> = path.split('/').collect();
-    let bad = |part: &&str| part.is_empty() || *part == "." || *part == ".." || fold(part) == ".git";
+    let bad =
+        |part: &&str| part.is_empty() || *part == "." || *part == ".." || fold(part) == ".git";
     (!parts.iter().any(bad)).then_some(parts)
 }
 
@@ -411,15 +427,21 @@ impl DotfilesStep<'_> {
     /// The existing clone, once it's shown to be a plain repo of this source.
     fn check_existing(&self, clone: &Path, source: &DotfilesSource) -> Result<(), DotfilesError> {
         // A `.git` file can point anywhere, and a `.git` symlink can too.
-        let is_real_folder = fs::symlink_metadata(clone.join(".git"))
-            .is_ok_and(|meta| meta.is_dir());
+        let is_real_folder =
+            fs::symlink_metadata(clone.join(".git")).is_ok_and(|meta| meta.is_dir());
         if !is_real_folder {
             return Err(DotfilesError::LocationBusy);
         }
         let output = self.git(
             GitCred::None,
             clone,
-            &["config", "--file", ".git/config", "--get", "remote.origin.url"],
+            &[
+                "config",
+                "--file",
+                ".git/config",
+                "--get",
+                "remote.origin.url",
+            ],
         )?;
         if output.stdout_text().trim() != source.clone_url() {
             return Err(DotfilesError::DifferentRepo);
@@ -495,10 +517,7 @@ impl DotfilesStep<'_> {
         let held = self.approval(plan).ok_or(DotfilesError::NotApproved)?;
         let root = SafeRoot::open(&self.tools.home).map_err(|_| DotfilesError::LocationBusy)?;
         let clone = fs::canonicalize(&clone).map_err(|_| DotfilesError::LocationBusy)?;
-        let refused = refused_links(
-            plan.links.keys().map(String::as_str),
-            self.clone_location,
-        );
+        let refused = refused_links(plan.links.keys().map(String::as_str), self.clone_location);
         let mut rows = Vec::with_capacity(plan.links.len());
         for (target, source) in &plan.links {
             let outcome = self.apply_one(&root, &clone, target, source, refused.get(target));

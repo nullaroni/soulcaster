@@ -1,6 +1,8 @@
 //! What a person pastes, or a Config names, before anything reaches a command line.
 
-use soulcaster_repo::address::{AddressError, ConfigPath, DotfilesSource, GitRef, ImportTarget, RepoId};
+use soulcaster_repo::address::{
+    AddressError, ConfigPath, DotfilesSource, GitRef, ImportTarget, RepoId,
+};
 
 fn refused(text: &str) -> AddressError {
     ImportTarget::parse(text).expect_err(text)
@@ -22,10 +24,15 @@ fn the_ordinary_forms_are_accepted() {
         };
         assert_eq!(repo.full_name(), "example-dev/mac-setup", "{text}");
     }
-    let ImportTarget::File { repo, git_ref, path } = ImportTarget::parse(
+    let ImportTarget::File {
+        repo,
+        git_ref,
+        path,
+    } = ImportTarget::parse(
         "https://github.com/example-dev/mac-setup/blob/main/configs/mobile.json",
     )
-    .unwrap() else {
+    .unwrap()
+    else {
         panic!("a file link");
     };
     assert_eq!(repo.full_name(), "example-dev/mac-setup");
@@ -168,7 +175,10 @@ fn a_dotfiles_repo_on_github_is_recognized_only_at_exactly_that_host() {
     assert_eq!(own.github().unwrap().full_name(), "example-you/dotfiles");
     let url = DotfilesSource::parse("https://GitHub.com/example-you/dotfiles.git").unwrap();
     assert_eq!(url.key(), "github.com/example-you/dotfiles");
-    assert_eq!(url.clone_url(), "https://github.com/example-you/dotfiles.git");
+    assert_eq!(
+        url.clone_url(),
+        "https://github.com/example-you/dotfiles.git"
+    );
 
     for other in [
         "https://github.com.evil.example/example-you/dotfiles",

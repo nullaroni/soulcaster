@@ -203,8 +203,8 @@ fn a_misleading_config_starts_with_everything_off_and_close_as_the_primary_butto
         script: None,
     };
     let boxes = review.starting_boxes(&approvals);
-    assert_eq!(boxes.catalog || boxes.formulae || boxes.casks, false);
-    assert_eq!(boxes.settings || boxes.repo || boxes.script, false);
+    assert!(!(boxes.catalog || boxes.formulae || boxes.casks));
+    assert!(!(boxes.settings || boxes.repo || boxes.script));
     assert!(boxes.taps.values().all(|on| !on));
     assert!(review.nothing_selected(&boxes));
     assert_eq!(review.primary(&boxes), Primary::Close);
@@ -240,17 +240,26 @@ fn a_tap_hidden_in_a_long_package_list_is_surfaced_with_where_it_was() {
 #[test]
 fn a_package_named_like_a_base_item_cannot_be_approved_or_installed() {
     let review = hostile();
-    let tap = review.taps.iter().find(|t| t.tap == "evil-tools/tap").unwrap();
+    let tap = review
+        .taps
+        .iter()
+        .find(|t| t.tap == "evil-tools/tap")
+        .unwrap();
     assert!(tap.blocked);
     let mut boxes = review.starting_boxes(&Approvals::default());
     assert!(!review.can_tick(&boxes, &Tick::Tap("evil-tools/tap".to_string())));
     review.toggle(&mut boxes, &Tick::Tap("evil-tools/tap".to_string()));
-    assert_eq!(boxes.taps["evil-tools/tap"], false, "the toggle does nothing");
+    assert!(!boxes.taps["evil-tools/tap"], "the toggle does nothing");
     // Even a forced box installs nothing.
     boxes.taps.insert("evil-tools/tap".to_string(), true);
     let run = review.run_contents(&boxes);
     assert!(!run.taps.contains(&"evil-tools/tap".to_string()));
-    assert!(!run.config.packages.casks.contains(&"evil-tools/tap/gh".to_string()));
+    assert!(
+        !run.config
+            .packages
+            .casks
+            .contains(&"evil-tools/tap/gh".to_string())
+    );
     let after = review.approvals_after_run(&boxes, &Approvals::default());
     assert!(!after.packages.contains("evil-tools/tap/gh"));
 }
@@ -259,8 +268,11 @@ fn a_package_named_like_a_base_item_cannot_be_approved_or_installed() {
 fn a_tap_box_starts_off_and_leaving_it_off_skips_only_its_packages() {
     let review = one_tap();
     let boxes = review.starting_boxes(&Approvals::default());
-    assert_eq!(boxes.taps["mobile-dev-inc/tap"], false);
-    assert_eq!(review.primary(&boxes), Primary::Start("Start without them".to_string()));
+    assert!(!boxes.taps["mobile-dev-inc/tap"]);
+    assert_eq!(
+        review.primary(&boxes),
+        Primary::Start("Start without them".to_string())
+    );
     let run = review.run_contents(&boxes);
     assert!(
         !run.config
@@ -275,10 +287,16 @@ fn a_tap_box_starts_off_and_leaving_it_off_skips_only_its_packages() {
 
     let mut on = boxes.clone();
     review.toggle(&mut on, &Tick::Tap("mobile-dev-inc/tap".to_string()));
-    assert_eq!(review.primary(&on), Primary::Start("Start with 1 approval".to_string()));
+    assert_eq!(
+        review.primary(&on),
+        Primary::Start("Start with 1 approval".to_string())
+    );
     let run = review.run_contents(&on);
     assert_eq!(run.taps, ["mobile-dev-inc/tap"]);
-    assert!(run.packages.contains(&"mobile-dev-inc/tap/maestro".to_string()));
+    assert!(
+        run.packages
+            .contains(&"mobile-dev-inc/tap/maestro".to_string())
+    );
 }
 
 #[test]
@@ -287,29 +305,30 @@ fn an_approval_covers_the_packages_named_not_the_tap() {
     let mut boxes = review.starting_boxes(&Approvals::default());
     review.toggle(&mut boxes, &Tick::Tap("mobile-dev-inc/tap".to_string()));
     let after = review.approvals_after_run(&boxes, &Approvals::default());
-    assert_eq!(review.starting_boxes(&after).taps["mobile-dev-inc/tap"], true);
+    assert!(review.starting_boxes(&after).taps["mobile-dev-inc/tap"]);
     // A new package from the same tap starts off again.
     let mut more = after.clone();
     more.packages.clear();
-    more.packages.insert("mobile-dev-inc/tap/something-else".to_string());
-    assert_eq!(review.starting_boxes(&more).taps["mobile-dev-inc/tap"], false);
+    more.packages
+        .insert("mobile-dev-inc/tap/something-else".to_string());
+    assert!(!review.starting_boxes(&more).taps["mobile-dev-inc/tap"]);
 }
 
 #[test]
 fn a_strangers_dotfiles_repo_starts_off_and_the_script_needs_the_repo_first() {
     let review = stranger();
     let mut boxes = review.starting_boxes(&Approvals::default());
-    assert_eq!(boxes.repo, false);
-    assert_eq!(boxes.script, false);
+    assert!(!boxes.repo);
+    assert!(!boxes.script);
     assert!(!review.can_tick(&boxes, &Tick::Script), "the repo isn't on");
     review.toggle(&mut boxes, &Tick::Script);
-    assert_eq!(boxes.script, false);
+    assert!(!boxes.script);
 
     review.toggle(&mut boxes, &Tick::Repo);
-    assert_eq!(boxes.repo, true);
-    assert_eq!(boxes.script, false, "the repo doesn't imply the script");
+    assert!(boxes.repo);
+    assert!(!boxes.script, "the repo doesn't imply the script");
     review.toggle(&mut boxes, &Tick::Script);
-    assert_eq!(boxes.script, true);
+    assert!(boxes.script);
     let run = review.run_contents(&boxes);
     assert_eq!(run.script.as_deref(), Some("script/setup"));
 
@@ -325,8 +344,8 @@ fn a_strangers_dotfiles_repo_starts_off_and_the_script_needs_the_repo_first() {
 fn your_own_repo_starts_on_but_its_script_stays_off() {
     let review = own();
     let boxes = review.starting_boxes(&Approvals::default());
-    assert_eq!(boxes.repo, true);
-    assert_eq!(boxes.script, false);
+    assert!(boxes.repo);
+    assert!(!boxes.script);
 }
 
 #[test]
@@ -338,7 +357,7 @@ fn own_means_github_says_so_and_you_own_the_config_too() {
         signed_in: None,
         facts: own_facts(),
     });
-    assert_eq!(signed_out.starting_boxes(&Approvals::default()).repo, false);
+    assert!(!signed_out.starting_boxes(&Approvals::default()).repo);
 
     // A stranger's Config naming your repo still wrote that list of links.
     let strangers_config = review(Case {
@@ -348,7 +367,7 @@ fn own_means_github_says_so_and_you_own_the_config_too() {
         facts: own_facts(),
     });
     assert!(strangers_config.dotfiles.as_ref().unwrap().names_your_repo);
-    assert_eq!(strangers_config.starting_boxes(&Approvals::default()).repo, false);
+    assert!(!strangers_config.starting_boxes(&Approvals::default()).repo);
 
     // The repo was transferred: the name in the file is yours, and GitHub says otherwise.
     let transferred = review(Case {
@@ -360,7 +379,7 @@ fn own_means_github_says_so_and_you_own_the_config_too() {
             ..own_facts()
         },
     });
-    assert_eq!(transferred.starting_boxes(&Approvals::default()).repo, false);
+    assert!(!transferred.starting_boxes(&Approvals::default()).repo);
 
     // Case doesn't matter to GitHub, so it doesn't here.
     let case = review(Case {
@@ -369,7 +388,7 @@ fn own_means_github_says_so_and_you_own_the_config_too() {
         signed_in: Some("EXAMPLE-you"),
         facts: own_facts(),
     });
-    assert_eq!(case.starting_boxes(&Approvals::default()).repo, true);
+    assert!(case.starting_boxes(&Approvals::default()).repo);
 
     // No commit, nothing to approve.
     let no_commit = review(Case {
@@ -382,7 +401,7 @@ fn own_means_github_says_so_and_you_own_the_config_too() {
         },
     });
     let boxes = no_commit.starting_boxes(&Approvals::default());
-    assert_eq!(boxes.repo, false);
+    assert!(!boxes.repo);
     assert!(!no_commit.can_tick(&boxes, &Tick::Repo));
 }
 
@@ -401,7 +420,7 @@ fn a_look_alike_host_is_never_yours() {
         &stub(),
         DEFAULT_CLONE_LOCATION,
     );
-    assert_eq!(review.starting_boxes(&Approvals::default()).repo, false);
+    assert!(!review.starting_boxes(&Approvals::default()).repo);
     assert!(review.signals.iter().any(|s| s.code == "host-lookalike"));
 }
 
@@ -420,7 +439,7 @@ fn a_script_that_cannot_be_shown_cannot_be_approved() {
     unshown.toggle(&mut boxes, &Tick::Repo);
     assert!(!unshown.can_tick(&boxes, &Tick::Script));
     unshown.toggle(&mut boxes, &Tick::Script);
-    assert_eq!(boxes.script, false);
+    assert!(!boxes.script);
     boxes.script = true;
     assert_eq!(unshown.run_contents(&boxes).script, None);
 }
@@ -472,7 +491,7 @@ fn approvals_are_tied_to_repo_commit_and_links() {
         &stub(),
         DEFAULT_CLONE_LOCATION,
     );
-    assert_eq!(more_links.starting_boxes(&approvals).repo, false);
+    assert!(!more_links.starting_boxes(&approvals).repo);
 
     // A different repo in the file is off.
     let mut config: serde_json::Value = serde_json::from_slice(STRANGER).unwrap();
@@ -485,7 +504,7 @@ fn approvals_are_tied_to_repo_commit_and_links() {
         &stub(),
         DEFAULT_CLONE_LOCATION,
     );
-    assert_eq!(other.starting_boxes(&approvals).repo, false);
+    assert!(!other.starting_boxes(&approvals).repo);
 }
 
 #[test]
@@ -506,8 +525,14 @@ fn a_refused_link_is_shown_and_never_applied_and_a_note_explains_but_does_not_re
     let dotfiles = review.dotfiles.as_ref().unwrap();
     let row = |target: &str| dotfiles.links.iter().find(|l| l.target == target).unwrap();
     assert!(row("~/Documents").refused.is_some());
-    assert!(row("~/.zshenv").refused.is_some(), "both sides of the clash");
-    assert!(row("~/.ZSHENV").refused.is_some(), "both sides of the clash");
+    assert!(
+        row("~/.zshenv").refused.is_some(),
+        "both sides of the clash"
+    );
+    assert!(
+        row("~/.ZSHENV").refused.is_some(),
+        "both sides of the clash"
+    );
     assert!(row("~/Developer/dotfiles/hooks").refused.is_some());
     let sudo = row("~/.local/bin/sudo");
     assert!(sudo.refused.is_none());
@@ -534,8 +559,12 @@ fn a_refused_link_is_shown_and_never_applied_and_a_note_explains_but_does_not_re
 fn the_name_is_data_and_mixed_alphabets_are_written_out() {
     let review = hostile();
     assert!(review.name_has_lookalikes);
-    assert!(review.name_escaped.contains("\\u0410"), "{}", review.name_escaped);
-    assert!(review.name_escaped.chars().all(|c| c.is_ascii()));
+    assert!(
+        review.name_escaped.contains("\\u0410"),
+        "{}",
+        review.name_escaped
+    );
+    assert!(review.name_escaped.is_ascii());
 }
 
 #[test]
@@ -549,7 +578,11 @@ fn a_setting_writing_through_a_link_only_skips_when_the_repo_is_on() {
     assert!(git.if_repo_on.is_some());
     let mut boxes = review.starting_boxes(&Approvals::default());
     assert!(
-        review.run_contents(&boxes).config.settings.contains_key("git.pull-rebase"),
+        review
+            .run_contents(&boxes)
+            .config
+            .settings
+            .contains_key("git.pull-rebase"),
         "the repo is off, so nothing is linked"
     );
     review.toggle(&mut boxes, &Tick::Repo);
@@ -579,8 +612,8 @@ fn a_long_official_list_starts_off_even_on_an_ordinary_config() {
     );
     let boxes = review.starting_boxes(&Approvals::default());
     assert!(review.big_formulae);
-    assert_eq!(boxes.formulae, false);
-    assert_eq!(boxes.casks, true);
+    assert!(!boxes.formulae);
+    assert!(boxes.casks);
 }
 
 #[test]
@@ -594,9 +627,8 @@ fn nothing_in_a_config_can_set_a_box() {
     ] {
         let text = format!(r#"{{"schemaVersion":1,"name":"x",{field}}}"#);
         assert!(Config::parse(text.as_bytes()).is_err(), "{field}");
-        let inside = format!(
-            r#"{{"schemaVersion":1,"name":"x","dotfiles":{{"repo":"a/b",{field}}}}}"#
-        );
+        let inside =
+            format!(r#"{{"schemaVersion":1,"name":"x","dotfiles":{{"repo":"a/b",{field}}}}}"#);
         assert!(Config::parse(inside.as_bytes()).is_err(), "{field}");
     }
 }
@@ -614,7 +646,10 @@ fn start_run_is_what_writes_approvals_and_a_clean_run_approves_nothing() {
     let mut boxes = review.starting_boxes(&Approvals::default());
     review.toggle(&mut boxes, &Tick::Repo);
     let run = review.record_start(&boxes, &store).unwrap();
-    assert_eq!(store.read().unwrap().dotfiles.unwrap().commit.as_str(), DOTS);
+    assert_eq!(
+        store.read().unwrap().dotfiles.unwrap().commit.as_str(),
+        DOTS
+    );
     assert_eq!(run.clone.unwrap().1.as_str(), DOTS);
 }
 

@@ -293,7 +293,7 @@ impl FakeGitHub {
             return;
         };
         for (word, effect) in state.effects.clone() {
-            if !command.args.iter().any(|a| *a == word) {
+            if !command.args.contains(&word) {
                 continue;
             }
             match effect {

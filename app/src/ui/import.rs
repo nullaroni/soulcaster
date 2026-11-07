@@ -98,7 +98,11 @@ fn outline<S: 'static>(
         .radius(999.0)
         .center()
         .border(1.0, kit::ink())
-        .child(text(words.to_string()).font(kit::bold_style()).color(kit::ink()));
+        .child(
+            text(words.to_string())
+                .font(kit::bold_style())
+                .color(kit::ink()),
+        );
     if enabled {
         button = button
             .focusable(true)
@@ -163,7 +167,7 @@ fn paste(app: &App, k: &Kit, error: Option<&str>) -> El {
             kit::primary(
                 "import-read",
                 "Read",
-                !app.repo.paste.text().trim().is_empty(),
+                !app.repo.paste.text.trim().is_empty(),
                 |app: &mut App, _| app.read_paste(),
             ),
         ),
@@ -180,13 +184,15 @@ fn pick_row(row_data: &PickRow) -> El {
             .child(kit::label(name).grow(1.0).shrink().truncate())
             .child(text("Refused").font(kit::ui_style()).color(kit::mandarin())),
         None => row()
-            .child(kit::label(format!(
-                "{name}  {:?}",
-                row_data.name.as_deref().unwrap_or("")
-            ))
-            .grow(1.0)
-            .shrink()
-            .truncate())
+            .child(
+                kit::label(format!(
+                    "{name}  {:?}",
+                    row_data.name.as_deref().unwrap_or("")
+                ))
+                .grow(1.0)
+                .shrink()
+                .truncate(),
+            )
             .child(kit::label(format!(
                 "{} to install, {} settings, {} to approve",
                 row_data.install, row_data.settings, row_data.approvals
@@ -221,9 +227,14 @@ fn pick(picker: &Picker) -> El {
         body,
         kit::foot(
             "pick-footer",
-            kit::action("pick-back".to_string(), "Back", false, |app: &mut App, _| {
-                app.close_import();
-            }),
+            kit::action(
+                "pick-back".to_string(),
+                "Back",
+                false,
+                |app: &mut App, _| {
+                    app.close_import();
+                },
+            ),
             el(),
         ),
     )
@@ -244,14 +255,19 @@ fn refused(from: &str, refusal: &Refusal) -> El {
             kit::mandarin(),
         ))
         .child(
-            col().key("refused-detail").w_full().px(14.0).py(10.0).child(
-                text(refusal.detail.clone())
-                    .font(kit::log_style())
-                    .color(kit::ink())
-                    .selectable(true)
-                    .w_full()
-                    .wrap(),
-            ),
+            col()
+                .key("refused-detail")
+                .w_full()
+                .px(14.0)
+                .py(10.0)
+                .child(
+                    text(refusal.detail.clone())
+                        .font(kit::log_style())
+                        .color(kit::ink())
+                        .selectable(true)
+                        .w_full()
+                        .wrap(),
+                ),
         );
     page(
         "refused-screen",
@@ -276,7 +292,11 @@ fn kept(name: &str, path: &str) -> El {
             "Name in the file",
             kit::label(format!("{name:?}")),
         ))
-        .child(plain_row("kept-path".to_string(), "Kept as", kit::label(path)))
+        .child(plain_row(
+            "kept-path".to_string(),
+            "Kept as",
+            kit::label(path),
+        ))
         .child(plain_row(
             "kept-approvals".to_string(),
             "Approvals",
@@ -298,6 +318,8 @@ fn kept(name: &str, path: &str) -> El {
 
 /// A row with a box. The whole row presses. A rule on its left marks what can run someone else's
 /// code, and it darkens only while the box is on.
+// One argument per thing a row shows. A struct would only rename them at three call sites.
+#[allow(clippy::too_many_arguments)]
 fn tick_row(
     k: &Kit,
     key: String,
@@ -399,7 +421,10 @@ fn tap_rows(page_data: &ReviewPage, k: &Kit, tap: &TapCard) -> Vec<El> {
 fn link_row(link: &LinkRow) -> El {
     let (note, color) = match (link.refused, link.lookalike, link.note) {
         (Some(why), _, _) => (why, kit::mandarin()),
-        (None, true, _) => ("Mixes alphabets. This isn't the file it looks like", kit::mandarin()),
+        (None, true, _) => (
+            "Mixes alphabets. This isn't the file it looks like",
+            kit::mandarin(),
+        ),
         (None, false, Some(note)) => (note, kit::ink()),
         (None, false, None) => ("", kit::ink()),
     };
@@ -407,17 +432,21 @@ fn link_row(link: &LinkRow) -> El {
         format!("link-{}", link.target_escaped),
         row()
             .help(if note.is_empty() {
-                "A link with no note can still matter, because many programs run what they read.".to_string()
+                "A link with no note can still matter, because many programs run what they read."
+                    .to_string()
             } else {
                 note.to_string()
             })
             .child(
-                text(format!("{}  \u{2190}  {}", link.target_escaped, link.source))
-                    .font(kit::log_style())
-                    .color(kit::ink())
-                    .grow(1.0)
-                    .shrink()
-                    .truncate(),
+                text(format!(
+                    "{}  \u{2190}  {}",
+                    link.target_escaped, link.source
+                ))
+                .font(kit::log_style())
+                .color(kit::ink())
+                .grow(1.0)
+                .shrink()
+                .truncate(),
             )
             .child(text(note.to_string()).font(kit::ui_style()).color(color)),
     )
@@ -451,7 +480,11 @@ fn dotfiles_rows(page_data: &ReviewPage, k: &Kit, card: &DotfilesCard, list: &mu
         &format!("{whose}. {REPO_STAKES}"),
         Tick::Repo,
     ));
-    list.push(plain_row("repo-whose".to_string(), "Whose", kit::label(whose)));
+    list.push(plain_row(
+        "repo-whose".to_string(),
+        "Whose",
+        kit::label(whose),
+    ));
     for link in &card.links {
         list.push(link_row(link));
     }
@@ -494,6 +527,7 @@ fn dotfiles_rows(page_data: &ReviewPage, k: &Kit, card: &DotfilesCard, list: &mu
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn package_rows(
     page_data: &ReviewPage,
     k: &Kit,
@@ -629,7 +663,11 @@ fn review(page_data: &ReviewPage, k: &Kit) -> El {
 
     list.push(group_row(
         "install",
-        if warned { "Could install" } else { "Will install" },
+        if warned {
+            "Could install"
+        } else {
+            "Will install"
+        },
     ));
     if !review.catalog.is_empty() {
         let names: Vec<&str> = review.catalog.iter().map(|c| c.name.as_str()).collect();
@@ -684,7 +722,11 @@ fn review(page_data: &ReviewPage, k: &Kit) -> El {
     if !review.settings.is_empty() {
         list.push(group_row(
             "settings",
-            if warned { "Could change settings" } else { "Will change settings" },
+            if warned {
+                "Could change settings"
+            } else {
+                "Will change settings"
+            },
         ));
         list.push(tick_row(
             k,
@@ -698,7 +740,12 @@ fn review(page_data: &ReviewPage, k: &Kit) -> El {
         ));
         for setting in &review.settings {
             let mut content = row()
-                .child(kit::label(setting.title.clone()).grow(1.0).shrink().truncate())
+                .child(
+                    kit::label(setting.title.clone())
+                        .grow(1.0)
+                        .shrink()
+                        .truncate(),
+                )
                 .child(kit::label(setting.after.clone()))
                 .child(row().w(130.0).child(kit::label(setting.effect)));
             if let Some(note) = setting.if_repo_on {
@@ -750,8 +797,17 @@ fn review(page_data: &ReviewPage, k: &Kit) -> El {
                 format!("wont-{}", row_data.id),
                 row()
                     .help(row_data.text.clone())
-                    .child(row().w(240.0).child(kit::label(row_data.id.clone()).shrink().truncate()))
-                    .child(kit::label(row_data.text.clone()).grow(1.0).shrink().truncate()),
+                    .child(
+                        row()
+                            .w(240.0)
+                            .child(kit::label(row_data.id.clone()).shrink().truncate()),
+                    )
+                    .child(
+                        kit::label(row_data.text.clone())
+                            .grow(1.0)
+                            .shrink()
+                            .truncate(),
+                    ),
             ));
         }
     }
@@ -763,9 +819,17 @@ fn review(page_data: &ReviewPage, k: &Kit) -> El {
     let words = format!(
         "{} {}, {} {}, {} to approve, {} won't apply",
         review.install_count(),
-        if warned { "could install" } else { "to install" },
+        if warned {
+            "could install"
+        } else {
+            "to install"
+        },
         review.settings.len(),
-        if warned { "settings could change" } else { "settings to change" },
+        if warned {
+            "settings could change"
+        } else {
+            "settings to change"
+        },
         review.approval_count(),
         review.wont_apply_count()
     );

@@ -26,7 +26,13 @@ fn github() -> FakeGitHub {
     let gh = FakeGitHub::new();
     gh.sign_in("example-you", 42);
     gh.add_repo("example-dev", "mac-setup", RepoShape::public("main", SHA));
-    gh.add_file("example-dev", "mac-setup", SHA, "configs/laptop.json", CLEAN);
+    gh.add_file(
+        "example-dev",
+        "mac-setup",
+        SHA,
+        "configs/laptop.json",
+        CLEAN,
+    );
     gh
 }
 
@@ -38,7 +44,7 @@ fn open(gh: &FakeGitHub, paste: &str) -> Result<Opened, ImportError> {
 
 fn one(gh: &FakeGitHub, paste: &str) -> soulcaster_repo::import::Fetched {
     match open(gh, paste) {
-        Ok(Opened::One(fetched)) => fetched,
+        Ok(Opened::One(fetched)) => *fetched,
         Ok(Opened::Pick(_)) => panic!("expected one Config"),
         Err(error) => panic!("{error:?}"),
     }
@@ -52,8 +58,9 @@ fn a_repo_with_one_config_opens_it_pinned_to_the_commit_it_read() {
     assert_eq!(fetched.source.path.as_str(), "configs/laptop.json");
     assert_eq!(fetched.source.repo.full_name(), "example-dev/mac-setup");
     // The file was read at the commit, never at a name that can move.
-    assert!(gh.api_paths().iter().any(|p| p
-        == &format!("repos/example-dev/mac-setup/contents/configs/laptop.json?ref={SHA}")));
+    assert!(gh.api_paths().iter().any(
+        |p| p == &format!("repos/example-dev/mac-setup/contents/configs/laptop.json?ref={SHA}")
+    ));
     assert!(
         !gh.api_paths()
             .iter()
@@ -78,7 +85,13 @@ fn a_repo_with_several_configs_is_a_choice_with_what_each_would_do() {
         "configs/broken.json",
         br#"{"schemaVersion":1,"name":"x","trusted":true}"#,
     );
-    gh.add_file("example-dev", "mac-setup", SHA, "configs/notes.txt", b"hello");
+    gh.add_file(
+        "example-dev",
+        "mac-setup",
+        SHA,
+        "configs/notes.txt",
+        b"hello",
+    );
     let Ok(Opened::Pick(picker)) = open(&gh, "example-dev/mac-setup") else {
         panic!("expected a choice");
     };
@@ -145,7 +158,13 @@ fn a_file_link_opens_that_file_and_resolves_a_moveable_name_once() {
 
     // The branch moves after the read. A new read gets a new commit, and the first copy keeps its own.
     gh.add_repo("example-dev", "mac-setup", RepoShape::public("main", NEWER));
-    gh.add_file("example-dev", "mac-setup", NEWER, "configs/laptop.json", CLEAN);
+    gh.add_file(
+        "example-dev",
+        "mac-setup",
+        NEWER,
+        "configs/laptop.json",
+        CLEAN,
+    );
     let later = one(
         &gh,
         "https://github.com/example-dev/mac-setup/blob/main/configs/laptop.json",
@@ -291,7 +310,13 @@ fn a_response_for_some_other_path_or_a_symlink_is_refused() {
 
 fn refused_kind(bytes: &[u8]) -> (RefusalKind, String) {
     let gh = github();
-    gh.add_file("example-dev", "mac-setup", SHA, "configs/laptop.json", bytes);
+    gh.add_file(
+        "example-dev",
+        "mac-setup",
+        SHA,
+        "configs/laptop.json",
+        bytes,
+    );
     match open(&gh, "example-dev/mac-setup") {
         Err(ImportError::Refused(refusal)) => (refusal.kind, refusal.detail),
         other => panic!("{other:?}"),
@@ -315,7 +340,10 @@ fn the_strict_parser_refuses_the_whole_file_before_anything_reads_it() {
     let (kind, detail) = refused_kind(include_bytes!("fixtures/import/refused-bidi.json"));
     assert_eq!(kind, RefusalKind::BadText);
     assert!(detail.contains("\\u202e"), "{detail}");
-    assert!(!detail.contains('\u{202e}'), "the character itself isn't shown");
+    assert!(
+        !detail.contains('\u{202e}'),
+        "the character itself isn't shown"
+    );
 }
 
 #[test]
@@ -357,7 +385,11 @@ fn failures_keep_nothing_and_say_what_happened() {
     );
 
     let gh = github();
-    gh.set_response("repos/example-dev/mac-setup", 403, "API rate limit exceeded");
+    gh.set_response(
+        "repos/example-dev/mac-setup",
+        403,
+        "API rate limit exceeded",
+    );
     assert_eq!(
         open(&gh, "example-dev/mac-setup").err().unwrap(),
         ImportError::Fetch(FetchError::RateLimited)
@@ -402,7 +434,10 @@ fn a_gh_token_never_reaches_a_command_line_a_log_or_an_error() {
     assert!(!format!("{error:?} {error}").contains("ghp_"));
     for call in gh.calls() {
         let line = format!("{:?}", (&call.args, &call.env));
-        assert!(!line.contains("ghp_") && !line.contains("GH_TOKEN"), "{line}");
+        assert!(
+            !line.contains("ghp_") && !line.contains("GH_TOKEN"),
+            "{line}"
+        );
     }
 }
 

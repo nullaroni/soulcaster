@@ -6,7 +6,9 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
-use soulcaster_core::approval::{ApprovalStore, Approvals, CommitSha, DotfilesApproval, ScriptApproval};
+use soulcaster_core::approval::{
+    ApprovalStore, Approvals, CommitSha, DotfilesApproval, ScriptApproval,
+};
 use soulcaster_core::command::Reply;
 use soulcaster_core::lint::{DEFAULT_CLONE_LOCATION, FindingKind};
 use soulcaster_core::plan::DotfilesPlan;
@@ -165,21 +167,36 @@ fn links_are_applied_and_what_they_replace_is_backed_up() {
     let rows = apply(&sandbox, &plan);
 
     let clone = sandbox.home.join("Developer/dotfiles");
-    assert!(is_link_to(&sandbox.home.join(".zshrc"), &clone.join("zsh/zshrc")));
-    assert!(is_link_to(&sandbox.home.join(".config/nvim"), &clone.join("nvim")));
-    let LinkOutcome::Linked { backup: Some(backup) } = &rows["~/.zshrc"] else {
+    assert!(is_link_to(
+        &sandbox.home.join(".zshrc"),
+        &clone.join("zsh/zshrc")
+    ));
+    assert!(is_link_to(
+        &sandbox.home.join(".config/nvim"),
+        &clone.join("nvim")
+    ));
+    let LinkOutcome::Linked {
+        backup: Some(backup),
+    } = &rows["~/.zshrc"]
+    else {
         panic!("{:?}", rows["~/.zshrc"]);
     };
     assert_eq!(fs::read_to_string(backup).unwrap(), "mine\n");
-    assert!(backup.starts_with(
-        sandbox
-            .home
-            .join("Library/Application Support/Soulcaster/backups/backup-1")
-    ));
+    assert!(
+        backup.starts_with(
+            sandbox
+                .home
+                .join("Library/Application Support/Soulcaster/backups/backup-1")
+        )
+    );
     assert_eq!(rows["~/.config/nvim"], LinkOutcome::Linked { backup: None });
     use std::os::unix::fs::PermissionsExt;
     let ssh = fs::metadata(sandbox.home.join(".ssh")).unwrap();
-    assert_eq!(ssh.permissions().mode() & 0o777, 0o700, "a folder this step makes is private");
+    assert_eq!(
+        ssh.permissions().mode() & 0o777,
+        0o700,
+        "a folder this step makes is private"
+    );
 }
 
 #[test]
@@ -190,7 +207,12 @@ fn applying_twice_changes_nothing_the_second_time() {
     apply(&sandbox, &plan);
     let rows = apply(&sandbox, &plan);
     assert_eq!(rows["~/.zshrc"], LinkOutcome::AlreadyLinked);
-    assert!(!sandbox.home.join("Library/Application Support/Soulcaster/backups").exists());
+    assert!(
+        !sandbox
+            .home
+            .join("Library/Application Support/Soulcaster/backups")
+            .exists()
+    );
 }
 
 #[test]
@@ -203,7 +225,10 @@ fn an_existing_symlink_is_moved_aside_not_written_through() {
     approve(&sandbox, &plan);
     let rows = apply(&sandbox, &plan);
     assert_eq!(fs::read_to_string(&victim).unwrap(), "keep me\n");
-    let LinkOutcome::Linked { backup: Some(backup) } = &rows["~/.zshrc"] else {
+    let LinkOutcome::Linked {
+        backup: Some(backup),
+    } = &rows["~/.zshrc"]
+    else {
         panic!("{:?}", rows["~/.zshrc"]);
     };
     assert_eq!(fs::read_link(backup).unwrap(), victim);
@@ -218,7 +243,10 @@ fn a_symlink_above_the_link_is_refused_so_nothing_lands_outside_home() {
     approve(&sandbox, &plan);
     let rows = apply(&sandbox, &plan);
     assert!(
-        matches!(refusal(&rows["~/.config/nvim/init.lua"]), LinkRefusal::SymlinkInPath { .. }),
+        matches!(
+            refusal(&rows["~/.config/nvim/init.lua"]),
+            LinkRefusal::SymlinkInPath { .. }
+        ),
         "{rows:?}"
     );
     assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
@@ -231,8 +259,14 @@ fn a_file_above_the_link_is_refused() {
     let plan = plan(&[("~/.config/nvim", "nvim")]);
     approve(&sandbox, &plan);
     let rows = apply(&sandbox, &plan);
-    assert!(matches!(refusal(&rows["~/.config/nvim"]), LinkRefusal::NotAFolder { .. }));
-    assert_eq!(fs::read_to_string(sandbox.home.join(".config")).unwrap(), "a file");
+    assert!(matches!(
+        refusal(&rows["~/.config/nvim"]),
+        LinkRefusal::NotAFolder { .. }
+    ));
+    assert_eq!(
+        fs::read_to_string(sandbox.home.join(".config")).unwrap(),
+        "a file"
+    );
 }
 
 #[test]
@@ -245,7 +279,10 @@ fn every_location_lint_refuses_is_refused_here_too_even_if_the_plan_forgot() {
         ("~/.a", "nvim"),
         ("~/.a/b", "nvim"),
         ("~/Developer/dotfiles/hooks", "nvim"),
-        ("~/Library/Application Support/Soulcaster/machine.json", "zsh/zshrc"),
+        (
+            "~/Library/Application Support/Soulcaster/machine.json",
+            "zsh/zshrc",
+        ),
     ]);
     fs::create_dir(sandbox.home.join("Documents")).unwrap();
     fs::write(sandbox.home.join("Documents/thesis.txt"), "years of work").unwrap();
@@ -328,9 +365,17 @@ fn a_repo_symlink_leaving_the_repo_or_reaching_git_is_refused() {
     assert_eq!(refusal(&rows["~/.six"]), &LinkRefusal::SourceLeavesRepo);
     assert_eq!(refusal(&rows["~/.seven"]), &LinkRefusal::SourceLeavesRepo);
     assert_eq!(refusal(&rows["~/.eight"]), &LinkRefusal::SourceLeavesRepo);
-    assert!(matches!(rows["~/.nine"], LinkOutcome::Linked { .. }), "inside is fine");
-    for name in [".one", ".two", ".three", ".four", ".five", ".six", ".seven", ".eight"] {
-        assert!(fs::symlink_metadata(sandbox.home.join(name)).is_err(), "{name}");
+    assert!(
+        matches!(rows["~/.nine"], LinkOutcome::Linked { .. }),
+        "inside is fine"
+    );
+    for name in [
+        ".one", ".two", ".three", ".four", ".five", ".six", ".seven", ".eight",
+    ] {
+        assert!(
+            fs::symlink_metadata(sandbox.home.join(name)).is_err(),
+            "{name}"
+        );
     }
 }
 
@@ -344,13 +389,18 @@ fn a_link_of_ours_already_at_that_location_is_not_replaced_by_a_case_variant() {
     approve(&sandbox, &plan);
     let rows = apply(&sandbox, &plan);
     assert_eq!(refusal(&rows["~/.zshrc"]), &LinkRefusal::AnotherLinkHere);
-    assert!(is_link_to(&sandbox.home.join(".zshrc"), &clone.join("nvim")));
+    assert!(is_link_to(
+        &sandbox.home.join(".zshrc"),
+        &clone.join("nvim")
+    ));
 }
 
 #[test]
 fn links_wait_for_a_new_preview_when_the_repo_on_disk_is_not_the_approved_commit() {
     let sandbox = sandbox();
-    sandbox.gh.on_git("rev-parse", Reply::ok(format!("{NEWER}\n")));
+    sandbox
+        .gh
+        .on_git("rev-parse", Reply::ok(format!("{NEWER}\n")));
     let plan = plan(&[("~/.zshrc", "zsh/zshrc")]);
     approve(&sandbox, &plan);
     let error = step(&sandbox)
@@ -372,7 +422,9 @@ fn a_clone_is_fetched_by_commit_and_refused_if_git_lands_anywhere_else() {
     let plan = plan(&[("~/.zshrc", "zsh/zshrc")]);
     approve(&sandbox, &plan);
     // A force-moved name: git reports some other commit after the checkout.
-    sandbox.gh.on_git("rev-parse", Reply::ok(format!("{NEWER}\n")));
+    sandbox
+        .gh
+        .on_git("rev-parse", Reply::ok(format!("{NEWER}\n")));
     let error = step(&sandbox)
         .ensure_clone(&plan, UserStage::password_is_gone())
         .unwrap_err();
@@ -404,16 +456,24 @@ fn a_clone_is_fetched_by_commit_and_refused_if_git_lands_anywhere_else() {
         let line = call.args.join(" ");
         assert!(line.contains("core.hooksPath=/dev/null"), "{line}");
         assert!(
-            call.env.contains(&("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string())),
+            call.env
+                .contains(&("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string())),
             "{line}"
         );
         assert!(
-            call.env.contains(&("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string())),
+            call.env
+                .contains(&("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string())),
             "{line}"
         );
     }
-    let init = calls.iter().find(|c| c.args.iter().any(|a| a == "init")).unwrap();
-    assert!(init.args.iter().any(|a| a == "--template="), "no template hooks");
+    let init = calls
+        .iter()
+        .find(|c| c.args.iter().any(|a| a == "init"))
+        .unwrap();
+    assert!(
+        init.args.iter().any(|a| a == "--template="),
+        "no template hooks"
+    );
 }
 
 #[test]
@@ -431,7 +491,10 @@ fn a_clone_location_with_something_already_there_is_left_alone() {
             .unwrap_err(),
         DotfilesError::LocationBusy
     );
-    assert_eq!(fs::read_to_string(clone.join("thesis.txt")).unwrap(), "mine");
+    assert_eq!(
+        fs::read_to_string(clone.join("thesis.txt")).unwrap(),
+        "mine"
+    );
     assert!(sandbox.gh.calls().is_empty());
 }
 
@@ -467,7 +530,9 @@ fn a_clone_location_reached_through_a_symlink_or_a_gitfile_is_refused() {
 #[test]
 fn an_existing_clone_of_some_other_repo_is_not_used() {
     let sandbox = sandbox();
-    sandbox.gh.on_git("--get", Reply::ok("https://github.com/evil/repo.git\n"));
+    sandbox
+        .gh
+        .on_git("--get", Reply::ok("https://github.com/evil/repo.git\n"));
     let plan = plan(&[("~/.zshrc", "zsh/zshrc")]);
     approve(&sandbox, &plan);
     assert_eq!(
@@ -496,7 +561,9 @@ fn the_token_goes_only_to_github_never_to_another_host() {
             script: None,
         })
         .unwrap();
-    sandbox.gh.on_git("rev-parse", Reply::ok(format!("{SHA}\n")));
+    sandbox
+        .gh
+        .on_git("rev-parse", Reply::ok(format!("{SHA}\n")));
     step(&sandbox)
         .ensure_clone(&other, UserStage::password_is_gone())
         .unwrap();
@@ -520,7 +587,8 @@ fn the_token_goes_only_to_github_never_to_another_host() {
         .unwrap();
     let line = fetch.args.join(" ");
     assert!(
-        line.contains("credential.https://github.com.helper=!") && line.contains("auth git-credential"),
+        line.contains("credential.https://github.com.helper=!")
+            && line.contains("auth git-credential"),
         "{line}"
     );
 }
@@ -554,10 +622,19 @@ fn the_script_needs_its_own_approval_and_runs_under_zsh_f_with_a_clean_environme
     approve(&sandbox, &plan);
     // The repo is approved and the script isn't, so nothing runs.
     assert_eq!(run_script(&sandbox, &plan), ScriptOutcome::NotApproved);
-    assert!(!sandbox.gh.calls().iter().any(|c| c.program.ends_with("zsh")));
+    assert!(
+        !sandbox
+            .gh
+            .calls()
+            .iter()
+            .any(|c| c.program.ends_with("zsh"))
+    );
 
     approve_script(&sandbox, &plan, "setup.sh");
-    assert_eq!(run_script(&sandbox, &plan), ScriptOutcome::Ran { success: true });
+    assert_eq!(
+        run_script(&sandbox, &plan),
+        ScriptOutcome::Ran { success: true }
+    );
     let call = sandbox
         .gh
         .calls()
@@ -568,7 +645,10 @@ fn the_script_needs_its_own_approval_and_runs_under_zsh_f_with_a_clean_environme
     assert_eq!(call.args, ["-f", "--", abs.to_str().unwrap()]);
     assert_eq!(call.cwd, Some(sandbox.home.join("Developer/dotfiles")));
     let line = format!("{:?}", call.env);
-    assert!(!line.contains("ASKPASS") && !line.contains("TOKEN"), "{line}");
+    assert!(
+        !line.contains("ASKPASS") && !line.contains("TOKEN"),
+        "{line}"
+    );
 
     // It runs once for this commit.
     assert_eq!(run_script(&sandbox, &plan), ScriptOutcome::AlreadyRan);
@@ -581,7 +661,10 @@ fn a_failing_script_is_reported_and_does_not_stop_anything() {
     approve(&sandbox, &plan);
     approve_script(&sandbox, &plan, "setup.sh");
     sandbox.gh.on_program("zsh", Reply::fails(3, "boom"));
-    assert_eq!(run_script(&sandbox, &plan), ScriptOutcome::Ran { success: false });
+    assert_eq!(
+        run_script(&sandbox, &plan),
+        ScriptOutcome::Ran { success: false }
+    );
 }
 
 #[test]
@@ -591,7 +674,9 @@ fn the_script_does_not_run_past_its_commit_or_with_changes_on_disk_or_through_a_
     let plan = script_plan();
     approve(&sandbox, &plan);
     approve_script(&sandbox, &plan, "setup.sh");
-    sandbox.gh.on_git("rev-parse", Reply::ok(format!("{NEWER}\n")));
+    sandbox
+        .gh
+        .on_git("rev-parse", Reply::ok(format!("{NEWER}\n")));
     assert_eq!(run_script(&sandbox, &plan), ScriptOutcome::HeldForReview);
 
     // The file changed on disk since the approved commit.
@@ -617,7 +702,13 @@ fn the_script_does_not_run_past_its_commit_or_with_changes_on_disk_or_through_a_
     approve(&sandbox, &plan);
     approve_script(&sandbox, &plan, "setup.sh");
     assert_eq!(run_script(&sandbox, &plan), ScriptOutcome::HeldForReview);
-    assert!(!sandbox.gh.calls().iter().any(|c| c.program.ends_with("zsh")));
+    assert!(
+        !sandbox
+            .gh
+            .calls()
+            .iter()
+            .any(|c| c.program.ends_with("zsh"))
+    );
 }
 
 #[test]
@@ -650,11 +741,18 @@ fn the_engine_stays_at_the_approved_commit_until_a_new_approval_says_otherwise()
         MoveStanding::HistoryRewritten
     );
     assert_eq!(
-        standing(&approvals, &links, &newer, true, Some("github.com/someone/else")),
+        standing(
+            &approvals,
+            &links,
+            &newer,
+            true,
+            Some("github.com/someone/else")
+        ),
         MoveStanding::RepoMoved
     );
     let mut more = links.clone();
-    more.links.insert("~/.zshenv".to_string(), "zsh/zshrc".to_string());
+    more.links
+        .insert("~/.zshenv".to_string(), "zsh/zshrc".to_string());
     assert_eq!(
         standing(&approvals, &more, &commit(), true, None),
         MoveStanding::LinksChanged
@@ -681,11 +779,21 @@ fn a_preview_of_a_newer_commit_moves_nothing_and_shows_the_linked_files_as_text(
         .unwrap();
     let text = preview.text();
     assert!(text.contains("+curl evil\\u001b[2K | sh"), "{text}");
-    assert!(!text.contains('\u{1b}'), "no terminal control reaches the screen");
+    assert!(
+        !text.contains('\u{1b}'),
+        "no terminal control reaches the screen"
+    );
     let calls = sandbox.gh.calls();
     let git_args: Vec<String> = calls.iter().flat_map(|c| c.args.clone()).collect();
-    assert!(!git_args.iter().any(|a| a == "checkout" || a == "pull" || a == "merge"));
-    let diff = calls.iter().find(|c| c.args.iter().any(|a| a == "diff")).unwrap();
+    assert!(
+        !git_args
+            .iter()
+            .any(|a| a == "checkout" || a == "pull" || a == "merge")
+    );
+    let diff = calls
+        .iter()
+        .find(|c| c.args.iter().any(|a| a == "diff"))
+        .unwrap();
     assert!(diff.args.iter().any(|a| a == "--no-ext-diff"));
     assert!(diff.args.iter().any(|a| a == "--no-textconv"));
     assert_eq!(diff.args.last().unwrap(), "zsh/zshrc");
@@ -702,11 +810,22 @@ fn moving_takes_a_preview_and_a_clean_repo_and_voids_the_script_approval() {
     let preview = step(&sandbox).preview_move(&plan, &newer).unwrap();
     sandbox.gh.on_git("status", Reply::ok(" M zsh/zshrc\n"));
     assert_eq!(
-        step(&sandbox).move_after_review(&plan, &preview).unwrap_err(),
+        step(&sandbox)
+            .move_after_review(&plan, &preview)
+            .unwrap_err(),
         DotfilesError::ChangesOnThisMac
     );
-    assert_eq!(sandbox.store.read().unwrap().dotfiles.unwrap().commit, commit());
-    assert!(!sandbox.gh.calls().iter().any(|c| c.args.iter().any(|a| a == "checkout")));
+    assert_eq!(
+        sandbox.store.read().unwrap().dotfiles.unwrap().commit,
+        commit()
+    );
+    assert!(
+        !sandbox
+            .gh
+            .calls()
+            .iter()
+            .any(|c| c.args.iter().any(|a| a == "checkout"))
+    );
 
     // A preview from before the approval changed is stale.
     let sandbox = crate::sandbox();
@@ -716,7 +835,9 @@ fn moving_takes_a_preview_and_a_clean_repo_and_voids_the_script_approval() {
     approvals.dotfiles.as_mut().unwrap().commit = newer.clone();
     sandbox.store.write(&approvals).unwrap();
     assert_eq!(
-        step(&sandbox).move_after_review(&plan, &preview).unwrap_err(),
+        step(&sandbox)
+            .move_after_review(&plan, &preview)
+            .unwrap_err(),
         DotfilesError::NotApproved
     );
 
@@ -732,7 +853,9 @@ fn moving_takes_a_preview_and_a_clean_repo_and_voids_the_script_approval() {
     approve(&sandbox, &plan);
     approve_script(&sandbox, &plan, "setup.sh");
     let preview = step(&sandbox).preview_move(&plan, &newer).unwrap();
-    sandbox.gh.on_git("rev-parse", Reply::ok(format!("{NEWER}\n")));
+    sandbox
+        .gh
+        .on_git("rev-parse", Reply::ok(format!("{NEWER}\n")));
     step(&sandbox).move_after_review(&plan, &preview).unwrap();
     let checkout = sandbox
         .gh
@@ -750,10 +873,15 @@ fn moving_takes_a_preview_and_a_clean_repo_and_voids_the_script_approval() {
     approve(&sandbox, &plan);
     let preview = step(&sandbox).preview_move(&plan, &newer).unwrap();
     assert!(matches!(
-        step(&sandbox).move_after_review(&plan, &preview).unwrap_err(),
+        step(&sandbox)
+            .move_after_review(&plan, &preview)
+            .unwrap_err(),
         DotfilesError::CommitMismatch { .. }
     ));
-    assert_eq!(sandbox.store.read().unwrap().dotfiles.unwrap().commit, commit());
+    assert_eq!(
+        sandbox.store.read().unwrap().dotfiles.unwrap().commit,
+        commit()
+    );
 }
 
 #[test]
@@ -777,8 +905,12 @@ fn every_word_on_screen_avoids_git_words() {
         LinkRefusal::SourceLeavesRepo,
         LinkRefusal::AnotherLinkHere,
         LinkRefusal::PathChanged,
-        LinkRefusal::SymlinkInPath { at: "~/.config".to_string() },
-        LinkRefusal::NotAFolder { at: "~/.config".to_string() },
+        LinkRefusal::SymlinkInPath {
+            at: "~/.config".to_string(),
+        },
+        LinkRefusal::NotAFolder {
+            at: "~/.config".to_string(),
+        },
         LinkRefusal::Io,
     ] {
         soulcaster_repo::assert_no_git_words(&refusal.to_string());
@@ -792,7 +924,10 @@ fn every_word_on_screen_avoids_git_words() {
         DotfilesError::Offline,
         DotfilesError::CommitGone,
         DotfilesError::PastApproved { head: commit() },
-        DotfilesError::CommitMismatch { wanted: commit(), found: commit() },
+        DotfilesError::CommitMismatch {
+            wanted: commit(),
+            found: commit(),
+        },
     ] {
         soulcaster_repo::assert_no_git_words(&error.to_string());
     }

@@ -265,8 +265,8 @@ impl Sender<'_> {
 
     /// GitHub's answer about the person's repo, making it private if there isn't one.
     fn repo(&self, created: &mut bool) -> Result<RepoFacts, WaitReason> {
-        let id = RepoId::new(&self.identity.login, self.repo_name)
-            .map_err(|_| WaitReason::Denied)?;
+        let id =
+            RepoId::new(&self.identity.login, self.repo_name).map_err(|_| WaitReason::Denied)?;
         let facts = match self.github.repo_facts(&id) {
             Ok(facts) => facts,
             Err(FetchError::NotVisible { .. }) => {
@@ -377,7 +377,10 @@ impl Sender<'_> {
                 });
             }
         }
-        if root.write_file(&parts, self.text.as_bytes(), 0o644).is_err() {
+        if root
+            .write_file(&parts, self.text.as_bytes(), 0o644)
+            .is_err()
+        {
             return Try::Wait(WaitReason::Denied);
         }
 
@@ -386,13 +389,16 @@ impl Sender<'_> {
         let email = format!("user.email={}", self.identity.noreply());
         let message = format!("Save {}", self.path);
         git_or_wait!(
-            "-c", &name,
-            "-c", &email,
+            "-c",
+            &name,
+            "-c",
+            &email,
             "commit",
             "--quiet",
             "--no-verify",
             "--no-gpg-sign",
-            "-m", &message,
+            "-m",
+            &message,
         );
         let refspec = format!("HEAD:refs/heads/{}", facts.default_branch.as_str());
         git_or_wait!("push", "--quiet", "--no-verify", "--", "origin", &refspec);

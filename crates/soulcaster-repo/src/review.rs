@@ -282,7 +282,9 @@ fn base_names(catalog: &Catalog) -> BTreeSet<String> {
 fn host_lookalike(host: &str) -> bool {
     host != "github.com"
         && (skeleton(host).contains("github")
-            || host.split(['.', ':']).any(|label| label.starts_with("xn--")))
+            || host
+                .split(['.', ':'])
+                .any(|label| label.starts_with("xn--")))
 }
 
 fn registrable(host: &str) -> String {
@@ -476,14 +478,19 @@ impl Review {
         if let Some(faked) = fakes_a_name(owner) {
             signal(
                 "source-lookalike",
-                format!("The account {owner} has a name like {faked}, and nothing connects it to {faked}."),
+                format!(
+                    "The account {owner} has a name like {faked}, and nothing connects it to {faked}."
+                ),
             );
         }
         for tap in &self.taps {
             if let Some(faked) = fakes_a_name(&tap.owner) {
                 signal(
                     "tap-lookalike",
-                    format!("The tap {} has a name like {faked}, and isn't from {faked}.", tap.tap),
+                    format!(
+                        "The tap {} has a name like {faked}, and isn't from {faked}.",
+                        tap.tap
+                    ),
                 );
             }
             for package in &tap.packages {

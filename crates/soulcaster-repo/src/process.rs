@@ -10,7 +10,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, Signal, kill_process_group};
-use soulcaster_core::command::{Command, CommandEnd, CommandOutput, CommandRunner, OutputStream, SpawnError};
+use soulcaster_core::command::{
+    Command, CommandEnd, CommandOutput, CommandRunner, OutputStream, SpawnError,
+};
 
 const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
 const LONGEST_LINE: usize = 64 * 1024;
@@ -18,7 +20,11 @@ const LONGEST_LINE: usize = 64 * 1024;
 #[derive(Default)]
 pub struct ProcessRunner;
 
-fn pump(mut pipe: impl Read + Send + 'static, stream: OutputStream, tx: mpsc::Sender<(OutputStream, Vec<u8>)>) {
+fn pump(
+    mut pipe: impl Read + Send + 'static,
+    stream: OutputStream,
+    tx: mpsc::Sender<(OutputStream, Vec<u8>)>,
+) {
     thread::spawn(move || {
         let mut chunk = [0_u8; 16 * 1024];
         while let Ok(read) = pipe.read(&mut chunk) {
@@ -30,10 +36,17 @@ fn pump(mut pipe: impl Read + Send + 'static, stream: OutputStream, tx: mpsc::Se
 }
 
 /// Hands complete lines to `on_line`. A line longer than anything a person reads is cut.
-fn send_lines(buffer: &mut Vec<u8>, stream: OutputStream, on_line: &mut dyn FnMut(OutputStream, &str)) {
+fn send_lines(
+    buffer: &mut Vec<u8>,
+    stream: OutputStream,
+    on_line: &mut dyn FnMut(OutputStream, &str),
+) {
     while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
         let line: Vec<u8> = buffer.drain(..=end).collect();
-        on_line(stream, String::from_utf8_lossy(&line[..end]).trim_end_matches('\r'));
+        on_line(
+            stream,
+            String::from_utf8_lossy(&line[..end]).trim_end_matches('\r'),
+        );
     }
     if buffer.len() > LONGEST_LINE {
         on_line(stream, &String::from_utf8_lossy(buffer));
@@ -118,7 +131,11 @@ impl CommandRunner for ProcessRunner {
         } else {
             CommandEnd::Signaled(status.signal().unwrap_or(0))
         };
-        Ok(CommandOutput { end, stdout, stderr })
+        Ok(CommandOutput {
+            end,
+            stdout,
+            stderr,
+        })
     }
 }
 

@@ -44,7 +44,7 @@ pub fn import(
         Err(error) => return refused(&error),
     };
     let fetched = match opened {
-        Opened::One(fetched) => fetched,
+        Opened::One(fetched) => *fetched,
         Opened::Pick(picker) => match pick(&importer, &picker, args.config) {
             Ok(Some(fetched)) => fetched,
             Ok(None) => return Done::Ok(print_picker(&picker)),
@@ -89,8 +89,8 @@ fn pick(
     let Some(wanted) = wanted else {
         return Ok(None);
     };
-    let path =
-        ConfigPath::parse(wanted).ok_or_else(|| Done::Refused("That isn't a Config in this repo.".to_string()))?;
+    let path = ConfigPath::parse(wanted)
+        .ok_or_else(|| Done::Refused("That isn't a Config in this repo.".to_string()))?;
     importer
         .pick(picker, &path)
         .map(Some)
@@ -106,7 +106,12 @@ fn print_picker(picker: &Picker) -> String {
     for row in &picker.rows {
         match &row.refused {
             Some(refusal) => {
-                let _ = writeln!(text, "  {}  refused: {}", row.path.as_str(), refusal.words());
+                let _ = writeln!(
+                    text,
+                    "  {}  refused: {}",
+                    row.path.as_str(),
+                    refusal.words()
+                );
             }
             None => {
                 let _ = writeln!(
@@ -184,7 +189,10 @@ fn print_review(review: &Review) -> String {
         Primary::Close => "Close without importing".to_string(),
         Primary::Start(words) => words,
     };
-    line(&mut text, format!("\nIn the window, the button here says: {button}"));
+    line(
+        &mut text,
+        format!("\nIn the window, the button here says: {button}"),
+    );
     text
 }
 
@@ -221,7 +229,11 @@ fn print_approvals(review: &Review, text: &mut String) {
                 .map(|why| format!("  refused: {why}"))
                 .or(link.note.map(|note| format!("  {note}")))
                 .unwrap_or_default();
-            let _ = writeln!(text, "    {} <- {}{status}", link.target_escaped, link.source);
+            let _ = writeln!(
+                text,
+                "    {} <- {}{status}",
+                link.target_escaped, link.source
+            );
         }
         if let Some(script) = &card.script {
             match &card.script_text {
@@ -284,9 +296,10 @@ pub fn save_config(
             }
             Done::Ok(text)
         }
-        Ok(SaveOutcome::AlreadyThere { repo, path, .. }) => {
-            Done::Ok(format!("{} already has this at {path}.\n", repo.full_name()))
-        }
+        Ok(SaveOutcome::AlreadyThere { repo, path, .. }) => Done::Ok(format!(
+            "{} already has this at {path}.\n",
+            repo.full_name()
+        )),
         Ok(SaveOutcome::ChangedElsewhere { path }) => Done::Waiting(format!(
             "{path} also changed on GitHub, so this wasn't saved. Choose which one to keep."
         )),
@@ -346,11 +359,20 @@ mod tests {
             panic!();
         };
         assert!(text.contains("looks built to mislead"), "{text}");
-        assert!(text.contains("Written out: Verified safe \\u0410pple"), "{text}");
+        assert!(
+            text.contains("Written out: Verified safe \\u0410pple"),
+            "{text}"
+        );
         assert!(text.contains("Not offered: evil-tools/tap/gh"), "{text}");
         assert!(text.contains("~/Documents <- d  refused"), "{text}");
-        assert!(text.contains("~/.zshenv <- z  Runs for every zsh"), "{text}");
-        assert!(text.contains("the button here says: Close without importing"), "{text}");
+        assert!(
+            text.contains("~/.zshenv <- z  Runs for every zsh"),
+            "{text}"
+        );
+        assert!(
+            text.contains("the button here says: Close without importing"),
+            "{text}"
+        );
         assert!(text.contains("Nothing was kept"), "{text}");
         assert!(!dir.path().join("Library").exists(), "nothing was written");
     }
@@ -363,7 +385,9 @@ mod tests {
             panic!();
         };
         assert!(text.contains("No approval was recorded"), "{text}");
-        let folder = dir.path().join("Library/Application Support/Soulcaster/imports");
+        let folder = dir
+            .path()
+            .join("Library/Application Support/Soulcaster/imports");
         let names: Vec<String> = std::fs::read_dir(&folder)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -373,7 +397,10 @@ mod tests {
         let kept = names.iter().find(|n| !n.ends_with(".source.json")).unwrap();
         let bytes = std::fs::read(folder.join(kept)).unwrap();
         let config = Config::parse(&bytes).expect("the copy is a valid Config");
-        assert!(!String::from_utf8_lossy(&bytes).contains("example-dev"), "no provenance in the file");
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains("example-dev"),
+            "no provenance in the file"
+        );
         assert_eq!(bytes, config.to_canonical_json().into_bytes());
     }
 
@@ -467,6 +494,10 @@ mod tests {
             },
         );
         assert!(matches!(done, Done::Waiting(_)), "{done:?}");
-        assert!(!gh.calls().iter().any(|c| c.args.iter().any(|a| a.contains("upload-pack"))));
+        assert!(
+            !gh.calls()
+                .iter()
+                .any(|c| c.args.iter().any(|a| a.contains("upload-pack")))
+        );
     }
 }

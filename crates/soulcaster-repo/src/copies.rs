@@ -49,7 +49,12 @@ pub fn slug(name: &str) -> String {
     }
 }
 
-fn write_in_support(home: &Path, folder: &str, file: &str, bytes: &[u8]) -> Result<PathBuf, CopyError> {
+fn write_in_support(
+    home: &Path,
+    folder: &str,
+    file: &str,
+    bytes: &[u8],
+) -> Result<PathBuf, CopyError> {
     let root = SafeRoot::open(home)?;
     let mut parts: Vec<&str> = SUPPORT.to_vec();
     parts.push(folder);
@@ -60,7 +65,12 @@ fn write_in_support(home: &Path, folder: &str, file: &str, bytes: &[u8]) -> Resu
 
 /// Your own Config, on this Mac, before anything is sent. `text` is already the canonical form.
 pub fn keep_own(home: &Path, name: &str, text: &str) -> Result<PathBuf, CopyError> {
-    write_in_support(home, "configs", &format!("{}.json", slug(name)), text.as_bytes())
+    write_in_support(
+        home,
+        "configs",
+        &format!("{}.json", slug(name)),
+        text.as_bytes(),
+    )
 }
 
 /// The commit a copy was read at, beside the copy. No approval is recorded, and the file itself
@@ -119,6 +129,9 @@ mod tests {
             kept,
             home.join("Library/Application Support/Soulcaster/configs/evil.json")
         );
-        assert_eq!(std::fs::metadata(&kept).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(&kept).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }

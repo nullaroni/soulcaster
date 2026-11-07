@@ -41,12 +41,19 @@ fn plan_rows(plan: &DotfilesPlan, mut body: El, status: &str) -> El {
 fn report_rows(report: &LinkReport, mut body: El) -> El {
     for row_data in &report.rows {
         let (status, failed) = match &row_data.outcome {
-            LinkOutcome::Linked { backup: Some(_) } => ("Linked, old file backed up".to_string(), false),
+            LinkOutcome::Linked { backup: Some(_) } => {
+                ("Linked, old file backed up".to_string(), false)
+            }
             LinkOutcome::Linked { backup: None } => ("Linked".to_string(), false),
             LinkOutcome::AlreadyLinked => ("Already linked".to_string(), false),
             LinkOutcome::Refused(why) => (why.to_string(), true),
         };
-        body = body.child(link_row(&row_data.target, &row_data.source, &status, failed));
+        body = body.child(link_row(
+            &row_data.target,
+            &row_data.source,
+            &status,
+            failed,
+        ));
     }
     body
 }
@@ -106,9 +113,14 @@ pub fn screen(app: &App) -> El {
         }
         DotfilesPhase::Applied(report) => {
             body = report_rows(report, body);
-            kit::primary("dot-review", "Review the updates", true, |app: &mut App, _| {
-                app.review_dotfiles_update();
-            })
+            kit::primary(
+                "dot-review",
+                "Review the updates",
+                true,
+                |app: &mut App, _| {
+                    app.review_dotfiles_update();
+                },
+            )
         }
         DotfilesPhase::Failed(words) => {
             body = body.child(sentence("failed", words, true));
@@ -118,19 +130,29 @@ pub fn screen(app: &App) -> El {
         }
         DotfilesPhase::Behind(preview) => {
             body = preview_block(preview, body);
-            kit::primary("dot-move", "Move to this version", true, |app: &mut App, _| {
-                app.move_dotfiles();
-            })
+            kit::primary(
+                "dot-move",
+                "Move to this version",
+                true,
+                |app: &mut App, _| {
+                    app.move_dotfiles();
+                },
+            )
         }
-        DotfilesPhase::Rewritten(_) => {
+        DotfilesPhase::Rewritten => {
             body = body.child(sentence(
                 "rewritten",
                 "Someone replaced the history, so Soulcaster can't show what changed. Treat this as a repo you've never seen.",
                 true,
             ));
-            kit::primary("dot-stay", "Stay on this version", true, |app: &mut App, _| {
-                app.repo.dotfiles = DotfilesPhase::Approved;
-            })
+            kit::primary(
+                "dot-stay",
+                "Stay on this version",
+                true,
+                |app: &mut App, _| {
+                    app.repo.dotfiles = DotfilesPhase::Approved;
+                },
+            )
         }
     };
     col()

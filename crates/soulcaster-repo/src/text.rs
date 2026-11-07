@@ -72,7 +72,9 @@ fn letter_script(c: char) -> Option<Script> {
             Some(Script::Latin)
         }
         '\u{370}'..='\u{3ff}' | '\u{1f00}'..='\u{1fff}' => Some(Script::Greek),
-        '\u{400}'..='\u{52f}' | '\u{1c80}'..='\u{1c8f}' | '\u{2de0}'..='\u{2dff}'
+        '\u{400}'..='\u{52f}'
+        | '\u{1c80}'..='\u{1c8f}'
+        | '\u{2de0}'..='\u{2dff}'
         | '\u{a640}'..='\u{a69f}' => Some(Script::Cyrillic),
         '\u{ff21}'..='\u{ff3a}' | '\u{ff41}'..='\u{ff5a}' => Some(Script::Fullwidth),
         _ => None,
@@ -104,13 +106,7 @@ pub fn claim(name: &str) -> Option<String> {
 /// A rough confusables folding, so `homebrevv` and `s0ulcaster` read as what they imitate.
 pub fn skeleton(text: &str) -> String {
     let mut s = text.to_lowercase();
-    for (from, to) in [
-        ("vv", "w"),
-        ("rn", "m"),
-        ("0", "o"),
-        ("1", "l"),
-        ("5", "s"),
-    ] {
+    for (from, to) in [("vv", "w"), ("rn", "m"), ("0", "o"), ("1", "l"), ("5", "s")] {
         s = s.replace(from, to);
     }
     s
@@ -130,7 +126,10 @@ mod tests {
 
     #[test]
     fn escaping_leaves_nothing_but_printable_ascii() {
-        assert_eq!(escaped("a\u{202e}b\n\u{1f600}"), "a\\u202eb\\u000a\\u{1f600}");
+        assert_eq!(
+            escaped("a\u{202e}b\n\u{1f600}"),
+            "a\\u202eb\\u000a\\u{1f600}"
+        );
         assert_eq!(escaped_lines("a\n\u{1b}[2K\tb"), "a\n\\u001b[2K\tb");
     }
 

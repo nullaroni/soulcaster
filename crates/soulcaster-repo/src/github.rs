@@ -21,7 +21,9 @@ const MAX_ANSWER: usize = 2 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FetchError {
     Offline,
-    NotVisible { signed_in: bool },
+    NotVisible {
+        signed_in: bool,
+    },
     RateLimited,
     TooLarge,
     /// The server's answer isn't what GitHub sends.
