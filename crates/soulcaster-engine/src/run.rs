@@ -1451,7 +1451,11 @@ impl<'a> Engine<'a> {
         // else it's left for the person, and nothing of theirs can be replaced.
         let any_config = configs
             .iter()
-            .any(|config| has_git_config(&self.home.join(config)));
+            .any(|config| has_git_config(&self.home.join(config)))
+            // A git repo at home brings its own config into every git there, after the global one.
+            || fs::symlink_metadata(self.home.join(".git")).is_ok()
+            // Git uses $XDG_CONFIG_HOME/git/config when that's set, and this git can't see it.
+            || xdg_config_home_in_use(self.home);
         if any_config {
             self.emit(EventKind::RunWarning {
                 text: "Git already has settings here, so its GitHub sign-in was left for you. Run `gh auth setup-git` if you want it.".into(),
@@ -3051,6 +3055,29 @@ fn link_on_the_way(home: &Path, relative: &Path) -> bool {
 /// spellings for a reader to tell one helper from another (a key on the section line, a comment,
 /// an escaped subsection), so any mention leaves the file alone. `gh`'s own helper being there
 /// already means there's nothing to set up.
+/// Whether the person may have `XDG_CONFIG_HOME` set: in this process, or in a shell startup
+/// file, since an app started from the Dock usually doesn't inherit a shell's variables.
+fn xdg_config_home_in_use(home: &Path) -> bool {
+    std::env::var_os("XDG_CONFIG_HOME").is_some()
+        || [
+            ".zshenv",
+            ".zprofile",
+            ".zshrc",
+            ".zlogin",
+            ".bash_profile",
+            ".bashrc",
+            ".profile",
+        ]
+        .iter()
+        .any(|file| {
+            fs::read(home.join(file)).is_ok_and(|bytes| {
+                bytes
+                    .windows(b"XDG_CONFIG_HOME".len())
+                    .any(|window| window == b"XDG_CONFIG_HOME")
+            })
+        })
+}
+
 /// Whether a git config file is there with anything in it. One that can't be read could hold
 /// anything, so it counts.
 fn has_git_config(path: &Path) -> bool {

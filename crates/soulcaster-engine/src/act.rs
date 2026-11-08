@@ -534,6 +534,9 @@ pub fn gh_setup_git(home: &Path) -> Command {
     base_command(home, BREW_GH)
         .args(["auth", "setup-git"])
         .env("GH_PATH", BREW_GH)
+        // Outside any repo, so no repo's own config is read while it writes.
+        .cwd("/")
+        .env("GIT_CEILING_DIRECTORIES", "/")
         .stall_limit(Duration::from_secs(60))
 }
 
