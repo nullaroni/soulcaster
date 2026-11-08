@@ -615,3 +615,49 @@ fn a_decision_does_not_land_in_the_middle_of_a_run() {
         Err(EngineError::Busy)
     ));
 }
+
+fn setting_store(id: &str, index: usize) -> soulcaster_core::recipe::Store {
+    let Some(soulcaster_core::recipe::Recipe::Setting(setting)) = Catalog::shipped()
+        .entry(id)
+        .map(|entry| entry.recipe.clone())
+    else {
+        panic!("{id} is a setting");
+    };
+    setting.stores[index].clone()
+}
+
+#[test]
+fn a_run_writes_a_show_setting_stored_as_hidden_the_right_way_round() {
+    let store = setting_store("menu-bar.show-spotlight", 0);
+    let home = Path::new("/Users/someone");
+    let write = soulcaster_engine::defaults_write_for_test(
+        home,
+        &store,
+        &soulcaster_core::config::SettingValue::Bool(true),
+    );
+    assert_eq!(
+        write.args,
+        [
+            "write",
+            "com.apple.Spotlight",
+            "MenuItemHidden",
+            "-bool",
+            "false"
+        ]
+    );
+}
+
+#[test]
+fn a_run_fills_in_the_home_folder_a_setting_stores() {
+    let store = setting_store("finder.new-window-target", 1);
+    let home = Path::new("/Users/someone");
+    let write = soulcaster_engine::defaults_write_for_test(
+        home,
+        &store,
+        &soulcaster_core::config::SettingValue::String("documents".into()),
+    );
+    assert_eq!(
+        write.args.last().unwrap(),
+        "file:///Users/someone/Documents/"
+    );
+}

@@ -790,6 +790,7 @@ impl<'a> Engine<'a> {
         store: &Store,
         desired: &SettingValue,
     ) -> Result<ReadBack, EngineError> {
+        let store = &act::with_home(self.home, store);
         match store {
             Store::Defaults { .. } => {
                 let Some(command) = act::defaults_read(self.home, store) else {
@@ -836,7 +837,7 @@ impl<'a> Engine<'a> {
     fn read_library(&mut self, id: &str, desired: &SettingValue) -> Result<ReadBack, EngineError> {
         match self.run_command(&act::library_read(self.home), id, false)? {
             CmdResult::Done(output) if output.is_success() => {
-                let hidden = output.stdout_text().contains("hidden");
+                let hidden = library_hidden(&output.stdout_text());
                 let visible = !hidden;
                 let wanted = matches!(desired, SettingValue::Bool(true));
                 Ok(if visible == wanted {
@@ -857,10 +858,10 @@ impl<'a> Engine<'a> {
             CmdResult::Done(output) if output.is_success() => {
                 let got = dock_paths(&output.stdout_text());
                 let same = got.len() == wanted.len()
-                    && got
-                        .iter()
-                        .zip(wanted.iter())
-                        .all(|(got, want)| dock_path(got) == dock_path(want));
+                    && got.iter().zip(wanted.iter()).all(|(got, want)| {
+                        dock_path(got)
+                            == dock_path(&act::expand_home(self.home, want).to_string_lossy())
+                    });
                 Ok(if same {
                     ReadBack::Match
                 } else {
@@ -2997,7 +2998,7 @@ pub(crate) fn compare_defaults(store: &Store, desired: &SettingValue, stdout: &s
     match stored_type {
         StoredType::Bool => {
             let got = matches!(text, "1" | "true");
-            let wanted = matches!(desired, SettingValue::Bool(true));
+            let wanted = act::stored_bool(desired, encode);
             if (text == "0" || text == "false" || text == "1" || text == "true") && got == wanted {
                 ReadBack::Match
             } else if text == "0" || text == "false" || text == "1" || text == "true" {
@@ -3144,6 +3145,19 @@ fn outcome_of(
             Err(failure_kind(&text, output.end == CommandEnd::Stalled))
         }
     }
+}
+
+/// Whether `ls -ldO` lists `hidden` among a folder's flags. The flags column comes right before
+/// the size, so a name with "hidden" in it elsewhere on the line doesn't count.
+pub(crate) fn library_hidden(listing: &str) -> bool {
+    let fields: Vec<&str> = listing.split_whitespace().collect();
+    let size = fields
+        .iter()
+        .skip(2)
+        .position(|field| field.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(|at| at + 2);
+    size.and_then(|at| fields.get(at.checked_sub(1)?))
+        .is_some_and(|flags| flags.split(',').any(|flag| flag == "hidden"))
 }
 
 pub(crate) fn dock_path(path: &str) -> String {

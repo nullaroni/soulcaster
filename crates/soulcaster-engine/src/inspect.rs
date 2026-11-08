@@ -27,7 +27,7 @@ use soulcaster_core::recipe::{
 use crate::act;
 use crate::record::{LastApplied, MachineRecord};
 use crate::run::{
-    Clock, EngineError, ReadBack, compare_defaults, dock_path, dock_paths, git_key,
+    Clock, EngineError, ReadBack, compare_defaults, dock_path, dock_paths, git_key, library_hidden,
     link_on_the_way, lock_run, parse_array, reason_label, rendered_git,
 };
 
@@ -188,8 +188,9 @@ impl Look<'_> {
                     Answer::Yes(text) if !text.trim().is_empty() => {
                         Stored::Text(text.trim().to_string())
                     }
-                    // Exit 1 is a key that isn't set. Anything else says nothing about the key.
-                    Answer::Yes(_) | Answer::No(1) => Stored::Unset,
+                    // Exit 1 is a key that isn't set. Anything else says nothing about the key,
+                    // and git prints the same empty line for `key` (true) and `key =` (false).
+                    Answer::No(1) => Stored::Unset,
                     _ => Stored::Unknown,
                 }
             }
@@ -215,8 +216,14 @@ impl Look<'_> {
         config: Option<&SettingValue>,
         last: Option<&Value>,
     ) -> Seen {
+        let stores: Vec<Store> = setting
+            .stores
+            .iter()
+            .filter(|store| !is_companion(store))
+            .map(|store| act::with_home(self.home, store))
+            .collect();
         let mut readings = Vec::new();
-        for store in &setting.stores {
+        for store in &stores {
             match self.read(store) {
                 Stored::Unknown => return Seen::CantTell,
                 reading => readings.push((store, reading)),
@@ -232,7 +239,7 @@ impl Look<'_> {
         for candidate in config.into_iter().chain(last_value.iter()) {
             if readings
                 .iter()
-                .all(|(store, reading)| holds(setting, store, reading, candidate))
+                .all(|(store, reading)| holds(self.home, setting, store, reading, candidate))
             {
                 return match serde_json::to_value(candidate) {
                     Ok(value) => Seen::Present(value),
@@ -245,7 +252,7 @@ impl Look<'_> {
         for (store, reading) in &readings {
             let this = match reading {
                 Stored::Unset => setting.unset_means.clone(),
-                Stored::Text(text) => match decode(setting, store, text) {
+                Stored::Text(text) => match decode(self.home, setting, store, text) {
                     Decoded::Says(value) => Some(value),
                     Decoded::Silent => continue,
                     Decoded::Cannot => return Seen::CantTell,
@@ -345,7 +352,33 @@ impl Look<'_> {
     }
 }
 
+/// A key written alongside the real one, the same for every choice. It says nothing about which
+/// was chosen, and macOS is free to change it, as it does a menu bar item's position.
+fn is_companion(store: &Store) -> bool {
+    let Store::Defaults {
+        encode: Some(encode),
+        ..
+    } = store
+    else {
+        return false;
+    };
+    let mut stored = encode.values();
+    let Some(first) = stored.next() else {
+        return false;
+    };
+    encode.len() > 1 && stored.all(|value| value == first)
+}
+
+fn git_bool(text: &str) -> Option<bool> {
+    match text.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => Some(true),
+        "false" | "no" | "off" | "0" => Some(false),
+        _ => None,
+    }
+}
+
 fn holds(
+    home: &Path,
     setting: &SettingRecipe,
     store: &Store,
     reading: &Stored,
@@ -359,13 +392,16 @@ fn holds(
         (Stored::Text(text), Store::Defaults { .. }) => {
             matches!(compare_defaults(store, candidate, text), ReadBack::Match)
         }
-        (Stored::Text(text), Store::GitConfig { .. }) => *text == rendered_git(candidate),
+        (Stored::Text(text), Store::GitConfig { .. }) => match candidate {
+            SettingValue::Bool(flag) => git_bool(text) == Some(*flag),
+            _ => *text == rendered_git(candidate),
+        },
         (
             Stored::Text(text),
             Store::Builtin {
                 name: BuiltinStore::LibraryVisible,
             },
-        ) => matches!(candidate, SettingValue::Bool(true)) != text.contains("hidden"),
+        ) => matches!(candidate, SettingValue::Bool(true)) != library_hidden(text),
         (
             Stored::Text(text),
             Store::Builtin {
@@ -377,10 +413,9 @@ fn holds(
             };
             let got = dock_paths(text);
             got.len() == wanted.len()
-                && got
-                    .iter()
-                    .zip(wanted)
-                    .all(|(got, want)| dock_path(got) == dock_path(want))
+                && got.iter().zip(wanted).all(|(got, want)| {
+                    dock_path(got) == dock_path(&act::expand_home(home, want).to_string_lossy())
+                })
         }
         _ => false,
     }
@@ -422,7 +457,7 @@ fn says(value: Option<Value>) -> Decoded {
 }
 
 /// What a store holds, in the Config's terms.
-fn decode(setting: &SettingRecipe, store: &Store, text: &str) -> Decoded {
+fn decode(home: &Path, setting: &SettingRecipe, store: &Store, text: &str) -> Decoded {
     match store {
         Store::Defaults {
             stored_type,
@@ -431,11 +466,21 @@ fn decode(setting: &SettingRecipe, store: &Store, text: &str) -> Decoded {
         } => {
             let text = text.trim();
             match stored_type {
-                StoredType::Bool => match text {
-                    "1" | "true" => Decoded::Says(Value::Bool(true)),
-                    "0" | "false" => Decoded::Says(Value::Bool(false)),
-                    _ => Decoded::Cannot,
-                },
+                StoredType::Bool => {
+                    let flag = match text {
+                        "1" | "true" => true,
+                        "0" | "false" => false,
+                        _ => return Decoded::Cannot,
+                    };
+                    if let Some(map) = encode {
+                        match token_for(map, |stored| stored.as_bool() == Some(flag)) {
+                            Err(()) => return Decoded::Silent,
+                            Ok(Some(token)) => return says(typed(setting, &token)),
+                            Ok(None) => {}
+                        }
+                    }
+                    Decoded::Says(Value::Bool(flag))
+                }
                 StoredType::Int | StoredType::Float => {
                     if let Some(map) = encode {
                         let stored_as = |stored: &Value| match stored {
@@ -486,18 +531,45 @@ fn decode(setting: &SettingRecipe, store: &Store, text: &str) -> Decoded {
                     }
                     Decoded::Says(Value::Array(list))
                 }
-                StoredType::Dict => Decoded::Silent,
+                StoredType::Dict => {
+                    let Some(map) = encode else {
+                        return Decoded::Cannot;
+                    };
+                    // The same reading the Run's comparison makes of this dictionary.
+                    let on = map.iter().filter(|(_, stored)| {
+                        let key = stored.as_str().unwrap_or("");
+                        text.contains(&format!("{key} = 1"))
+                            || text.contains(&format!("{key} = true"))
+                    });
+                    Decoded::Says(Value::Array(
+                        on.map(|(token, _)| Value::String(token.clone())).collect(),
+                    ))
+                }
             }
         }
-        Store::GitConfig { .. } => says(typed(setting, text.trim())),
+        Store::GitConfig { .. } => match setting.value_type {
+            ValueType::Boolean => says(git_bool(text.trim()).map(Value::Bool)),
+            _ => says(typed(setting, text.trim())),
+        },
         Store::Builtin {
             name: BuiltinStore::LibraryVisible,
-        } => Decoded::Says(Value::Bool(!text.contains("hidden"))),
+        } => Decoded::Says(Value::Bool(!library_hidden(text))),
         Store::Builtin {
             name: BuiltinStore::DockTiles,
-        } => Decoded::Says(Value::Array(
-            dock_paths(text).into_iter().map(Value::String).collect(),
-        )),
+        } => {
+            // A path under the home folder goes back to the `~` a Config can hold.
+            let home = home.to_string_lossy();
+            Decoded::Says(Value::Array(
+                dock_paths(text)
+                    .into_iter()
+                    .map(|path| match path.strip_prefix(home.as_ref()) {
+                        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+                        _ => path,
+                    })
+                    .map(Value::String)
+                    .collect(),
+            ))
+        }
         Store::Builtin { .. } => Decoded::Silent,
     }
 }

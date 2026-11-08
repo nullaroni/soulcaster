@@ -703,7 +703,8 @@ pub fn report(facts: &Facts<'_>) -> Report {
         };
         let spelled = file_key(facts, key);
         let only_needed = config.is_some() && spelled.is_none();
-        let held_up = !is_setting && !report.held.is_empty();
+        // That unreadable ID may be this entry's new name, for a setting that left the file too.
+        let held_up = !report.held.is_empty() && (!is_setting || kind == RowKind::Dropped);
         report.rows.push(Row {
             id: key.to_string(),
             file_key: spelled.unwrap_or_else(|| key.to_string()),

@@ -616,7 +616,40 @@ pub fn defaults_read(home: &Path, store: &Store) -> Option<Command> {
     Some(base_command(home, "/usr/bin/defaults").args(args))
 }
 
+/// A store as it is on this Machine: the Catalog says `<home>` where a value holds the home folder.
+pub fn with_home(home: &Path, store: &Store) -> Store {
+    let mut store = store.clone();
+    if let Store::Defaults {
+        encode: Some(encode),
+        ..
+    } = &mut store
+    {
+        for stored in encode.values_mut() {
+            if let Value::String(text) = stored {
+                *text = text.replace("<home>", &home_string(home));
+            }
+        }
+    }
+    store
+}
+
+/// What's written for a yes-or-no value. `encode` can invert it, as "show" stored as "hidden" does.
+pub(crate) fn stored_bool(
+    value: &SettingValue,
+    encode: &Option<std::collections::BTreeMap<String, Value>>,
+) -> bool {
+    let SettingValue::Bool(flag) = value else {
+        return false;
+    };
+    encode
+        .as_ref()
+        .and_then(|map| map.get(&flag.to_string()))
+        .and_then(Value::as_bool)
+        .unwrap_or(*flag)
+}
+
 pub fn defaults_write(home: &Path, store: &Store, value: &SettingValue) -> Option<Command> {
+    let store = &with_home(home, store);
     let Store::Defaults {
         domain,
         key,
@@ -639,7 +672,14 @@ pub fn defaults_write(home: &Path, store: &Store, value: &SettingValue) -> Optio
     match stored_type {
         StoredType::Bool => {
             args.push("-bool".into());
-            args.push(bool_word(value).into());
+            args.push(
+                if stored_bool(value, encode) {
+                    "true"
+                } else {
+                    "false"
+                }
+                .into(),
+            );
         }
         StoredType::Int => {
             args.push("-int".into());
@@ -678,13 +718,6 @@ pub fn defaults_write(home: &Path, store: &Store, value: &SettingValue) -> Optio
         }
     }
     Some(base_command(home, "/usr/bin/defaults").args(args))
-}
-
-fn bool_word(value: &SettingValue) -> &'static str {
-    match value {
-        SettingValue::Bool(true) => "true",
-        _ => "false",
-    }
 }
 
 /// The text `defaults` stores for an int or float, including a boolean's encoded number.
@@ -760,9 +793,11 @@ pub fn dock_write(home: &Path, apps: &[String]) -> Vec<Command> {
         "--no-restart",
     ])];
     for app in apps {
+        // No shell reads this, so nothing else would expand a `~`.
+        let app = expand_home(home, app).to_string_lossy().into_owned();
         commands.push(base_command(home, "/opt/homebrew/bin/dockutil").args([
             "--add",
-            app,
+            &app,
             "--no-restart",
         ]));
     }

@@ -287,8 +287,11 @@ pub fn adopt(
         let merged_text = savable_text(&merged, catalog)?;
         let canonical = config.to_canonical_json();
         let mut base = text.clone();
+        // A file holding something that can't be saved can't be tidied by itself. The reviewed
+        // change may be what takes that line out.
         if let Some(text) = &text
             && *text != canonical
+            && savable_text(&config, catalog).is_ok()
         {
             match send(runner, tools, catalog, request, &config, Some(text))? {
                 Sent::Done { .. } => base = Some(canonical),
