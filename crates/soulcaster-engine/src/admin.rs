@@ -422,17 +422,21 @@ pub(crate) fn disable_core_dumps() {
 /// The identifier the release signs the helper with, from `packaging/sign-app.sh`.
 pub const ASKPASS_IDENTIFIER: &str = "com.nullworks.macflayer.askpass";
 
-/// Where the helper is for a program at `executable`. In the app bundle it's in
-/// `Contents/Helpers`, beside the CLI and one folder over from the window, and that one always
-/// wins, so a file dropped next to the window can't stand in for it. A plain build has it beside
-/// the program.
+/// Where the helper is for a program at `executable`. The window of an app bundle is in
+/// `Contents/MacOS` and the helper in `Contents/Helpers`. Anything else, the CLI in the bundle or
+/// a plain build, has it beside the program. The folders decide this rather than whether a file
+/// happens to exist, so nothing dropped nearby can stand in for it.
 fn helper_for(executable: &std::path::Path) -> PathBuf {
     let Some(folder) = executable.parent() else {
         return PathBuf::new();
     };
-    let bundled = folder.join("../Helpers/soulcaster-askpass");
-    if bundled.exists() {
-        bundled
+    let in_a_bundle = folder.file_name().is_some_and(|name| name == "MacOS")
+        && folder
+            .parent()
+            .and_then(std::path::Path::file_name)
+            .is_some_and(|name| name == "Contents");
+    if in_a_bundle {
+        folder.with_file_name("Helpers").join("soulcaster-askpass")
     } else {
         folder.join("soulcaster-askpass")
     }

@@ -136,6 +136,8 @@ pub struct App {
     /// The Dotfiles Repo from an imported Config, for the Run to apply.
     pub dotfiles: Option<soulcaster_core::config::Dotfiles>,
     dotfiles_for: Option<String>,
+    /// Taps an Import's packages come from. They show as answered, and approve nothing here.
+    pub imported_taps: std::collections::BTreeSet<String>,
     pub scoped_wrong: bool,
 
     // Drift
@@ -203,6 +205,7 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         run_asks: (false, false),
         dotfiles: None,
         dotfiles_for: None,
+        imported_taps: Default::default(),
         scoped_wrong: false,
         drift: crate::drift::sample(),
         confirm_remove: None,
@@ -573,7 +576,11 @@ impl App {
         let plan = self.plan();
         // An answer from an earlier Review only counts if this plan shows that tap.
         let mut answers = self.answers.clone();
-        answers.taps.retain(|tap| plan.taps.contains_key(tap));
+        // And an Import approves its packages one by one, which `record_start` has stored. A tap
+        // approval would cover everything else from that tap too.
+        answers
+            .taps
+            .retain(|tap| plan.taps.contains_key(tap) && !self.imported_taps.contains(tap));
         self.engine.start_run(&plan, &answers);
         self.screen = Screen::Run;
         self.pump();

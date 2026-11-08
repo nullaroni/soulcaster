@@ -478,6 +478,7 @@ impl App {
                 .map(|c| format!("cask:{c}")),
         );
         self.answers.taps = run.taps.iter().cloned().collect();
+        self.imported_taps = run.taps.iter().cloned().collect();
         self.answers.licenses = run.licenses.clone();
         self.keep_dotfiles(run.config.dotfiles.clone());
         self.rebuild_rows();
