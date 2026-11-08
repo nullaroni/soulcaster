@@ -418,3 +418,24 @@ pub(crate) fn disable_core_dumps() {
     // SAFETY: `none` is a valid `rlimit` for the length of the call.
     unsafe { libc::setrlimit(libc::RLIMIT_CORE, &none) };
 }
+
+/// The identifier the release signs the helper with, from `packaging/sign-app.sh`.
+pub const ASKPASS_IDENTIFIER: &str = "com.nullworks.macflayer.askpass";
+
+/// The gate for this build: the helper beside `executable`, as packaging puts it. A release built
+/// with `SOULCASTER_TEAM_ID` answers only that team's signature. Any other build, a contributor's
+/// own ad-hoc one included, checks the helper's path alone.
+pub fn gate_beside(executable: &std::path::Path) -> SocketGate {
+    let helper = executable
+        .parent()
+        .map(|folder| folder.join("soulcaster-askpass"))
+        .unwrap_or_default();
+    let rule = match option_env!("SOULCASTER_TEAM_ID") {
+        Some(team) if !team.is_empty() => PeerRule::Signed {
+            identifier: ASKPASS_IDENTIFIER.to_string(),
+            team: team.to_string(),
+        },
+        _ => PeerRule::PathOnly,
+    };
+    SocketGate::new(helper, rule)
+}

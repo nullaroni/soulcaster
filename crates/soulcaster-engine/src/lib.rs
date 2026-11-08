@@ -14,7 +14,10 @@ mod process;
 mod record;
 mod run;
 
-pub use admin::{AdminGate, AdminWindow, Budget, PeerRule, SocketGate, Validation};
+pub use admin::{
+    ASKPASS_IDENTIFIER, AdminGate, AdminWindow, Budget, PeerRule, SocketGate, Validation,
+    gate_beside,
+};
 pub use approvals::RecordApprovals;
 pub use dotfiles::{DotfilesHook, DotfilesResult};
 pub use process::ProcessRunner;
