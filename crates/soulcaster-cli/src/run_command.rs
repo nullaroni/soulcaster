@@ -659,4 +659,242 @@ mod tests {
         drop(primary);
         let _ = child.wait();
     }
+
+    /// Ctrl-Z during the prompt. This Mac's zsh suspends the job, and `fg` turns echo back on
+    /// before the read continues. The password then shows on the terminal.
+    #[test]
+    fn a_stopped_password_prompt_echoes_the_password_when_continued() {
+        if std::env::var_os("SOULCASTER_ECHO_STOP_CHILD").is_some() {
+            // Fresh process on the pty, with the signals a terminal actually delivers.
+            // SAFETY: `set` is initialized by `sigemptyset`. The mask and dispositions apply only
+            // to this child, which is not the terminal this test was launched from.
+            unsafe {
+                let mut set = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+                libc::sigemptyset(set.as_mut_ptr());
+                libc::sigaddset(set.as_mut_ptr(), libc::SIGINT);
+                libc::sigaddset(set.as_mut_ptr(), libc::SIGTSTP);
+                libc::pthread_sigmask(libc::SIG_UNBLOCK, set.as_ptr(), std::ptr::null_mut());
+                libc::signal(libc::SIGINT, libc::SIG_DFL);
+                libc::signal(libc::SIGTSTP, libc::SIG_DFL);
+            }
+            let _ = super::read_without_echo("Password: ");
+            // After the read returns, on the pty, so a password echoed above was consumed by the
+            // prompt and not typed at the shell afterwards.
+            if let Ok(mut tty) = std::fs::OpenOptions::new().write(true).open("/dev/tty") {
+                let _ = std::io::Write::write_all(&mut tty, b"PROMPT_DONE\n");
+            }
+            std::process::exit(0);
+        }
+
+        let mut primary: libc::c_int = -1;
+        let mut replica: libc::c_int = -1;
+        // SAFETY: both pointers are live `c_int`s. A null window and name ask for defaults.
+        let opened = unsafe {
+            libc::openpty(
+                &mut primary,
+                &mut replica,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(opened, 0, "openpty: {}", std::io::Error::last_os_error());
+        let primary = unsafe { std::os::fd::OwnedFd::from_raw_fd(primary) };
+        let replica = unsafe { std::os::fd::OwnedFd::from_raw_fd(replica) };
+        let _replica_kept = replica.try_clone().unwrap();
+        // SAFETY: the primary is open. Non-blocking reads keep the test from waiting on zsh.
+        unsafe {
+            let flags = libc::fcntl(primary.as_raw_fd(), libc::F_GETFL);
+            assert!(flags >= 0, "fcntl: {}", std::io::Error::last_os_error());
+            assert_eq!(
+                libc::fcntl(primary.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK),
+                0,
+                "fcntl: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+
+        let exe = std::env::current_exe().unwrap();
+        let command = format!(
+            "SOULCASTER_ECHO_STOP_CHILD=1 {} {} --exact\n",
+            shell_quote(&exe.to_string_lossy()),
+            shell_quote(
+                "run_command::tests::a_stopped_password_prompt_echoes_the_password_when_continued"
+            )
+        );
+        let mut child = std::process::Command::new("/bin/zsh");
+        child
+            .args(["-f", "-i"])
+            .env("PS1", "ZSH> ")
+            .env("TERM", "xterm-256color")
+            .stdin(std::process::Stdio::from(replica.try_clone().unwrap()))
+            .stdout(std::process::Stdio::from(replica.try_clone().unwrap()))
+            .stderr(std::process::Stdio::from(replica));
+        // SAFETY: runs in the forked child before exec. `setsid` and `TIOCSCTTY` only affect that
+        // child. File descriptor 0 is the pty replica handed in as stdin.
+        unsafe {
+            child.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::ioctl(0, libc::TIOCSCTTY as libc::c_ulong, 0) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = child.spawn().unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        struct StopShell(Option<i32>);
+        impl Drop for StopShell {
+            fn drop(&mut self) {
+                if let Some(pid) = self.0.take() {
+                    // SAFETY: `pid` leads the session this test spawned. Killing the group ends
+                    // zsh and the password prompt if the test unwinds while they are still running.
+                    unsafe {
+                        libc::kill(-pid, libc::SIGKILL);
+                        libc::kill(pid, libc::SIGKILL);
+                    }
+                }
+            }
+        }
+        let mut stop = StopShell(Some(pid));
+        let primary_fd = primary.as_raw_fd();
+        let mut seen = read_pty(primary_fd, Duration::from_millis(800));
+        write_pty(primary_fd, command.as_bytes());
+        let prompted = wait_for(primary_fd, &mut seen, b"Password:", Duration::from_secs(8));
+        assert!(
+            prompted,
+            "the password prompt never came up: {}",
+            String::from_utf8_lossy(&seen)
+        );
+        // The prompt is written, then echo goes off, then the read blocks. zsh's own line editor
+        // also clears echo, so wait until the job has had the terminal and echo is off again.
+        let echo_off_at = std::time::Instant::now();
+        let echo_on = |fd: std::os::fd::RawFd| -> bool {
+            let mut termios = unsafe { std::mem::zeroed::<libc::termios>() };
+            // SAFETY: `fd` is the open pty primary and `termios` is a live value of that type.
+            let read = unsafe { libc::tcgetattr(fd, &mut termios) };
+            assert_eq!(read, 0, "tcgetattr: {}", std::io::Error::last_os_error());
+            termios.c_lflag & libc::ECHO != 0
+        };
+        while echo_on(primary_fd) && echo_off_at.elapsed() < Duration::from_secs(2) {
+            seen.extend(read_pty(primary_fd, Duration::from_millis(20)));
+        }
+        assert!(
+            !echo_on(primary_fd),
+            "echo was still on after the prompt: {}",
+            String::from_utf8_lossy(&seen)
+        );
+        std::thread::sleep(Duration::from_millis(150));
+        // The terminal's suspend character, Ctrl-Z, not a direct kill.
+        write_pty(primary_fd, b"\x1a");
+        let suspended = wait_for(primary_fd, &mut seen, b"suspended", Duration::from_secs(3));
+        assert!(
+            suspended,
+            "zsh did not suspend the prompt: {}",
+            String::from_utf8_lossy(&seen)
+        );
+        write_pty(primary_fd, b"fg\n");
+        let continued = wait_for(primary_fd, &mut seen, b"continued", Duration::from_secs(3));
+        assert!(
+            continued,
+            "zsh did not continue the prompt: {}",
+            String::from_utf8_lossy(&seen)
+        );
+        let password = b"s3cret-password\n";
+        write_pty(primary_fd, password);
+        let mut after = Vec::new();
+        let done = wait_for(
+            primary_fd,
+            &mut after,
+            b"PROMPT_DONE",
+            Duration::from_secs(3),
+        );
+        assert!(
+            done,
+            "the prompt never finished the read: {}",
+            String::from_utf8_lossy(&after)
+        );
+        assert!(
+            !after
+                .windows(b"s3cret-password".len())
+                .any(|window| window == b"s3cret-password"),
+            "the password was echoed after Ctrl-Z and fg. zsh turns echo back on when the job continues, and the prompt never turns it off again: {}",
+            String::from_utf8_lossy(&after)
+        );
+        stop.0 = None;
+        // SAFETY: same session as above. It has finished the assertion, so end it.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+            libc::kill(pid, libc::SIGKILL);
+        }
+        drop(primary);
+        let _ = child.wait();
+    }
+
+    fn shell_quote(text: &str) -> String {
+        format!("'{}'", text.replace('\'', r"'\''"))
+    }
+
+    fn write_pty(fd: std::os::fd::RawFd, bytes: &[u8]) {
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            // SAFETY: `fd` is the open pty primary and `rest` is the bytes still to send.
+            let wrote = unsafe { libc::write(fd, rest.as_ptr().cast(), rest.len()) };
+            assert!(wrote > 0, "write: {}", std::io::Error::last_os_error());
+            let wrote = usize::try_from(wrote).unwrap();
+            rest = &rest[wrote..];
+        }
+    }
+
+    fn read_pty(fd: std::os::fd::RawFd, wait: Duration) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut buf = [0_u8; 2048];
+        let deadline = std::time::Instant::now() + wait;
+        while std::time::Instant::now() < deadline {
+            let mut poll = libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let left = deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis()
+                .min(200);
+            // SAFETY: `poll` describes the open pty primary. A short wait bounds the test.
+            let ready = unsafe { libc::poll(&mut poll, 1, i32::try_from(left).unwrap_or(200)) };
+            if ready <= 0 {
+                continue;
+            }
+            loop {
+                // SAFETY: `buf` is writable storage and `fd` is the open pty primary.
+                let read = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+                if read > 0 {
+                    let read = usize::try_from(read).unwrap();
+                    out.extend_from_slice(&buf[..read]);
+                    continue;
+                }
+                break;
+            }
+        }
+        out
+    }
+
+    fn wait_for(
+        fd: std::os::fd::RawFd,
+        seen: &mut Vec<u8>,
+        needle: &[u8],
+        limit: Duration,
+    ) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < limit {
+            if seen.windows(needle.len()).any(|window| window == needle) {
+                return true;
+            }
+            let left = limit.saturating_sub(start.elapsed());
+            seen.extend(read_pty(fd, left.min(Duration::from_millis(100))));
+        }
+        seen.windows(needle.len()).any(|window| window == needle)
+    }
 }
