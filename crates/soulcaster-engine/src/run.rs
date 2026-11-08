@@ -2556,6 +2556,11 @@ impl<'a> Engine<'a> {
             }
             match outcome_of(ran) {
                 Ok(output) => return Ok(CmdResult::Done(output)),
+                // It would have been retried, but the password went with the failed clear. It's
+                // admin work for later, not a failure of the step, and not a reason for a dialog.
+                Err(FailureKind::Network) if self.password.is_none() => {
+                    return Ok(CmdResult::Failed(FailureKind::NeedsAdmin));
+                }
                 // With the password gone there's no retry, so there's nothing to wait for.
                 Err(FailureKind::Network) if attempt < 2 && self.password.is_some() => {
                     self.backoff(attempt);
@@ -3050,23 +3055,13 @@ fn link_on_the_way(home: &Path, relative: &Path) -> bool {
     })
 }
 
-/// A `helper` in a `[credential ...]` section that names GitHub, other than `gh`'s own.
+/// Whether a git config file says anything about signing in to GitHub. Git's syntax has too many
+/// spellings for a reader to tell one helper from another (a key on the section line, a comment,
+/// an escaped subsection), so any mention leaves the file alone. `gh`'s own helper being there
+/// already means there's nothing to set up.
 fn has_other_github_helper(text: &str) -> bool {
-    let mut section = String::new();
-    text.lines().any(|line| {
-        let line = line.trim();
-        if line.starts_with('[') {
-            section = line.to_lowercase();
-            return false;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            return false;
-        };
-        section.starts_with("[credential")
-            && section.contains("github")
-            && key.trim().eq_ignore_ascii_case("helper")
-            && !value.contains("gh auth git-credential")
-    })
+    let folded: String = text.to_lowercase().chars().filter(|c| *c != '\\').collect();
+    folded.contains("credential") && folded.contains("github")
 }
 
 fn outcome_of(
@@ -3261,21 +3256,24 @@ mod helper_tests {
     use super::has_other_github_helper;
 
     #[test]
-    fn only_another_helper_for_github_counts() {
-        assert!(has_other_github_helper(
-            "[credential \"https://github.com\"]\n\thelper = !/usr/local/bin/other\n"
-        ));
-        assert!(has_other_github_helper(
-            "[Credential \"https://GitHub.com\"]\n  HELPER=osxkeychain\n"
-        ));
-        assert!(!has_other_github_helper(
-            "[credential \"https://github.com\"]\n\thelper = !/opt/homebrew/bin/gh auth git-credential\n"
-        ));
+    fn any_github_credential_leaves_the_file_alone() {
+        for text in [
+            "[credential \"https://github.com\"]\n\thelper = !/usr/local/bin/other\n",
+            "[Credential \"https://GitHub.com\"]\n  HELPER=osxkeychain\n",
+            "[credential \"https://github.com\"] helper = osxkeychain\n",
+            "[credential \"https://git\\hub.com\"]\n\thelper = osxkeychain\n",
+            "[credential \"https://github.com\"]\n\thelper = osxkeychain # gh auth git-credential\n",
+            // gh's own: already set up, so there's nothing to do.
+            "[credential \"https://github.com\"]\n\thelper = !/opt/homebrew/bin/gh auth git-credential\n",
+        ] {
+            assert!(has_other_github_helper(text), "{text}");
+        }
+        // A helper for everything, or for another host, doesn't stop gh adding its own.
         assert!(!has_other_github_helper(
             "[credential]\n\thelper = osxkeychain\n"
         ));
         assert!(!has_other_github_helper(
-            "[user]\n\tname = github helper\n[credential \"https://gitlab.com\"]\n\thelper = x\n"
+            "[credential \"https://gitlab.com\"]\n\thelper = x\n"
         ));
     }
 }
