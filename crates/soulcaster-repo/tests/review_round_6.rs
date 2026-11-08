@@ -217,14 +217,14 @@ fn a_skipped_ds_store_is_what_the_link_follows_and_the_script_runs() {
     let links = plan(".DS_Store");
     let (outcome, script, marker) = attempt(&repo, &links);
     let followed = fs::read_to_string(repo.home.join(".zshrc")).unwrap_or_default();
-    assert_eq!(
-        (outcome.clone(), script, marker, followed.as_str()),
-        (
-            LinkOutcome::Refused(LinkRefusal::RepoChanged),
-            ScriptOutcome::HeldForReview,
-            false,
-            ""
-        ),
+    // Changed from one exact pair of outcomes: the fix refuses a `.DS_Store` source and script
+    // before the tree check, as `SourceLeavesRepo` and `NotApproved`. What's proven is unchanged:
+    // the link is refused, the script doesn't run, and nothing was followed.
+    assert!(
+        matches!(outcome, LinkOutcome::Refused(_))
+            && !matches!(script, ScriptOutcome::Ran { .. })
+            && !marker
+            && followed.is_empty(),
         "skipping .DS_Store hid its bytes at {}: linked {outcome:?}, script {script:?}, marker {marker}, followed {followed:?}",
         repo.commit
     );

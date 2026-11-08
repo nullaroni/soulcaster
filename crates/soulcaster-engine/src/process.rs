@@ -148,7 +148,14 @@ impl CommandRunner for ProcessRunner {
             let mut bytes_left = DRAIN_BYTES_MAX;
             while !(stdout_done && stderr_done) && bytes_left > 0 && !wait_left.is_zero() {
                 let waiting = Instant::now();
-                let received = rx.recv_timeout(DRAIN.min(wait_left));
+                // Read as data, a pipe still open means a cut-off answer, so give a busy machine
+                // the whole wait to close it rather than the log's short quiet period.
+                let quiet = if self.kill_past_limit {
+                    wait_left
+                } else {
+                    DRAIN.min(wait_left)
+                };
+                let received = rx.recv_timeout(quiet);
                 wait_left = wait_left.saturating_sub(waiting.elapsed());
                 match received {
                     Ok(PipeMsg::Chunk(stream, bytes)) => {
@@ -171,20 +178,8 @@ impl CommandRunner for ProcessRunner {
             }
         }
 
-        flush_partial(
-            OutputStream::Stdout,
-            &mut stdout_line,
-            &mut stdout_buf,
-            self.output_limit,
-            on_line,
-        );
-        flush_partial(
-            OutputStream::Stderr,
-            &mut stderr_line,
-            &mut stderr_buf,
-            self.output_limit,
-            on_line,
-        );
+        flush_partial(OutputStream::Stdout, &mut stdout_line, on_line);
+        flush_partial(OutputStream::Stderr, &mut stderr_line, on_line);
 
         // A finished command can still have been cut off: past the limit before this noticed, or
         // with a pipe still open when the drain stopped. Neither is the whole answer.
@@ -280,6 +275,10 @@ fn read_pipe<R: Read + Send>(pipe: Option<R>, stream: OutputStream, tx: SyncSend
     let _ = tx.send(PipeMsg::Eof(stream));
 }
 
+/// Keeps the bytes exactly as the program wrote them, up to `limit`, because some output is data:
+/// a NUL-separated listing, a carriage return in a file name, a line longer than any log line.
+/// Separately, it hands complete lines to `on_line` for the log, where a carriage return is
+/// dropped and a very long line is cut.
 fn absorb(
     stream: OutputStream,
     bytes: &[u8],
@@ -288,9 +287,11 @@ fn absorb(
     limit: usize,
     on_line: &mut dyn FnMut(OutputStream, &str),
 ) {
+    let room = limit.saturating_sub(buf.len());
+    buf.extend_from_slice(&bytes[..bytes.len().min(room)]);
     for &byte in bytes {
         if byte == b'\n' {
-            emit_line(stream, line, buf, limit, on_line);
+            emit_line(stream, line, on_line);
             line.clear();
             continue;
         }
@@ -298,7 +299,7 @@ fn absorb(
             continue;
         }
         if line.len() >= LINE_CAP {
-            emit_line(stream, line, buf, limit, on_line);
+            emit_line(stream, line, on_line);
             line.clear();
         }
         line.push(byte);
@@ -308,38 +309,16 @@ fn absorb(
 fn flush_partial(
     stream: OutputStream,
     line: &mut Vec<u8>,
-    buf: &mut Vec<u8>,
-    limit: usize,
     on_line: &mut dyn FnMut(OutputStream, &str),
 ) {
     if !line.is_empty() {
-        emit_line(stream, line, buf, limit, on_line);
+        emit_line(stream, line, on_line);
         line.clear();
     }
 }
 
-fn emit_line(
-    stream: OutputStream,
-    line: &[u8],
-    buf: &mut Vec<u8>,
-    limit: usize,
-    on_line: &mut dyn FnMut(OutputStream, &str),
-) {
-    // The cap is on what's kept in memory. The log still sees every line, and has its own cap.
-    let text = String::from_utf8_lossy(line);
-    on_line(stream, &text);
-    if buf.len() >= limit {
-        return;
-    }
-    let room = limit - buf.len();
-    let take = line.len().min(room);
-    buf.extend_from_slice(&line[..take]);
-    if buf.len() < limit {
-        buf.push(b'\n');
-    }
-    if buf.len() > limit {
-        buf.truncate(limit);
-    }
+fn emit_line(stream: OutputStream, line: &[u8], on_line: &mut dyn FnMut(OutputStream, &str)) {
+    on_line(stream, &String::from_utf8_lossy(line));
 }
 
 fn kill_group(pid: u32) {
@@ -471,6 +450,15 @@ mod tests {
             output.stdout.len()
         );
         assert!(output.stdout.len() <= 64, "{}", output.stdout.len());
+    }
+
+    #[test]
+    fn the_output_is_the_bytes_the_program_wrote() {
+        let output = run(Command::new("/usr/bin/printf").args(["a\\r\\0b\\nno newline"]));
+        assert_eq!(output.stdout, b"a\r\0b\nno newline");
+        let long = run(Command::new("/usr/bin/perl").args(["-e", "print q(x) x 100000"]));
+        assert_eq!(long.stdout.len(), 100_000);
+        assert!(!long.stdout.contains(&b'\n'));
     }
 
     #[test]

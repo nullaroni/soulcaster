@@ -301,10 +301,11 @@ fn verify_source(root: &Path, source: &str) -> Result<PathBuf, LinkRefusal> {
     let inside = canonical
         .strip_prefix(root)
         .map_err(|_| LinkRefusal::SourceLeavesRepo)?;
-    if inside
-        .components()
-        .any(|part| fold(&part.as_os_str().to_string_lossy()) == ".git")
-    {
+    // The check of the clone skips Finder's `.DS_Store` files, so a link must never use one.
+    if inside.components().any(|part| {
+        let name = fold(&part.as_os_str().to_string_lossy());
+        name == ".git" || name == ".ds_store"
+    }) {
         return Err(LinkRefusal::SourceLeavesRepo);
     }
     Ok(literal)
@@ -314,17 +315,19 @@ fn verify_source(root: &Path, source: &str) -> Result<PathBuf, LinkRefusal> {
 fn tree_entries(listing: &[u8]) -> Option<BTreeMap<PathBuf, (String, String)>> {
     use std::os::unix::ffi::OsStrExt;
     let mut entries = BTreeMap::new();
-    // The runner ends its output with a newline, so a last record of only that is no entry.
-    for record in listing
-        .split(|byte| *byte == 0)
-        .filter(|record| !record.iter().all(u8::is_ascii_whitespace))
-    {
+    for record in listing.split(|byte| *byte == 0).filter(|r| !r.is_empty()) {
         let tab = record.iter().position(|byte| *byte == b'\t')?;
         let head = std::str::from_utf8(&record[..tab]).ok()?;
         let mut parts = head.split(' ');
         let (mode, _kind, id) = (parts.next()?, parts.next()?, parts.next()?);
         let path = PathBuf::from(std::ffi::OsStr::from_bytes(&record[tab + 1..]));
-        entries.insert(path, (mode.to_string(), id.to_string()));
+        // Two entries for one path can only mean the listing isn't what it seems.
+        if entries
+            .insert(path, (mode.to_string(), id.to_string()))
+            .is_some()
+        {
+            return None;
+        }
     }
     Some(entries)
 }
@@ -776,7 +779,11 @@ impl DotfilesStep<'_> {
         if script.ran {
             return ScriptOutcome::AlreadyRan;
         }
-        if path.starts_with('-') || safe_parts(path).is_none() {
+        // The check of the clone skips Finder's `.DS_Store` files, so the script can't be one.
+        let is_ds_store = Path::new(path)
+            .file_name()
+            .is_some_and(|name| fold(&name.to_string_lossy()) == ".ds_store");
+        if path.starts_with('-') || safe_parts(path).is_none() || is_ds_store {
             return ScriptOutcome::NotApproved;
         }
         let clone = match self.ensure_clone(plan, stage) {
