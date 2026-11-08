@@ -25,7 +25,9 @@ plist_value() {
 for path in "$contents/Info.plist" "$contents/PkgInfo" "${binaries[@]}" \
   "$contents/Resources/Soulcaster.icns" \
   "$contents/Resources/licenses/IBMPlexMono-OFL.txt" \
-  "$contents/Resources/licenses/PlayfairDisplay-OFL.txt"; do
+  "$contents/Resources/licenses/PlayfairDisplay-OFL.txt" \
+  "$contents/Resources/licenses/SimpleIcons-LICENSE.md" \
+  "$contents/Resources/licenses/Devicon-LICENSE.txt"; do
   if [ -f "$path" ]; then
     echo "ok    present: ${path#"$app"/}"
   else

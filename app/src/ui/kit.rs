@@ -110,7 +110,7 @@ pub fn hairline() -> El {
     el().w_full().h(1.0).fill(rule_color())
 }
 
-fn row_rule() -> El {
+pub fn row_rule() -> El {
     el().w_full().h(1.0).fill(row_rule_color())
 }
 

@@ -106,8 +106,9 @@ pub struct App {
     pub search: TextEdit,
     pub only_selected: bool,
     pub rows: Vec<CatRow>,
-    pub rows_version: u64,
     pub current_section: usize,
+    /// How wide the Catalog's content is, which sets its column count.
+    pub grid_width: f32,
     pub config_name: String,
 
     // Review
@@ -190,8 +191,9 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         search: TextEdit::new(""),
         only_selected: false,
         rows: Vec::new(),
-        rows_version: 0,
         current_section: 0,
+        // The default window, less the sidebar. The first layout reports the real width.
+        grid_width: 911.0,
         config_name: "My Mac".to_string(),
         base_present: false,
         answers: Answers::default(),
@@ -442,23 +444,30 @@ impl App {
     }
 
     pub fn jump_to_section(&mut self, section: usize, tx: &mut rune::Tx) {
-        if self.only_selected || !self.search.text.is_empty() {
-            self.only_selected = false;
-            self.search.clear();
-            self.rebuild_rows();
-        }
-        self.current_section = section;
-        let key = match section {
-            usize::MAX => "row-surface-first".to_string(),
-            ALWAYS_SECTION => "row-base-0".to_string(),
-            _ => format!("row-section-{section}"),
-        };
-        tx.scroll_into_view(key);
+        self.show_section(section);
+        tx.scroll_to_instant("catalog-list", 0.0, 0.0);
     }
 
-    /// The flat list the Catalog's virtual rows read. Rebuilt on search and filter changes, not on
-    /// every commit: a toggle only changes what a row draws, not which rows exist.
+    /// Opens one category, leaving any search or filter.
+    pub fn show_section(&mut self, section: usize) {
+        self.only_selected = false;
+        self.search.clear();
+        self.current_section = section;
+        self.rebuild_rows();
+    }
+
+    /// Looking at one category, rather than a search or the selection across all of them.
+    pub fn browsing(&self) -> bool {
+        !self.only_selected && self.search.text.trim().is_empty()
+    }
+
+    /// What the Catalog shows: one category while browsing, every category for a search or the
+    /// selection. Rebuilt on search, filter and category changes, not on every commit: a toggle
+    /// only changes what a row draws, not which rows exist.
     pub fn rebuild_rows(&mut self) {
+        if self.current_section == PACKAGES_SECTION && self.packages.is_empty() {
+            self.current_section = 0;
+        }
         let cat = view();
         let query = self.search.text.trim().to_lowercase();
         let matches = |text: &str| query.is_empty() || text.to_lowercase().contains(&query);
@@ -471,14 +480,19 @@ impl App {
                 || listing.group.as_deref().is_some_and(matches);
             hit && (!self.only_selected || self.selected.contains(entry.id()))
         };
-        let browsing = query.is_empty() && !self.only_selected;
+        let browsing = self.browsing();
+        let current = self.current_section;
+        let on_page = |section: usize| !browsing || current == section;
         let mut rows = Vec::new();
-        if browsing {
+        if browsing && current == ALWAYS_SECTION {
             for i in 0..cat.catalog.base_items().count() {
                 rows.push(CatRow::Base(i));
             }
         }
         for (s, section) in cat.catalog.sections().iter().enumerate() {
+            if !on_page(s) {
+                continue;
+            }
             let section_of = |i: usize| {
                 cat.items[i]
                     .listing
@@ -538,7 +552,8 @@ impl App {
         let mut surfaces: Vec<&'static str> = Vec::new();
         for (i, setting) in cat.settings.iter().enumerate() {
             let surface = surface_name(&setting.id);
-            let shown = (matches(&setting.title) || matches(&setting.id) || matches(surface))
+            let shown = on_page(SETTINGS_SECTION)
+                && (matches(&setting.title) || matches(&setting.id) || matches(surface))
                 && (!self.only_selected || self.settings.contains_key(&setting.id));
             if !shown {
                 continue;
@@ -550,7 +565,7 @@ impl App {
             rows.push(CatRow::Setting(i));
         }
         for package in &self.packages {
-            if matches(package) {
+            if on_page(PACKAGES_SECTION) && matches(package) {
                 rows.push(CatRow::Package(package.clone()));
             }
         }
@@ -561,7 +576,6 @@ impl App {
             rows.push(CatRow::Empty);
         }
         self.rows = rows;
-        self.rows_version += 1;
     }
 
     pub fn selection_count(&self) -> usize {
@@ -942,8 +956,12 @@ impl App {
     }
 }
 
-/// `current_section` for the Base Items at the top of the list.
+/// `current_section` for the macOS and Git settings.
+pub const SETTINGS_SECTION: usize = usize::MAX;
+/// `current_section` for the Base Items.
 pub const ALWAYS_SECTION: usize = usize::MAX - 1;
+/// `current_section` for packages added from Homebrew by name.
+pub const PACKAGES_SECTION: usize = usize::MAX - 2;
 
 #[cfg(test)]
 mod tests {
@@ -1151,18 +1169,101 @@ mod tests {
     }
 
     #[test]
-    fn every_catalog_item_shows_a_row_and_every_row_key_section_exists() {
-        let app = init();
-        let items = app
-            .rows
-            .iter()
-            .filter(|r| matches!(r, CatRow::Item(_)))
-            .count();
-        assert_eq!(items, 243, "each listed Item appears exactly once");
+    fn every_catalog_item_is_on_exactly_one_category_page() {
+        let mut app = init();
+        let mut seen = Vec::new();
+        for section in 0..view().catalog.sections().len() {
+            app.show_section(section);
+            seen.extend(app.rows.iter().filter_map(|r| match r {
+                CatRow::Item(i) => Some(*i),
+                _ => None,
+            }));
+        }
+        assert_eq!(seen.len(), 243, "each listed Item appears exactly once");
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), 243, "and no Item is on two pages");
         assert_eq!(
             view().catalog.sections().len(),
             Catalog::shipped().sections().len()
         );
+    }
+
+    fn item_rows(app: &App) -> usize {
+        app.rows
+            .iter()
+            .filter(|r| matches!(r, CatRow::Item(_)))
+            .count()
+    }
+
+    #[test]
+    fn a_category_page_holds_only_that_category() {
+        let mut app = init();
+        assert_eq!(item_rows(&app), 34, "the launch page is Languages");
+        assert!(!app.rows.iter().any(|r| matches!(r, CatRow::Base(_))));
+        assert!(!app.rows.iter().any(|r| matches!(r, CatRow::Setting(_))));
+
+        app.show_section(ALWAYS_SECTION);
+        assert_eq!(
+            app.rows
+                .iter()
+                .filter(|r| matches!(r, CatRow::Base(_)))
+                .count(),
+            3
+        );
+        assert_eq!(item_rows(&app), 0);
+
+        app.show_section(SETTINGS_SECTION);
+        assert!(app.rows.iter().any(|r| matches!(r, CatRow::Setting(_))));
+        assert_eq!(item_rows(&app), 0);
+    }
+
+    #[test]
+    fn a_search_reaches_past_the_open_category() {
+        let mut app = init();
+        assert_eq!(app.current_section, 0, "Languages is open");
+        app.search.text = "ripgrep".to_string();
+        app.rebuild_rows();
+        let found: Vec<&str> = app
+            .rows
+            .iter()
+            .filter_map(|r| match r {
+                CatRow::Item(i) => Some(view().items[*i].id()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(found, ["ripgrep"]);
+    }
+
+    #[test]
+    fn the_selected_filter_reaches_every_category() {
+        let mut app = init();
+        app.selected.insert("ripgrep".to_string());
+        app.selected.insert("node".to_string());
+        app.only_selected = true;
+        app.rebuild_rows();
+        assert_eq!(item_rows(&app), 2);
+    }
+
+    #[test]
+    fn opening_a_category_leaves_the_search_and_the_filter() {
+        let mut app = init();
+        app.search.text = "ripgrep".to_string();
+        app.only_selected = true;
+        app.show_section(1);
+        assert!(app.browsing());
+        assert_eq!(item_rows(&app), 10, "Browsers");
+    }
+
+    #[test]
+    fn removing_the_last_added_package_leaves_its_page() {
+        let mut app = init();
+        app.add_package("htop");
+        app.show_section(PACKAGES_SECTION);
+        assert!(app.rows.iter().any(|r| matches!(r, CatRow::Package(_))));
+        app.packages.clear();
+        app.rebuild_rows();
+        assert_eq!(app.current_section, 0);
     }
 
     #[test]

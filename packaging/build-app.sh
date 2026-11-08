@@ -41,8 +41,9 @@ done
 iconutil -c icns -o "$contents/Resources/Soulcaster.icns" "$iconset"
 rm -rf "$(dirname "$iconset")"
 
-# The fonts and data are compiled into the binary, so only the fonts' licenses travel as files.
+# The fonts, logos and data are compiled into the binary, so only their licenses travel as files.
 cp app/assets/fonts/*-OFL.txt "$contents/Resources/licenses/"
+cp app/assets/icons/SimpleIcons-LICENSE.md app/assets/icons/Devicon-LICENSE.txt "$contents/Resources/licenses/"
 
 packaging/sign-app.sh - "$app"
 packaging/check-app.sh "$app"

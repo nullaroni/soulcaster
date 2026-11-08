@@ -8,7 +8,7 @@ use soulcaster_repo::review::Tick;
 
 use crate::repo_flow::DotfilesPhase;
 use crate::sim::{Scenario, SimEngine, SimMachine};
-use crate::state::{App, GithubState, PasswordState, Screen};
+use crate::state::{App, GithubState, PasswordState, SETTINGS_SECTION, Screen};
 
 fn answered(app: &mut App) {
     app.fill_typical();
@@ -56,6 +56,32 @@ type Scene = (&'static str, fn(&mut App));
 pub const SCENES: &[Scene] = &[
     ("catalog", |_| {}),
     ("catalog-picked", |a| a.fill_typical()),
+    ("catalog-browsers", |a| {
+        a.fill_typical();
+        a.show_section(1);
+    }),
+    ("catalog-editors", |a| {
+        a.fill_typical();
+        a.show_section(2);
+    }),
+    ("catalog-cloud", |a| {
+        a.fill_typical();
+        a.show_section(10);
+    }),
+    ("catalog-settings", |a| {
+        a.fill_typical();
+        a.show_section(SETTINGS_SECTION);
+    }),
+    ("catalog-search", |a| {
+        a.fill_typical();
+        a.search.text = "git".to_string();
+        a.rebuild_rows();
+    }),
+    ("catalog-selected", |a| {
+        a.fill_typical();
+        a.only_selected = true;
+        a.rebuild_rows();
+    }),
     ("review", |a| {
         a.fill_typical();
         a.screen = Screen::Review;
