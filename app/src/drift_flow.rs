@@ -10,7 +10,7 @@ use soulcaster_core::catalog::Catalog;
 use soulcaster_core::command::CommandRunner;
 use soulcaster_core::config::Config;
 use soulcaster_core::drift::{
-    Choice, Report, Reviewed, Row, changed_again, changed_elsewhere, not_adoptable,
+    Choice, Report, Reviewed, Row, changed_again, changed_elsewhere, not_adoptable, value_in,
 };
 use soulcaster_core::plan::Plan;
 use soulcaster_engine::{
@@ -37,6 +37,9 @@ struct Following {
     config: String,
     ever_saved: bool,
     read_at: u64,
+    /// The Config that saves waiting on this Mac were reviewed for, by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    waiting_for: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,6 +96,10 @@ fn store(home: &Path, following: &Following) {
 pub fn follow(home: &Path, config: &Config, saved: bool, now: u64) {
     let text = config.to_canonical_json();
     let before = following(home);
+    let earlier_saved = before.as_ref().is_some_and(|earlier| earlier.ever_saved);
+    let waiting_for = before
+        .as_ref()
+        .and_then(|earlier| earlier.waiting_for.clone());
     let same = before.as_ref().is_some_and(|earlier| {
         Config::parse(earlier.config.as_bytes()).is_ok_and(|held| held.name == config.name)
     });
@@ -100,8 +107,9 @@ pub fn follow(home: &Path, config: &Config, saved: bool, now: u64) {
         home,
         &Following {
             config: text,
-            ever_saved: saved || (same && before.is_some_and(|earlier| earlier.ever_saved)),
+            ever_saved: saved || (same && earlier_saved),
             read_at: now,
+            waiting_for,
         },
     );
 }
@@ -135,6 +143,8 @@ fn look(deps: &Deps<'_>) -> Look {
         Followed::Latest(latest) => {
             held.config = latest.to_canonical_json();
             held.read_at = deps.clock.now_ms();
+            // It's on GitHub, so if it goes away that's a missing file, not a new one.
+            held.ever_saved = true;
             store(deps.home, &held);
             (latest, Status::Current)
         }
@@ -221,9 +231,15 @@ fn send(
         }
         Ok(AdoptOutcome::Waiting { why, .. }) => {
             notes.push(why.words().to_string());
-            if set_waiting_saves(deps.home, reviewed).is_err() {
+            let mut waiting = waiting_saves(deps.home).unwrap_or_default();
+            waiting.retain(|earlier| !reviewed.iter().any(|entry| entry.id == earlier.id));
+            waiting.extend(reviewed.iter().cloned());
+            if set_waiting_saves(deps.home, &waiting).is_err() {
                 notes.push(BUSY.to_string());
             }
+            let mut marked = following.clone();
+            marked.waiting_for = Some(config.name.clone());
+            store(deps.home, &marked);
             return;
         }
         Ok(AdoptOutcome::ChangedElsewhere { ids }) => {
@@ -376,11 +392,24 @@ pub fn send_waiting(deps: &Deps<'_>) -> Vec<String> {
     if waiting.is_empty() || view.checked.status.blocks_changes() {
         return notes;
     }
+    // A save reviewed for one Config never lands in another.
+    if let (Some(following), Some(config)) = (&view.following, &view.config)
+        && let Some(owner) = following.waiting_for.as_deref()
+        && owner != config.name
+    {
+        notes.push(format!(
+            "You have changes waiting to send to {owner}. Send or discard them before you switch."
+        ));
+        return notes;
+    }
     let rows = view.checked.report.rows.clone();
-    let still = |entry: &Reviewed| {
-        rows.iter()
-            .find(|row| row.id == entry.id)
-            .is_some_and(|now| now.on_mac == entry.write)
+    let held = view.config.clone();
+    // No row means this Mac and the Config agree, which is only a success if they agree on this.
+    let still = |entry: &Reviewed| match rows.iter().find(|row| row.id == entry.id) {
+        Some(now) => now.on_mac == entry.write,
+        None => held
+            .as_ref()
+            .is_some_and(|config| value_in(config, &entry.key) == entry.write),
     };
     send(deps, &view, &waiting, &rows, &still, &mut notes);
     notes
@@ -389,7 +418,13 @@ pub fn send_waiting(deps: &Deps<'_>) -> Vec<String> {
 /// "Discard, and keep this Mac as it is." The rows come back.
 pub fn discard_waiting(home: &Path) -> Vec<String> {
     match set_waiting_saves(home, &[]) {
-        Ok(()) => Vec::new(),
+        Ok(()) => {
+            if let Some(mut held) = following(home) {
+                held.waiting_for = None;
+                store(home, &held);
+            }
+            Vec::new()
+        }
         Err(_) => vec![BUSY.to_string()],
     }
 }
@@ -708,5 +743,160 @@ mod tests {
         world.follow(TEXT, true);
         world.follow(TEXT, false);
         assert!(following(world.dir.path()).unwrap().ever_saved);
+    }
+
+    // Review of PR #43, round 1. Each of these fails on the reviewed commit.
+
+    /// GitHub comes back, holding exactly these files.
+    fn github_holds(world: &mut World, files: &[(&str, &str)]) {
+        let gh = FakeGitHub::new();
+        gh.sign_in("example-you", 42);
+        gh.on_git("rev-parse", Reply::ok(format!("{PUSHED}\n")));
+        gh.add_repo(
+            "example-you",
+            CONFIG_REPO_NAME,
+            RepoShape::private("main", SHA),
+        );
+        let canonical: Vec<(String, String)> = files
+            .iter()
+            .map(|(path, text)| {
+                let config = Config::parse(text.as_bytes()).unwrap();
+                ((*path).to_string(), config.to_canonical_json())
+            })
+            .collect();
+        for (path, text) in &canonical {
+            gh.add_file("example-you", CONFIG_REPO_NAME, SHA, path, text.as_bytes());
+        }
+        gh.set_git_files(
+            "checkout",
+            canonical
+                .iter()
+                .map(|(path, text)| (path.as_str(), text.as_str()))
+                .collect(),
+        );
+        world.gh = gh;
+    }
+
+    #[test]
+    fn review_a_second_save_while_offline_keeps_the_first_one_waiting() {
+        const TWO: &str = r#"{"schemaVersion":1,"name":"My Mac","settings":{"dock.autohide":true,"keyboard.key-repeat":2}}"#;
+        let world = World::new();
+        world.follow(TWO, true);
+        world.on_github(TWO);
+        world.remember("keyboard.key-repeat", json!(2));
+        world.remember("dock.autohide", json!(true));
+        world.mac_says("read NSGlobalDomain KeyRepeat", Reply::ok("6\n"));
+        world.mac_says("read com.apple.dock autohide", Reply::ok("0\n"));
+        world.nothing_else_here();
+        let rows = check(&world.deps()).report.rows;
+        let row = |id: &str| rows.iter().find(|row| row.id == id).unwrap().clone();
+        world.gh.go_offline();
+        carry_out(
+            &world.deps(),
+            &[(row("keyboard.key-repeat"), Choice::Adopt)],
+        );
+        carry_out(&world.deps(), &[(row("dock.autohide"), Choice::Adopt)]);
+        let waiting: Vec<String> = world
+            .record()
+            .waiting_saves
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect();
+        assert!(
+            waiting.contains(&"keyboard.key-repeat".to_string())
+                && waiting.contains(&"dock.autohide".to_string()),
+            "the person saved both while offline, and only these are waiting: {waiting:?}"
+        );
+    }
+
+    #[test]
+    fn review_a_waiting_save_does_not_go_into_a_config_followed_later() {
+        const WORK: &str =
+            r#"{"schemaVersion":1,"name":"Work","settings":{"keyboard.key-repeat":2}}"#;
+        const HOME: &str =
+            r#"{"schemaVersion":1,"name":"Home","settings":{"keyboard.key-repeat":2}}"#;
+        let mut world = World::new();
+        world.follow(WORK, true);
+        github_holds(&mut world, &[("configs/work.json", WORK)]);
+        world.remember("keyboard.key-repeat", json!(2));
+        world.mac_says("read NSGlobalDomain KeyRepeat", Reply::ok("6\n"));
+        world.nothing_else_here();
+        let row = check(&world.deps()).report.rows[0].clone();
+        world.gh.go_offline();
+        carry_out(&world.deps(), &[(row, Choice::Adopt)]);
+        assert_eq!(world.record().waiting_saves.len(), 1, "saved for Work");
+
+        // Later, a Run or a save of another Config, and GitHub is back.
+        world.follow(HOME, true);
+        github_holds(
+            &mut world,
+            &[("configs/work.json", WORK), ("configs/home.json", HOME)],
+        );
+        send_waiting(&world.deps());
+        assert_eq!(
+            world.pushes(),
+            0,
+            "Send to GitHub wrote a save reviewed for Work into configs/home.json: {:?}",
+            world.gh.file_at_git("add", "configs/home.json")
+        );
+        assert_eq!(
+            world.record().last_applied["keyboard.key-repeat"].value,
+            json!(2),
+            "GitHub's Work Config doesn't have this"
+        );
+    }
+
+    #[test]
+    fn review_a_config_read_from_github_stops_changes_once_its_file_is_gone() {
+        // A second Mac imports its Config from GitHub and Runs it, which follows it unsaved.
+        let mut world = World::new();
+        world.follow(TEXT, false);
+        github_holds(&mut world, &[(PATH, TEXT)]);
+        world.remember("keyboard.key-repeat", json!(2));
+        world.mac_says("read NSGlobalDomain KeyRepeat", Reply::ok("6\n"));
+        world.nothing_else_here();
+        let checked = check(&world.deps());
+        assert_eq!(checked.status, Status::Current, "GitHub has it");
+        let row = checked.report.rows[0].clone();
+
+        github_holds(&mut world, &[]);
+        let carried = carry_out(&world.deps(), &[(row, Choice::Adopt)]);
+        assert_eq!(
+            world.pushes(),
+            0,
+            "the file was deleted on GitHub and this put it back: {:?}",
+            carried.notes
+        );
+        assert_eq!(
+            check(&world.deps()).status,
+            Status::Missing {
+                path: PATH.to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn review_send_settles_a_waiting_save_github_already_has() {
+        const SIX: &str =
+            r#"{"schemaVersion":1,"name":"My Mac","settings":{"keyboard.key-repeat":6}}"#;
+        let mut world = World::new();
+        let row = world.key_repeat_moved().report.rows[0].clone();
+        world.gh.go_offline();
+        carry_out(&world.deps(), &[(row, Choice::Adopt)]);
+        assert_eq!(world.record().waiting_saves.len(), 1);
+
+        // The push landed before the app died, or another Mac sent the same value.
+        github_holds(&mut world, &[(PATH, SIX)]);
+        let notes = send_waiting(&world.deps());
+        assert_eq!(
+            notes,
+            Vec::<String>::new(),
+            "GitHub and this Mac both say 6, and the person is told it wasn't saved"
+        );
+        assert!(world.record().waiting_saves.is_empty(), "it's on GitHub");
+        assert_eq!(
+            world.record().last_applied["keyboard.key-repeat"].value,
+            json!(6)
+        );
     }
 }

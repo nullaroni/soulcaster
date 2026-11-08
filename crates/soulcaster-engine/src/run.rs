@@ -1093,7 +1093,11 @@ impl<'a> Engine<'a> {
 
     /// Once per Run, and never while the password is held.
     fn apply_dotfiles(&mut self) -> Result<(), EngineError> {
-        if self.dotfiles_done || self.password.is_some() {
+        // An Apply changes what was chosen. The Dotfiles Repo isn't a row it can choose.
+        if self.dotfiles_done
+            || self.password.is_some()
+            || matches!(self.scope_kind, RunScope::Only { .. })
+        {
             return Ok(());
         }
         self.dotfiles_done = true;

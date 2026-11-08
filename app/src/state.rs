@@ -177,6 +177,8 @@ pub fn init() -> App {
 }
 
 pub fn with_engine(engine: Box<dyn Engine>) -> App {
+    // The samples are for the simulator. A real Mac shows only what was really found.
+    let engine_is_real = engine.is_real();
     let mut app = App {
         engine,
         screen: Screen::Catalog,
@@ -215,17 +217,29 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         imported_selection: None,
         imported_taps: Default::default(),
         scoped_wrong: false,
-        drift: crate::drift::sample(),
+        drift: if engine_is_real {
+            Vec::new()
+        } else {
+            crate::drift::sample()
+        },
         confirm_remove: None,
         remove_understood: false,
-        drift_unavailable: crate::drift::SAMPLE_UNAVAILABLE
-            .iter()
-            .map(|(name, why)| ((*name).to_string(), (*why).to_string()))
-            .collect(),
-        drift_unknown: crate::drift::SAMPLE_COULD_NOT_CHECK
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect(),
+        drift_unavailable: if engine_is_real {
+            Vec::new()
+        } else {
+            crate::drift::SAMPLE_UNAVAILABLE
+                .iter()
+                .map(|(name, why)| ((*name).to_string(), (*why).to_string()))
+                .collect()
+        },
+        drift_unknown: if engine_is_real {
+            Vec::new()
+        } else {
+            crate::drift::SAMPLE_COULD_NOT_CHECK
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect()
+        },
         drift_held: Vec::new(),
         drift_status: None,
         drift_waiting: 0,
