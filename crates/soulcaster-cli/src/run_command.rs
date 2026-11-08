@@ -3,8 +3,11 @@
 //! the design's: 0 everything finished, 2 refused before changing anything, 3 finished with queue
 //! entries, 4 finished with failures.
 
+use std::cell::UnsafeCell;
 use std::io::{BufRead, BufReader, Write};
+use std::mem::MaybeUninit;
 use std::path::Path;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use soulcaster_core::ask::{Asks, Password, PasswordRequest, SignInStatus};
@@ -36,6 +39,7 @@ pub fn run_plan(plan: &mut Plan, setup: &Setup<'_>, out: Arc<Mutex<dyn Write + S
     let mut sink = Printer {
         out: Arc::clone(&out),
         json: setup.json,
+        started: false,
     };
     let config = ConfigRef {
         name: plan.config_name.clone(),
@@ -58,18 +62,28 @@ pub fn run_plan(plan: &mut Plan, setup: &Setup<'_>, out: Arc<Mutex<dyn Write + S
     });
     match result {
         Err(error) => {
-            if !setup.json
-                && let Ok(mut out) = out.lock()
-            {
-                let _ = writeln!(out, "Refused before changing anything: {error}");
+            // Only a Run that never began can say nothing changed.
+            let (words, code) = if sink.started {
+                ("The Run stopped partway", FAILED)
+            } else {
+                ("Refused before changing anything", REFUSED)
+            };
+            if setup.json {
+                eprintln!("{words}: {error}");
+            } else if let Ok(mut out) = out.lock() {
+                let _ = writeln!(out, "{words}: {error}");
             }
-            REFUSED
+            code
         }
         Ok(report) => {
-            if report
-                .states
-                .values()
-                .any(|state| matches!(state, ItemState::Failed { .. }))
+            // Stopped early, or with an Item still waiting to start, isn't "everything finished".
+            let unfinished =
+                report.cancelled || report.states.values().any(|state| !state.is_terminal());
+            if unfinished
+                || report
+                    .states
+                    .values()
+                    .any(|state| matches!(state, ItemState::Failed { .. }))
             {
                 FAILED
             } else if !report.queue.is_empty() {
@@ -85,10 +99,12 @@ pub fn run_plan(plan: &mut Plan, setup: &Setup<'_>, out: Arc<Mutex<dyn Write + S
 struct Printer {
     out: Arc<Mutex<dyn Write + Send>>,
     json: bool,
+    started: bool,
 }
 
 impl EventSink for Printer {
     fn send(&mut self, event: Event) {
+        self.started |= matches!(event.kind, EventKind::RunStarted { .. });
         let Ok(mut out) = self.out.lock() else {
             return;
         };
@@ -161,23 +177,80 @@ impl Asks for TerminalAsks {
     }
 }
 
+/// What to put back if a signal ends the process during the prompt. Filled in before `TTY_FD`
+/// is set, and only read by the handler once it has been.
+struct SavedTerminal(UnsafeCell<MaybeUninit<libc::termios>>);
+
+// SAFETY: written once per prompt, before `TTY_FD` publishes it with `Release`. The handler reads
+// it only after seeing that fd with `Acquire`, and nothing writes it again until `TTY_FD` is
+// cleared.
+unsafe impl Sync for SavedTerminal {}
+
+static SAVED_TERMINAL: SavedTerminal = SavedTerminal(UnsafeCell::new(MaybeUninit::uninit()));
+static TTY_FD: AtomicI32 = AtomicI32::new(-1);
+const ENDING_SIGNALS: [libc::c_int; 4] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT];
+
+/// Turns echo back on, then lets the signal do what it would have. `tcsetattr`, `signal` and
+/// `raise` are all async-signal-safe.
+extern "C" fn restore_echo_and_die(signal: libc::c_int) {
+    let fd = TTY_FD.load(Ordering::Acquire);
+    if fd >= 0 {
+        // SAFETY: a non-negative `fd` means `SAVED_TERMINAL` holds a valid `termios`.
+        unsafe { libc::tcsetattr(fd, libc::TCSANOW, (*SAVED_TERMINAL.0.get()).as_ptr()) };
+    }
+    // SAFETY: resets this signal to its default and raises it again. It's delivered on return.
+    unsafe {
+        libc::signal(signal, libc::SIG_DFL);
+        libc::raise(signal);
+    }
+}
+
 fn read_without_echo(prompt: &str) -> Option<String> {
-    use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+    use std::os::fd::AsRawFd;
+
     let tty = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/tty")
         .ok()?;
-    let before = tcgetattr(&tty).ok()?;
-    let mut quiet = before.clone();
-    quiet.local_modes.remove(LocalModes::ECHO);
-    (&tty).write_all(prompt.as_bytes()).ok()?;
-    tcsetattr(&tty, OptionalActions::Now, &quiet).ok()?;
-    let mut line = String::new();
-    let read = BufReader::new(&tty).read_line(&mut line);
-    let _ = tcsetattr(&tty, OptionalActions::Now, &before);
+    let fd = tty.as_raw_fd();
+    let mut before = MaybeUninit::<libc::termios>::uninit();
+    // SAFETY: `fd` is open and `before` has room for a `termios`.
+    if unsafe { libc::tcgetattr(fd, before.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: `tcgetattr` succeeded, so `before` is initialized.
+    let before = unsafe { before.assume_init() };
+    // SAFETY: no handler is installed yet and `TTY_FD` is still -1, so nothing reads this.
+    unsafe { (*SAVED_TERMINAL.0.get()).write(before) };
+    TTY_FD.store(fd, Ordering::Release);
+
+    let handler = restore_echo_and_die as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: installs a handler that only makes async-signal-safe calls, and keeps the old ones.
+    let previous = ENDING_SIGNALS.map(|signal| unsafe { libc::signal(signal, handler) });
+
+    let mut quiet = before;
+    quiet.c_lflag &= !libc::ECHO;
+    let line = (&tty)
+        .write_all(prompt.as_bytes())
+        .ok()
+        // SAFETY: `fd` is open and `quiet` is a valid `termios`.
+        .filter(|()| unsafe { libc::tcsetattr(fd, libc::TCSANOW, &quiet) } == 0)
+        .and_then(|()| {
+            let mut line = String::new();
+            BufReader::new(&tty).read_line(&mut line).ok().map(|_| line)
+        });
+
+    // SAFETY: `fd` is open and `before` is the terminal's own earlier state.
+    unsafe { libc::tcsetattr(fd, libc::TCSANOW, &before) };
+    for (signal, old) in ENDING_SIGNALS.into_iter().zip(previous) {
+        // SAFETY: puts back what `signal` returned above.
+        unsafe { libc::signal(signal, old) };
+    }
+    TTY_FD.store(-1, Ordering::Release);
     let _ = (&tty).write_all(b"\n");
-    read.ok()?;
+
+    let line = line?;
     let line = line.trim_end_matches(['\n', '\r']).to_string();
     (!line.is_empty()).then_some(line)
 }
@@ -581,6 +654,9 @@ mod tests {
         );
         stop.0 = None;
         let _ = child.kill();
+        // macOS won't let a process finish exiting while its terminal has unread output, and
+        // nothing reads this one. Closing the other end discards it.
+        drop(primary);
         let _ = child.wait();
     }
 }

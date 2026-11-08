@@ -1068,11 +1068,13 @@ impl<'a> Engine<'a> {
         let (Some(hook), Some(plan)) = (self.dotfiles, self.plan.dotfiles.clone()) else {
             return Ok(());
         };
-        let held =
-            crate::approvals::HeldApprovals(std::sync::Mutex::new(self.record.approvals.clone()));
+        let held = crate::approvals::HeldApprovals {
+            record: std::sync::Mutex::new(self.record.clone()),
+            home: self.home.to_path_buf(),
+        };
         let result = hook.apply(&plan, &held);
-        if let Ok(approvals) = held.0.into_inner() {
-            self.record.approvals = approvals;
+        if let Ok(record) = held.record.into_inner() {
+            self.record = record;
         }
         self.record.save(self.home)?;
         for text in result.warnings {

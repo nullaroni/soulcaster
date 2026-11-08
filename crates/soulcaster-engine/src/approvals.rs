@@ -2,6 +2,7 @@
 //! reads them. Neither a Config nor anything from a repo can reach this.
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use soulcaster_core::approval::{ApprovalStore, ApprovalStoreError, Approvals};
 
@@ -38,23 +39,31 @@ impl ApprovalStore for RecordApprovals {
     }
 }
 
-/// The Run's own copy, for a step inside the Run. The Run saves it back afterwards.
-pub(crate) struct HeldApprovals(pub(crate) std::sync::Mutex<Approvals>);
+/// The Run's own record, for a step inside the Run. A write is on disk before it returns, because
+/// a step may act on it: the install script runs only once its record is stored.
+pub(crate) struct HeldApprovals {
+    pub(crate) record: Mutex<MachineRecord>,
+    pub(crate) home: PathBuf,
+}
+
+fn unavailable() -> ApprovalStoreError {
+    ApprovalStoreError("the Run's approvals are unavailable".to_string())
+}
 
 impl ApprovalStore for HeldApprovals {
     fn read(&self) -> Result<Approvals, ApprovalStoreError> {
-        self.0
+        self.record
             .lock()
-            .map(|held| held.clone())
-            .map_err(|_| ApprovalStoreError("the Run's approvals are unavailable".to_string()))
+            .map(|record| record.approvals.clone())
+            .map_err(|_| unavailable())
     }
 
     fn write(&self, approvals: &Approvals) -> Result<(), ApprovalStoreError> {
-        let mut held = self
-            .0
-            .lock()
-            .map_err(|_| ApprovalStoreError("the Run's approvals are unavailable".to_string()))?;
-        *held = approvals.clone();
-        Ok(())
+        let mut record = self.record.lock().map_err(|_| unavailable())?;
+        let before = std::mem::replace(&mut record.approvals, approvals.clone());
+        record.save(&self.home).map_err(|error| {
+            record.approvals = before;
+            ApprovalStoreError(error.to_string())
+        })
     }
 }

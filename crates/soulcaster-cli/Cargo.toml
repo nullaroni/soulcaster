@@ -14,8 +14,7 @@ soulcaster-core.workspace = true
 soulcaster-repo.workspace = true
 soulcaster-engine.workspace = true
 serde_json.workspace = true
-rustix = { version = "1", features = ["termios"] }
+libc = "0.2"
 
 [dev-dependencies]
-libc = "0.2"
 tempfile = "3"
