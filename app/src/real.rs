@@ -73,12 +73,19 @@ impl EventSink for ChannelSink {
     }
 }
 
-/// Clears the flag when the Run's thread ends, however it ends.
-struct Running(Arc<AtomicBool>);
+/// Clears the flag when the Run's thread ends, however it ends. A panic gets no `run.finished`
+/// from the engine, so the Run screen is told here.
+struct Running {
+    flag: Arc<AtomicBool>,
+    sender: Sender<Event>,
+}
 
 impl Drop for Running {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        if thread::panicking() {
+            finish_with(&self.sender, "The Run stopped unexpectedly.");
+        }
+        self.flag.store(false, Ordering::SeqCst);
     }
 }
 
@@ -108,7 +115,10 @@ impl RealEngine {
         if self.running.swap(true, Ordering::SeqCst) {
             return;
         }
-        let running = Running(Arc::clone(&self.running));
+        let running = Running {
+            flag: Arc::clone(&self.running),
+            sender: self.sender.clone(),
+        };
         let home = self.home.clone();
         let waiting = Arc::clone(&self.waiting);
         let sender = self.sender.clone();
@@ -167,11 +177,24 @@ impl RealEngine {
             return;
         }
         let store = RecordApprovals::new(self.home.clone());
-        let Ok(mut approvals) = store.read() else {
-            return;
-        };
-        approvals.taps.extend(answers.taps.iter().cloned());
-        let _ = store.write(&approvals);
+        let written = store.read().and_then(|mut approvals| {
+            approvals.taps.extend(answers.taps.iter().cloned());
+            store.write(&approvals)
+        });
+        // The Run still starts. Those taps' Items wait in the queue, and this says why.
+        if written.is_err() {
+            let mut stamper = Stamper::new();
+            let _ = self.sender.send(stamper.stamp(
+                SystemClock.now_ms(),
+                EventKind::RunWarning {
+                    text: "Your tap approvals couldn't be saved, so those Items will wait.".into(),
+                },
+            ));
+        }
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
     }
 
     /// A person said a queue entry is done. The Run reads that from the record.
@@ -207,12 +230,25 @@ fn finish_with(sender: &Sender<Event>, words: &str) {
     ));
 }
 
+/// The window going away has to end a question a Run is waiting on. The Run's thread holds the
+/// shared state too, so dropping only this `Arc` wouldn't.
+impl Drop for RealEngine {
+    fn drop(&mut self) {
+        if let Ok(mut waiting) = self.waiting.password.lock() {
+            waiting.take();
+        }
+    }
+}
+
 impl Engine for RealEngine {
     fn is_real(&self) -> bool {
         true
     }
 
     fn start_run(&mut self, plan: &Plan, answers: &Answers) {
+        if self.is_running() {
+            return;
+        }
         self.approve_taps(answers);
         self.plan = Some(plan.clone());
         self.start(plan.clone(), RunScope::Full);
@@ -222,6 +258,9 @@ impl Engine for RealEngine {
         let Some(plan) = self.plan.clone() else {
             return;
         };
+        if self.is_running() {
+            return;
+        }
         if let Some(id) = queue_id {
             self.finish_queue_entry(id);
         }

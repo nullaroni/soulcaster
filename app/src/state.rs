@@ -135,6 +135,7 @@ pub struct App {
     pub run_asks: (bool, bool),
     /// The Dotfiles Repo from an imported Config, for the Run to apply.
     pub dotfiles: Option<soulcaster_core::config::Dotfiles>,
+    dotfiles_for: Option<String>,
     pub scoped_wrong: bool,
 
     // Drift
@@ -201,6 +202,7 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         run_password: TextEdit::new("").secure(),
         run_asks: (false, false),
         dotfiles: None,
+        dotfiles_for: None,
         scoped_wrong: false,
         drift: crate::drift::sample(),
         confirm_remove: None,
@@ -274,6 +276,23 @@ pub fn typical_settings() -> Vec<(&'static str, SettingValue)> {
 impl App {
     /// The Config this selection saves, in the Config format's shape.
     pub fn config(&self) -> Config {
+        let mut config = self.selection();
+        // Only the exact selection that was reviewed with it.
+        if self.dotfiles_for.as_deref() == Some(config.to_canonical_json().as_str()) {
+            config.dotfiles = self.dotfiles.clone();
+        }
+        config
+    }
+
+    /// Records what the imported Dotfiles Repo was reviewed with.
+    pub fn keep_dotfiles(&mut self, dotfiles: Option<soulcaster_core::config::Dotfiles>) {
+        self.dotfiles_for = dotfiles
+            .is_some()
+            .then(|| self.selection().to_canonical_json());
+        self.dotfiles = dotfiles;
+    }
+
+    fn selection(&self) -> Config {
         let (casks, formulae): (Vec<&String>, Vec<&String>) =
             self.packages.iter().partition(|p| p.starts_with("cask:"));
         Config {
@@ -289,7 +308,7 @@ impl App {
                     .collect(),
             },
             settings: self.settings.clone(),
-            dotfiles: self.dotfiles.clone(),
+            dotfiles: None,
         }
     }
 
@@ -552,7 +571,10 @@ impl App {
 
     pub fn start_run(&mut self) {
         let plan = self.plan();
-        self.engine.start_run(&plan, &self.answers);
+        // An answer from an earlier Review only counts if this plan shows that tap.
+        let mut answers = self.answers.clone();
+        answers.taps.retain(|tap| plan.taps.contains_key(tap));
+        self.engine.start_run(&plan, &answers);
         self.screen = Screen::Run;
         self.pump();
     }
@@ -761,6 +783,11 @@ impl App {
             self.engine.github_code().is_some(),
         );
         if asks != self.run_asks {
+            // What was typed for a question that has ended isn't for the next one.
+            if !asks.0 {
+                self.run_password.replace_text("");
+                self.run_password.clear();
+            }
             self.run_asks = asks;
             changed = true;
         }

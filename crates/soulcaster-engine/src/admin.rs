@@ -422,19 +422,19 @@ pub(crate) fn disable_core_dumps() {
 /// The identifier the release signs the helper with, from `packaging/sign-app.sh`.
 pub const ASKPASS_IDENTIFIER: &str = "com.nullworks.macflayer.askpass";
 
-/// Where the helper is for a program at `executable`. In the app bundle the CLI sits beside it in
-/// `Contents/Helpers`, and the window one folder over in `Contents/MacOS`. A plain build has it
-/// beside both.
+/// Where the helper is for a program at `executable`. In the app bundle it's in
+/// `Contents/Helpers`, beside the CLI and one folder over from the window, and that one always
+/// wins, so a file dropped next to the window can't stand in for it. A plain build has it beside
+/// the program.
 fn helper_for(executable: &std::path::Path) -> PathBuf {
     let Some(folder) = executable.parent() else {
         return PathBuf::new();
     };
-    let beside = folder.join("soulcaster-askpass");
     let bundled = folder.join("../Helpers/soulcaster-askpass");
-    if !beside.exists() && bundled.exists() {
+    if bundled.exists() {
         bundled
     } else {
-        beside
+        folder.join("soulcaster-askpass")
     }
 }
 
@@ -466,8 +466,11 @@ mod helper_path_tests {
         fs::create_dir_all(&helpers).unwrap();
         fs::create_dir_all(&macos).unwrap();
         fs::write(helpers.join("soulcaster-askpass"), "").unwrap();
-        let from_cli = helper_for(&helpers.join("soulcaster"));
-        assert_eq!(from_cli, helpers.join("soulcaster-askpass"));
+        let from_cli = fs::canonicalize(helper_for(&helpers.join("soulcaster"))).unwrap();
+        assert_eq!(
+            from_cli,
+            fs::canonicalize(helpers.join("soulcaster-askpass")).unwrap()
+        );
         let from_window = fs::canonicalize(helper_for(&macos.join("Soulcaster"))).unwrap();
         assert_eq!(
             from_window,

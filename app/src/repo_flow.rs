@@ -477,9 +477,9 @@ impl App {
                 .iter()
                 .map(|c| format!("cask:{c}")),
         );
-        self.dotfiles = run.config.dotfiles.clone();
         self.answers.taps = run.taps.iter().cloned().collect();
         self.answers.licenses = run.licenses.clone();
+        self.keep_dotfiles(run.config.dotfiles.clone());
         self.rebuild_rows();
         self.repo.import = ImportPhase::Paste { error: None };
         self.screen = Screen::Review;
