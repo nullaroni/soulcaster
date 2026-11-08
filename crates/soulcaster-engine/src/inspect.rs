@@ -47,6 +47,8 @@ enum Decoded {
     Says(Value),
     /// Holds nothing about this value, such as a companion key that's the same for every choice.
     Silent,
+    /// Holds something the Catalog has no name for, so it isn't what the Config says.
+    Foreign(Value),
     /// Holds something the Config has no way to state.
     Cannot,
 }
@@ -219,14 +221,22 @@ impl Look<'_> {
         let stores: Vec<Store> = setting
             .stores
             .iter()
-            .filter(|store| !is_companion(store))
+            .filter(|store| !macos_arranges(store))
             .map(|store| act::with_home(self.home, store))
             .collect();
         let mut readings = Vec::new();
         for store in &stores {
-            match self.read(store) {
-                Stored::Unknown => return Seen::CantTell,
-                reading => readings.push((store, reading)),
+            match (self.read(store), companion_value(store)) {
+                (Stored::Unknown, _) => return Seen::CantTell,
+                // A companion left alone says nothing. One changed by hand, such as a hot corner
+                // that needs a modifier key, means this isn't the choice it looks like.
+                (Stored::Unset, Some(_)) => {}
+                (Stored::Text(text), Some(usual)) => {
+                    if text.trim() != usual {
+                        return Seen::CantTell;
+                    }
+                }
+                (reading, None) => readings.push((store, reading)),
             }
         }
         if readings.is_empty() {
@@ -249,12 +259,17 @@ impl Look<'_> {
         }
         // Every store that has something to say must say the same thing.
         let mut said: Option<Option<Value>> = None;
+        let mut foreign = None;
         for (store, reading) in &readings {
             let this = match reading {
                 Stored::Unset => setting.unset_means.clone(),
                 Stored::Text(text) => match decode(self.home, setting, store, text) {
                     Decoded::Says(value) => Some(value),
                     Decoded::Silent => continue,
+                    Decoded::Foreign(value) => {
+                        foreign.get_or_insert(value);
+                        continue;
+                    }
                     Decoded::Cannot => return Seen::CantTell,
                 },
                 Stored::Unknown => return Seen::CantTell,
@@ -265,10 +280,11 @@ impl Look<'_> {
                 Some(_) => return Seen::CantTell,
             }
         }
-        let decoded = match said {
-            None => return Seen::CantTell,
-            Some(None) => return Seen::Absent,
-            Some(Some(value)) => value,
+        let decoded = match (foreign, said) {
+            (Some(value), _) => value,
+            (None, None) => return Seen::CantTell,
+            (None, Some(None)) => return Seen::Absent,
+            (None, Some(Some(value))) => value,
         };
         // Stores that read as a candidate the Run's comparison turned down: nothing is certain.
         let looks_settled = config
@@ -338,7 +354,7 @@ impl Look<'_> {
             _ => None,
         };
         let formulae = read(&["leaves", "--installed-on-request"])?;
-        let casks = read(&["list", "--cask", "-1"])?;
+        let casks = read(&["list", "--cask", "--full-name"])?;
         let keys = |text: String, prefix: &str| {
             text.lines()
                 .map(str::trim)
@@ -352,21 +368,38 @@ impl Look<'_> {
     }
 }
 
-/// A key written alongside the real one, the same for every choice. It says nothing about which
-/// was chosen, and macOS is free to change it, as it does a menu bar item's position.
-fn is_companion(store: &Store) -> bool {
+/// A menu bar item's position, which macOS sets itself as soon as the item is placed or dragged.
+fn macos_arranges(store: &Store) -> bool {
+    matches!(store, Store::Defaults { key, .. } if key.starts_with("NSStatusItem Preferred Position"))
+}
+
+/// For a key written alongside the real one, the same for every choice: what it always holds.
+fn companion_value(store: &Store) -> Option<String> {
     let Store::Defaults {
         encode: Some(encode),
         ..
     } = store
     else {
-        return false;
+        return None;
     };
     let mut stored = encode.values();
-    let Some(first) = stored.next() else {
-        return false;
-    };
-    encode.len() > 1 && stored.all(|value| value == first)
+    let first = stored.next()?;
+    if encode.len() < 2 || !stored.all(|value| value == first) {
+        return None;
+    }
+    Some(match first {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    })
+}
+
+/// A path under the home folder, as the `~` a Config can hold.
+fn with_tilde(home: &Path, path: String) -> String {
+    let home = home.to_string_lossy();
+    match path.strip_prefix(home.as_ref()) {
+        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        _ => path,
+    }
 }
 
 fn git_bool(text: &str) -> Option<bool> {
@@ -394,7 +427,11 @@ fn holds(
         }
         (Stored::Text(text), Store::GitConfig { .. }) => match candidate {
             SettingValue::Bool(flag) => git_bool(text) == Some(*flag),
-            _ => *text == rendered_git(candidate),
+            // A shell expands `~` before git stores it, so both spellings are this file.
+            _ => {
+                let rendered = rendered_git(candidate);
+                *text == rendered || *text == *act::expand_home(home, &rendered).to_string_lossy()
+            }
         },
         (
             Stored::Text(text),
@@ -490,7 +527,12 @@ fn decode(home: &Path, setting: &SettingRecipe, store: &Store, text: &str) -> De
                         match token_for(map, stored_as) {
                             Err(()) => return Decoded::Silent,
                             Ok(Some(token)) => return says(typed(setting, &token)),
-                            Ok(None) => {}
+                            Ok(None) => {
+                                return match text.parse::<i64>() {
+                                    Ok(number) => Decoded::Foreign(Value::Number(number.into())),
+                                    Err(_) => Decoded::Cannot,
+                                };
+                            }
                         }
                     }
                     if let Ok(number) = text.parse::<i64>() {
@@ -508,7 +550,7 @@ fn decode(home: &Path, setting: &SettingRecipe, store: &Store, text: &str) -> De
                         match token_for(map, |stored| stored.as_str() == Some(text)) {
                             Err(()) => return Decoded::Silent,
                             Ok(Some(token)) => return says(typed(setting, &token)),
-                            Ok(None) => {}
+                            Ok(None) => return Decoded::Foreign(Value::String(text.to_string())),
                         }
                     }
                     Decoded::Says(Value::String(text.to_string()))
@@ -549,7 +591,7 @@ fn decode(home: &Path, setting: &SettingRecipe, store: &Store, text: &str) -> De
         }
         Store::GitConfig { .. } => match setting.value_type {
             ValueType::Boolean => says(git_bool(text.trim()).map(Value::Bool)),
-            _ => says(typed(setting, text.trim())),
+            _ => says(typed(setting, &with_tilde(home, text.trim().to_string()))),
         },
         Store::Builtin {
             name: BuiltinStore::LibraryVisible,
@@ -558,15 +600,10 @@ fn decode(home: &Path, setting: &SettingRecipe, store: &Store, text: &str) -> De
             name: BuiltinStore::DockTiles,
         } => {
             // A path under the home folder goes back to the `~` a Config can hold.
-            let home = home.to_string_lossy();
             Decoded::Says(Value::Array(
                 dock_paths(text)
                     .into_iter()
-                    .map(|path| match path.strip_prefix(home.as_ref()) {
-                        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
-                        _ => path,
-                    })
-                    .map(Value::String)
+                    .map(|path| Value::String(with_tilde(home, path)))
                     .collect(),
             ))
         }

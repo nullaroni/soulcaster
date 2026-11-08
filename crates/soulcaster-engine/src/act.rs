@@ -42,13 +42,13 @@ fn home_string(home: &Path) -> String {
 }
 
 pub fn expand_home(home: &Path, path: &str) -> PathBuf {
-    let home_str = home_string(home);
     if let Some(rest) = path.strip_prefix("~/") {
         home.join(rest)
     } else if path == "~" {
         home.to_path_buf()
     } else {
-        PathBuf::from(path.replace("~", &home_str))
+        // Only a leading `~` means the home folder. Anywhere else it's part of a name.
+        PathBuf::from(path)
     }
 }
 

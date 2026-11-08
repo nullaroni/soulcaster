@@ -585,9 +585,10 @@ fn may_leave_this_mac(facts: &Facts<'_>, key: &str, value: SettingValue) -> bool
     only_this.packages = Default::default();
     only_this.dotfiles = None;
     only_this.settings = BTreeMap::from([(key.to_string(), value)]);
-    !lint(&only_this, facts.catalog, DEFAULT_CLONE_LOCATION)
-        .iter()
-        .any(|finding| finding.must_stay_on_this_mac() && finding.at == key)
+    Config::parse(only_this.to_canonical_json().as_bytes()).is_ok()
+        && !lint(&only_this, facts.catalog, DEFAULT_CLONE_LOCATION)
+            .iter()
+            .any(|finding| finding.must_stay_on_this_mac() && finding.at == key)
 }
 
 pub fn report(facts: &Facts<'_>) -> Report {

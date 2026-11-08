@@ -3212,12 +3212,13 @@ pub(crate) fn dock_paths(stdout: &str) -> Vec<String> {
     stdout
         .lines()
         .filter_map(|line| {
-            let field = line.split('\t').nth(1).unwrap_or(line).trim();
-            if field.is_empty() {
-                None
-            } else {
-                Some(dock_path(field))
-            }
+            let mut fields = line.split('\t');
+            let path = fields.nth(1).unwrap_or(line).trim();
+            // `--list` also prints recent apps and folders, which aren't tiles a person placed.
+            let tile = fields
+                .next()
+                .is_none_or(|section| section == "persistentApps");
+            (tile && !path.is_empty()).then(|| dock_path(path))
         })
         .collect()
 }
