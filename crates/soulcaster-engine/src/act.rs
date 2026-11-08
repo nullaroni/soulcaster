@@ -128,9 +128,9 @@ pub fn probe_commands(home: &Path, probe: &Probe) -> Vec<Command> {
 
 fn test_flag(home: &Path, flag: &str, path: &str) -> Command {
     if flag == "!" {
-        base_command(home, "/usr/bin/test").args(["!", "-e", path])
+        base_command(home, "/bin/test").args(["!", "-e", path])
     } else {
-        base_command(home, "/usr/bin/test").args([flag, path])
+        base_command(home, "/bin/test").args([flag, path])
     }
 }
 
@@ -480,8 +480,17 @@ pub fn clt_dialog(home: &Path) -> Command {
 /// isn't a release, and anything else in the list isn't ours to install.
 pub fn newest_clt_label(listing: &str) -> Option<String> {
     let version = |label: &str| -> Option<Vec<u32>> {
-        let number = label.strip_prefix("Command Line Tools for Xcode-")?;
-        number
+        // Older Macs say `...Xcode-16.4`, and macOS 27 says `...Xcode 27.2-27.2`.
+        let rest = label.strip_prefix("Command Line Tools for Xcode")?;
+        let rest = rest.strip_prefix('-').or_else(|| rest.strip_prefix(' '))?;
+        if !rest
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b == b'.' || b == b'-')
+        {
+            return None;
+        }
+        rest.rsplit('-')
+            .next()?
             .split('.')
             .map(|part| part.parse().ok())
             .collect::<Option<Vec<u32>>>()
@@ -1009,6 +1018,36 @@ mod tests {
     use soulcaster_core::command::Command;
     use std::path::Path;
     use std::time::Duration;
+
+    #[test]
+    fn the_check_program_is_where_macos_keeps_it() {
+        // macOS 27 has no /usr/bin/test, and every install check read as "not installed".
+        let program = test_flag(Path::new("/tmp"), "-e", "/tmp").program;
+        assert!(program.exists(), "{}", program.display());
+    }
+
+    #[test]
+    fn the_newest_command_line_tools_label_is_found_in_both_of_apples_spellings() {
+        // Word for word from `softwareupdate -l` on macOS 27.0.
+        let modern = "Software Update found the following new or updated software:\n\
+            * Label: Command Line Tools for Xcode 27.2-27.2\n\
+            \tTitle: Command Line Tools for Xcode 27.2, Version: 27.2, Size: 521120KiB\n\
+            * Label: macOS 27.2-26B123\n";
+        assert_eq!(
+            newest_clt_label(modern).as_deref(),
+            Some("Command Line Tools for Xcode 27.2-27.2")
+        );
+        let older = "* Label: Command Line Tools for Xcode-16.4\n\
+            * Label: Command Line Tools for Xcode-26.0\n";
+        assert_eq!(
+            newest_clt_label(older).as_deref(),
+            Some("Command Line Tools for Xcode-26.0")
+        );
+        assert_eq!(
+            newest_clt_label("* Label: Command Line Tools for Xcode 27.2 beta 3-27.2\n"),
+            None
+        );
+    }
 
     fn env_value<'a>(command: &'a Command, key: &str) -> Option<&'a str> {
         command

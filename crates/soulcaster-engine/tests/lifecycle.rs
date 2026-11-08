@@ -1362,6 +1362,61 @@ fn a_stalled_admin_step_waits_on_a_person_and_a_stalled_user_step_fails() {
 }
 
 #[test]
+fn command_line_tools_that_just_installed_are_found_by_the_check_after_the_install() {
+    // On a real Mac the Item failed verify 2ms after a good install: an answer from before.
+    let harness = Harness::new();
+    let installed = Arc::new(AtomicBool::new(false));
+    let after = Arc::clone(&installed);
+    harness.runner.on(
+        move |command| {
+            if file_name(command) == "softwareupdate" && args_contain(command, "-i") {
+                after.store(true, Ordering::SeqCst);
+            }
+            false
+        },
+        [Reply::ok("")],
+    );
+    let seen = Arc::clone(&installed);
+    harness.runner.on(
+        move |command| {
+            file_name(command) == "test"
+                && args_contain(command, "CommandLineTools")
+                && !seen.load(Ordering::SeqCst)
+        },
+        [Reply::fails(1, "missing")],
+    );
+    harness.runner.on(
+        |command| file_name(command) == "softwareupdate" && args_contain(command, "-l"),
+        [Reply::ok(
+            "* Label: Command Line Tools for Xcode 27.2-27.2\n",
+        )],
+    );
+    // The plan a real Run has, because which earlier checks run depends on what else is in it.
+    harness.runner.on(
+        |command| file_name(command) == "test" && args_contain(command, "CommandLineTools"),
+        [Reply::ok("")],
+    );
+    harness.runner.on(
+        |command| file_name(command) == "test",
+        [Reply::fails(1, "missing")],
+    );
+    let config = Config::parse(
+        br#"{"schemaVersion":1,"name":"x","items":["jq","tailscale"],"settings":{"dock.autohide":true}}"#,
+    )
+    .unwrap();
+    let mut real_plan = Plan::new(&config, Catalog::shipped());
+    let (report, _) = harness.run(&mut real_plan);
+    assert!(
+        matches!(
+            state(&report, "command-line-tools"),
+            ItemState::Satisfied { .. }
+        ),
+        "{:?}",
+        state(&report, "command-line-tools")
+    );
+}
+
+#[test]
 fn command_line_tools_falling_back_blocks_what_needs_them_and_other_items_continue() {
     let harness = Harness::new();
     harness.runner.on(
