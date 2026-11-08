@@ -504,4 +504,49 @@ mod helper_path_tests {
         );
         assert_eq!(chosen, bundled);
     }
+
+    /// A plain build has no bundle. `../Helpers/soulcaster-askpass` is a path above the binary,
+    /// and `exists` follows a symlink there.
+    #[test]
+    fn a_helper_planted_at_dotdot_helpers_does_not_beat_a_plain_build() {
+        let root = std::env::temp_dir().join(format!(
+            "soulcaster-helper-plain-planted-{}",
+            std::process::id()
+        ));
+        let plain = root.join("target/debug");
+        let planted_dir = root.join("target/Helpers");
+        fs::create_dir_all(&plain).unwrap();
+        fs::create_dir_all(&planted_dir).unwrap();
+        fs::write(plain.join("soulcaster-askpass"), "real").unwrap();
+        fs::write(planted_dir.join("soulcaster-askpass"), "planted").unwrap();
+        let chosen_file = fs::canonicalize(helper_for(&plain.join("soulcaster"))).unwrap();
+        let beside = fs::canonicalize(plain.join("soulcaster-askpass")).unwrap();
+        let planted = fs::canonicalize(planted_dir.join("soulcaster-askpass")).unwrap();
+
+        let link_plain = root.join("linked/debug");
+        let link_helpers = root.join("linked/Helpers");
+        fs::create_dir_all(&link_plain).unwrap();
+        fs::create_dir_all(&link_helpers).unwrap();
+        fs::write(link_plain.join("soulcaster-askpass"), "real").unwrap();
+        let evil = root.join("linked/evil-askpass");
+        fs::write(&evil, "evil").unwrap();
+        std::os::unix::fs::symlink(&evil, link_helpers.join("soulcaster-askpass")).unwrap();
+        let chosen_link = fs::canonicalize(helper_for(&link_plain.join("soulcaster"))).unwrap();
+        let beside_link = fs::canonicalize(link_plain.join("soulcaster-askpass")).unwrap();
+        let evil_path = fs::canonicalize(&evil).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        let mut problems = Vec::new();
+        if chosen_file != beside {
+            problems.push(format!(
+                "a file planted at ../Helpers was chosen ({chosen_file:?}) instead of the helper beside the binary ({beside:?}); planted is {planted:?}"
+            ));
+        }
+        if chosen_link != beside_link {
+            problems.push(format!(
+                "a symlink at ../Helpers/soulcaster-askpass was chosen ({chosen_link:?}); it points at {evil_path:?}, not the helper beside the binary ({beside_link:?})"
+            ));
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
 }

@@ -565,9 +565,16 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use soulcaster_core::ask::Password;
+    use soulcaster_core::event::Event;
+    use soulcaster_core::plan::Plan;
     use soulcaster_repo::review::Primary;
 
     use super::*;
+    use crate::answers::Answers;
+    use crate::engine::Engine;
     use crate::sim::{Scenario, SimEngine, SimMachine};
     use crate::state::with_engine;
 
@@ -676,6 +683,62 @@ mod tests {
                 .map(|dotfiles| dotfiles.repo.as_str()),
             None,
             "a Catalog plan that has nothing to do with the import still carries {imported}"
+        );
+    }
+
+    /// The review records `owner/tap/name`. A tap approval covers every package from that tap.
+    struct Capture(Arc<Mutex<Vec<String>>>);
+
+    impl Engine for Capture {
+        fn start_run(&mut self, _plan: &Plan, answers: &Answers) {
+            *self.0.lock().unwrap() = answers.taps.iter().cloned().collect();
+        }
+
+        fn start_scoped(&mut self, _: &str, _: &[String], _: Option<&str>) {}
+
+        fn submit_password(&mut self, _: Password) {}
+
+        fn start_github_sign_in(&mut self) -> String {
+            String::new()
+        }
+
+        fn poll(&mut self, _: f64) -> Vec<Event> {
+            Vec::new()
+        }
+
+        fn next_due(&self, _: f64) -> Option<f64> {
+            None
+        }
+    }
+
+    #[test]
+    fn a_package_approval_is_not_widened_to_the_whole_tap() {
+        let mut app = app();
+        app.read_sample("example-dev/one-config");
+        app.review_tick(&Tick::Tap("mobile-dev-inc/tap".to_string()));
+        app.start_from_review();
+        assert!(
+            app.plan().taps.contains_key("mobile-dev-inc/tap"),
+            "the imported package should put its tap on the plan"
+        );
+        let held = app.repo.sim.store.read().unwrap();
+        assert!(
+            held.packages.contains("mobile-dev-inc/tap/maestro"),
+            "the review records the package, not the tap: {:?}",
+            held.packages
+        );
+        assert!(
+            !held.taps.contains("mobile-dev-inc/tap"),
+            "the review approved the whole tap: {:?}",
+            held.taps
+        );
+        let got = Arc::new(Mutex::new(Vec::new()));
+        app.engine = Box::new(Capture(Arc::clone(&got)));
+        app.start_run();
+        let handed = got.lock().unwrap().clone();
+        assert!(
+            !handed.iter().any(|tap| tap == "mobile-dev-inc/tap"),
+            "start handed the engine the tap {handed:?}, which approves every package from it, not only mobile-dev-inc/tap/maestro"
         );
     }
 
