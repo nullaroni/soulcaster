@@ -2189,7 +2189,17 @@ impl<'a> Engine<'a> {
                 }
                 soulcaster_core::recipe::BuiltinStore::DockTiles => {
                     if let SettingValue::List(apps) = value {
-                        for command in act::dock_write(self.home, apps) {
+                        // Without knowing what's there, the Dock is left as it is.
+                        let CmdResult::Done(listing) =
+                            self.run_command(&act::dock_list(self.home), id, false)?
+                        else {
+                            return Ok(());
+                        };
+                        if !listing.is_success() {
+                            return Ok(());
+                        }
+                        let tiles = dock_app_tiles(&listing.stdout_text());
+                        for command in act::dock_write(self.home, &tiles, apps) {
                             let _ = self.run_command(&command, id, true)?;
                         }
                     }
@@ -3223,6 +3233,32 @@ pub(crate) fn dock_paths(stdout: &str) -> Vec<String> {
         .collect()
 }
 
+/// What to name each app tile by when removing it: the bundle ID, or the label for a tile with
+/// none. A name dockutil would read as an option, or as `all`, is left alone.
+fn dock_app_tiles(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let is_app = fields
+                .get(2)
+                .is_none_or(|section| *section == "persistentApps");
+            let has_path = fields.get(1).is_some_and(|path| !path.trim().is_empty());
+            let id = fields
+                .get(4)
+                .map(|bundle| bundle.trim())
+                .filter(|bundle| !bundle.is_empty())
+                .or(fields.first().map(|label| label.trim()))?;
+            (is_app
+                && has_path
+                && !id.is_empty()
+                && !id.starts_with('-')
+                && !id.eq_ignore_ascii_case("all"))
+            .then(|| id.to_string())
+        })
+        .collect()
+}
+
 pub(crate) fn git_key(key: &soulcaster_core::recipe::GitKey) -> &'static str {
     match key {
         soulcaster_core::recipe::GitKey::UserName => "user.name",
@@ -3285,6 +3321,21 @@ pub(crate) fn reason_label(reason: SkipReason) -> &'static str {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn only_app_tiles_are_removed_and_never_by_a_name_dockutil_would_misread() {
+        assert_eq!(
+            dock_app_tiles(
+                "Mail\tfile:///System/Applications/Mail.app/\tpersistentApps\t/p\tcom.apple.mail\n\
+                 Downloads\tfile:///Users/x/Downloads/\tpersistentOthers\t/p\t\n\
+                 Zed\tfile:///Applications/Zed.app/\trecentApps\t/p\tdev.zed.Zed\n\
+                 all\tfile:///Applications/all.app/\tpersistentApps\t/p\t\n\
+                 --zap\tfile:///Applications/z.app/\tpersistentApps\t/p\t\n\
+                 Thing\tfile:///Applications/Thing.app/\tpersistentApps\t/p\t\n"
+            ),
+            ["com.apple.mail", "Thing"]
+        );
+    }
 
     #[test]
     fn dock_paths_are_compared_as_paths_not_as_urls() {

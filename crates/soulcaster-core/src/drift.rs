@@ -579,6 +579,28 @@ pub fn held_sentence(name: &str) -> String {
     )
 }
 
+/// Whether adding this entry's line leaves everything else in the Config being applied. A line
+/// that conflicts with one already there would stop both, on every Machine.
+fn saving_keeps_applying(
+    facts: &Facts<'_>,
+    key: &str,
+    machine: &Seen,
+    always: &BTreeSet<&str>,
+) -> bool {
+    let Seen::Present(value) = machine else {
+        return true;
+    };
+    let line = Reviewed {
+        id: key.to_string(),
+        key: key.to_string(),
+        seen: None,
+        write: Some(value.clone()),
+    };
+    adopt_onto(facts.config, &[line], always).is_ok_and(|after| {
+        Plan::new(&after, facts.catalog).conflicts.len() <= facts.plan.conflicts.len()
+    })
+}
+
 fn may_leave_this_mac(facts: &Facts<'_>, key: &str, value: SettingValue) -> bool {
     let mut only_this = facts.config.clone();
     only_this.items.clear();
@@ -704,6 +726,9 @@ pub fn report(facts: &Facts<'_>) -> Report {
         };
         let spelled = file_key(facts, key);
         let only_needed = config.is_some() && spelled.is_none();
+        let keeps_applying = config.is_some()
+            || !matches!(machine, Seen::Present(_))
+            || saving_keeps_applying(facts, key, &machine, &always);
         // That unreadable ID may be this entry's new name, for a setting that left the file too.
         let held_up = !report.held.is_empty() && (!is_setting || kind == RowKind::Dropped);
         report.rows.push(Row {
@@ -718,7 +743,7 @@ pub fn report(facts: &Facts<'_>) -> Report {
             },
             is_setting,
             removable,
-            adoptable: !held_up && value_fits && !only_needed,
+            adoptable: !held_up && value_fits && !only_needed && keeps_applying,
             waits_for_update: held_up && matches!(kind, RowKind::Dropped | RowKind::Extra),
             only_needed,
         });

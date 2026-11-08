@@ -786,12 +786,19 @@ pub fn dock_list(home: &Path) -> Command {
     base_command(home, "/opt/homebrew/bin/dockutil").args(["--list"])
 }
 
-pub fn dock_write(home: &Path, apps: &[String]) -> Vec<Command> {
-    let mut commands = vec![base_command(home, "/opt/homebrew/bin/dockutil").args([
-        "--remove",
-        "all",
-        "--no-restart",
-    ])];
+/// Takes the app tiles out one by one and adds the wanted ones in order. `--remove all` would
+/// also empty the folders beside them, which a Config can't name and no Run puts back.
+pub fn dock_write(home: &Path, tiles: &[String], apps: &[String]) -> Vec<Command> {
+    let mut commands: Vec<Command> = tiles
+        .iter()
+        .map(|tile| {
+            base_command(home, "/opt/homebrew/bin/dockutil").args([
+                "--remove",
+                tile,
+                "--no-restart",
+            ])
+        })
+        .collect();
     for app in apps {
         // No shell reads this, so nothing else would expand a `~`.
         let app = expand_home(home, app).to_string_lossy().into_owned();
