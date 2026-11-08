@@ -135,7 +135,7 @@ pub struct App {
     pub run_asks: (bool, bool),
     /// The Dotfiles Repo from an imported Config, for the Run to apply.
     pub dotfiles: Option<soulcaster_core::config::Dotfiles>,
-    dotfiles_for: Option<String>,
+    imported_selection: Option<String>,
     /// Taps an Import's packages come from. They show as answered, and approve nothing here.
     pub imported_taps: std::collections::BTreeSet<String>,
     pub scoped_wrong: bool,
@@ -204,7 +204,7 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         run_password: TextEdit::new("").secure(),
         run_asks: (false, false),
         dotfiles: None,
-        dotfiles_for: None,
+        imported_selection: None,
         imported_taps: Default::default(),
         scoped_wrong: false,
         drift: crate::drift::sample(),
@@ -281,17 +281,20 @@ impl App {
     pub fn config(&self) -> Config {
         let mut config = self.selection();
         // Only the exact selection that was reviewed with it.
-        if self.dotfiles_for.as_deref() == Some(config.to_canonical_json().as_str()) {
+        if self.is_imported_selection() {
             config.dotfiles = self.dotfiles.clone();
         }
         config
     }
 
-    /// Records what the imported Dotfiles Repo was reviewed with.
+    /// Whether the selection is still exactly what an Import's review showed.
+    fn is_imported_selection(&self) -> bool {
+        self.imported_selection.as_deref() == Some(self.selection().to_canonical_json().as_str())
+    }
+
+    /// Records what an Import was reviewed with, for what's only true of that selection.
     pub fn keep_dotfiles(&mut self, dotfiles: Option<soulcaster_core::config::Dotfiles>) {
-        self.dotfiles_for = dotfiles
-            .is_some()
-            .then(|| self.selection().to_canonical_json());
+        self.imported_selection = Some(self.selection().to_canonical_json());
         self.dotfiles = dotfiles;
     }
 
@@ -578,9 +581,11 @@ impl App {
         let mut answers = self.answers.clone();
         // And an Import approves its packages one by one, which `record_start` has stored. A tap
         // approval would cover everything else from that tap too.
-        answers
-            .taps
-            .retain(|tap| plan.taps.contains_key(tap) && !self.imported_taps.contains(tap));
+        // Once the selection has changed, a tap ticked here is the person's own answer.
+        let imported = self.is_imported_selection();
+        answers.taps.retain(|tap| {
+            plan.taps.contains_key(tap) && !(imported && self.imported_taps.contains(tap))
+        });
         self.engine.start_run(&plan, &answers);
         self.screen = Screen::Run;
         self.pump();

@@ -425,9 +425,20 @@ pub const ASKPASS_IDENTIFIER: &str = "com.nullworks.macflayer.askpass";
 /// Where the helper is for a program at `executable`. The window of an app bundle is in
 /// `Contents/MacOS` and the helper in `Contents/Helpers`. Anything else, the CLI in the bundle or
 /// a plain build, has it beside the program. The folders decide this rather than whether a file
-/// happens to exist, so nothing dropped nearby can stand in for it.
+/// happens to exist, so nothing dropped nearby can stand in for it, and they're the program's real
+/// folders, so a symlink can't make something look like a bundle.
 fn helper_for(executable: &std::path::Path) -> PathBuf {
-    let Some(folder) = executable.parent() else {
+    let real = fs::canonicalize(executable).or_else(|_| {
+        // Not there yet in a test. The folder still has to be real.
+        let folder = executable.parent().ok_or(ErrorKind::NotFound)?;
+        Ok::<_, std::io::Error>(
+            fs::canonicalize(folder)?.join(executable.file_name().unwrap_or_default()),
+        )
+    });
+    let Ok(real) = real else {
+        return PathBuf::new();
+    };
+    let Some(folder) = real.parent() else {
         return PathBuf::new();
     };
     let in_a_bundle = folder.file_name().is_some_and(|name| name == "MacOS")
@@ -481,9 +492,10 @@ mod helper_path_tests {
             fs::canonicalize(helpers.join("soulcaster-askpass")).unwrap()
         );
         let plain = root.join("target/debug");
+        fs::create_dir_all(&plain).unwrap();
         assert_eq!(
             helper_for(&plain.join("soulcaster")),
-            plain.join("soulcaster-askpass")
+            fs::canonicalize(&plain).unwrap().join("soulcaster-askpass")
         );
         fs::remove_dir_all(&root).unwrap();
     }
