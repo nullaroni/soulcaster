@@ -899,4 +899,61 @@ mod tests {
             json!(6)
         );
     }
+
+    // Review of PR #43, round 2.
+
+    #[test]
+    fn review_an_offline_save_for_another_config_does_not_take_over_a_waiting_save() {
+        const WORK: &str =
+            r#"{"schemaVersion":1,"name":"Work","settings":{"keyboard.key-repeat":2}}"#;
+        const HOME: &str = r#"{"schemaVersion":1,"name":"Home","settings":{"dock.autohide":true,"keyboard.key-repeat":2}}"#;
+        let mut world = World::new();
+        world.follow(WORK, true);
+        github_holds(&mut world, &[("configs/work.json", WORK)]);
+        world.remember("keyboard.key-repeat", json!(2));
+        world.remember("dock.autohide", json!(true));
+        world.mac_says("read NSGlobalDomain KeyRepeat", Reply::ok("6\n"));
+        world.mac_says("read com.apple.dock autohide", Reply::ok("0\n"));
+        world.nothing_else_here();
+        let rows = check(&world.deps()).report.rows;
+        let repeat = rows
+            .iter()
+            .find(|row| row.id == "keyboard.key-repeat")
+            .unwrap()
+            .clone();
+
+        // Key repeat is saved for Work and waits.
+        world.gh.go_offline();
+        carry_out(&world.deps(), &[(repeat, Choice::Adopt)]);
+        assert_eq!(world.record().waiting_saves.len(), 1, "saved for Work");
+
+        // Home is followed next, and only its Dock row is saved, still offline.
+        world.follow(HOME, true);
+        let rows = check(&world.deps()).report.rows;
+        let dock = rows
+            .iter()
+            .find(|row| row.id == "dock.autohide")
+            .unwrap()
+            .clone();
+        carry_out(&world.deps(), &[(dock, Choice::Adopt)]);
+
+        github_holds(
+            &mut world,
+            &[("configs/work.json", WORK), ("configs/home.json", HOME)],
+        );
+        send_waiting(&world.deps());
+        let home = world.gh.file_at_git("add", "configs/home.json");
+        assert!(
+            home.as_ref().is_none_or(|text| {
+                let held: serde_json::Value = serde_json::from_str(text).unwrap();
+                held["settings"]["keyboard.key-repeat"] == json!(2)
+            }),
+            "the key repeat save was reviewed for Work and went into configs/home.json: {home:?}"
+        );
+        assert_eq!(
+            world.record().last_applied["keyboard.key-repeat"].value,
+            json!(2),
+            "GitHub's Work Config doesn't have this"
+        );
+    }
 }
