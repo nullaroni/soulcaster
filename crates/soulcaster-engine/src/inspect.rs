@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde_json::Number;
 use serde_json::Value;
 use soulcaster_core::catalog::{Catalog, Lifecycle};
-use soulcaster_core::command::{Command, CommandEnd, CommandRunner};
+use soulcaster_core::command::{Command, CommandEnd, CommandOutput, CommandRunner};
 use soulcaster_core::config::{Config, SettingValue};
 use soulcaster_core::drift::{
     Facts, Keg, Report, Reviewed, Seen, Uninstall, current_id, kegs_of, plain_package, removal_of,
@@ -38,8 +38,17 @@ const APPLE_STUBS: [&str; 2] = ["/usr/bin/git", "/usr/bin/xcodebuild"];
 
 enum Answer {
     Yes(String),
-    No,
+    No(i32),
     Unknown,
+}
+
+/// What one store's contents say, in the Config's terms.
+enum Decoded {
+    Says(Value),
+    /// Holds nothing about this value, such as a companion key that's the same for every choice.
+    Silent,
+    /// Holds something the Config has no way to state.
+    Cannot,
 }
 
 /// What one store holds, kept as read so each candidate value can be compared the way a Run does.
@@ -62,7 +71,10 @@ impl Look<'_> {
             .run(&command.stall_limit(LOOK_LIMIT), &mut |_, _| {})
         {
             Ok(output) if output.is_success() => Answer::Yes(output.stdout_text()),
-            Ok(output) if matches!(output.end, CommandEnd::Exited(_)) => Answer::No,
+            Ok(CommandOutput {
+                end: CommandEnd::Exited(code),
+                ..
+            }) => Answer::No(code),
             _ => Answer::Unknown,
         }
     }
@@ -113,7 +125,7 @@ impl Look<'_> {
                 // from starting says nothing about whether it's there.
                 Err(error)
                     if matches!(probe, Probe::ToolVersion { .. })
-                        && error.message.contains("os error 2") =>
+                        && error.message.ends_with("(os error 2)") =>
                 {
                     return Some(false);
                 }
@@ -154,8 +166,8 @@ impl Look<'_> {
                 };
                 match self.ask(command) {
                     Answer::Yes(text) => Stored::Text(text),
-                    Answer::No => Stored::Unset,
-                    Answer::Unknown => Stored::Unknown,
+                    Answer::No(1) => Stored::Unset,
+                    _ => Stored::Unknown,
                 }
             }
             Store::GitConfig { key } => {
@@ -176,8 +188,9 @@ impl Look<'_> {
                     Answer::Yes(text) if !text.trim().is_empty() => {
                         Stored::Text(text.trim().to_string())
                     }
-                    Answer::Yes(_) | Answer::No => Stored::Unset,
-                    Answer::Unknown => Stored::Unknown,
+                    // Exit 1 is a key that isn't set. Anything else says nothing about the key.
+                    Answer::Yes(_) | Answer::No(1) => Stored::Unset,
+                    _ => Stored::Unknown,
                 }
             }
             Store::Builtin {
@@ -209,9 +222,9 @@ impl Look<'_> {
                 reading => readings.push((store, reading)),
             }
         }
-        let Some((first, first_reading)) = readings.first() else {
+        if readings.is_empty() {
             return Seen::CantTell;
-        };
+        }
         let last_value =
             last.and_then(|value| serde_json::from_value::<SettingValue>(value.clone()).ok());
         // The Run's own comparison decides what counts as the same, so a value it wouldn't touch
@@ -227,20 +240,30 @@ impl Look<'_> {
                 };
             }
         }
-        let decoded = match first_reading {
-            Stored::Unset => {
-                return match &setting.unset_means {
-                    Some(value) => Seen::Present(value.clone()),
-                    None => Seen::Absent,
-                };
+        // Every store that has something to say must say the same thing.
+        let mut said: Option<Option<Value>> = None;
+        for (store, reading) in &readings {
+            let this = match reading {
+                Stored::Unset => setting.unset_means.clone(),
+                Stored::Text(text) => match decode(setting, store, text) {
+                    Decoded::Says(value) => Some(value),
+                    Decoded::Silent => continue,
+                    Decoded::Cannot => return Seen::CantTell,
+                },
+                Stored::Unknown => return Seen::CantTell,
+            };
+            match &said {
+                None => said = Some(this),
+                Some(earlier) if *earlier == this => {}
+                Some(_) => return Seen::CantTell,
             }
-            Stored::Text(text) => decode(setting, first, text),
-            Stored::Unknown => None,
+        }
+        let decoded = match said {
+            None => return Seen::CantTell,
+            Some(None) => return Seen::Absent,
+            Some(Some(value)) => value,
         };
-        let Some(decoded) = decoded else {
-            return Seen::CantTell;
-        };
-        // The first store agrees with a value the others don't: one thing can't be said of it.
+        // Stores that read as a candidate the Run's comparison turned down: nothing is certain.
         let looks_settled = config
             .and_then(|value| serde_json::to_value(value).ok())
             .iter()
@@ -363,20 +386,21 @@ fn holds(
     }
 }
 
-/// The Config's token for what's stored. Several tokens stored the same way can't be told apart.
+/// The Config's token for what's stored. `Err` when several tokens are stored the same way, so
+/// the stored value can't pick one.
 fn token_for(
     encode: &BTreeMap<String, Value>,
     matches: impl Fn(&Value) -> bool,
-) -> Option<Option<String>> {
+) -> Result<Option<String>, ()> {
     let tokens: Vec<&String> = encode
         .iter()
         .filter(|(_, stored)| matches(stored))
         .map(|(token, _)| token)
         .collect();
     match tokens.as_slice() {
-        [] => Some(None),
-        [one] => Some(Some((*one).clone())),
-        _ => None,
+        [] => Ok(None),
+        [one] => Ok(Some((*one).clone())),
+        _ => Err(()),
     }
 }
 
@@ -393,8 +417,12 @@ fn typed(setting: &SettingRecipe, text: &str) -> Option<Value> {
     }
 }
 
-/// What a store holds, in the Config's terms. `None` when that can't be said honestly.
-fn decode(setting: &SettingRecipe, store: &Store, text: &str) -> Option<Value> {
+fn says(value: Option<Value>) -> Decoded {
+    value.map_or(Decoded::Cannot, Decoded::Says)
+}
+
+/// What a store holds, in the Config's terms.
+fn decode(setting: &SettingRecipe, store: &Store, text: &str) -> Decoded {
     match store {
         Store::Defaults {
             stored_type,
@@ -404,61 +432,73 @@ fn decode(setting: &SettingRecipe, store: &Store, text: &str) -> Option<Value> {
             let text = text.trim();
             match stored_type {
                 StoredType::Bool => match text {
-                    "1" | "true" => Some(Value::Bool(true)),
-                    "0" | "false" => Some(Value::Bool(false)),
-                    _ => None,
+                    "1" | "true" => Decoded::Says(Value::Bool(true)),
+                    "0" | "false" => Decoded::Says(Value::Bool(false)),
+                    _ => Decoded::Cannot,
                 },
                 StoredType::Int | StoredType::Float => {
                     if let Some(map) = encode {
-                        let token = token_for(map, |stored| match stored {
+                        let stored_as = |stored: &Value| match stored {
                             Value::Number(number) => number.to_string() == text,
                             _ => false,
-                        })?;
-                        if let Some(token) = token {
-                            return typed(setting, &token);
+                        };
+                        match token_for(map, stored_as) {
+                            Err(()) => return Decoded::Silent,
+                            Ok(Some(token)) => return says(typed(setting, &token)),
+                            Ok(None) => {}
                         }
                     }
                     if let Ok(number) = text.parse::<i64>() {
-                        return Some(Value::Number(number.into()));
+                        return Decoded::Says(Value::Number(number.into()));
                     }
-                    let number: f64 = text.parse().ok()?;
-                    Number::from_f64(number).map(Value::Number)
+                    says(
+                        text.parse::<f64>()
+                            .ok()
+                            .and_then(Number::from_f64)
+                            .map(Value::Number),
+                    )
                 }
                 StoredType::String => {
                     if let Some(map) = encode {
-                        let token = token_for(map, |stored| stored.as_str() == Some(text))?;
-                        if let Some(token) = token {
-                            return typed(setting, &token);
+                        match token_for(map, |stored| stored.as_str() == Some(text)) {
+                            Err(()) => return Decoded::Silent,
+                            Ok(Some(token)) => return says(typed(setting, &token)),
+                            Ok(None) => {}
                         }
                     }
-                    Some(Value::String(text.to_string()))
+                    Decoded::Says(Value::String(text.to_string()))
                 }
                 StoredType::StringArray => {
                     let mut list = Vec::new();
                     for item in parse_array(text) {
                         let token = match encode {
                             Some(map) => {
-                                token_for(map, |stored| stored.as_str() == Some(item.as_str()))?
+                                match token_for(map, |stored| {
+                                    stored.as_str() == Some(item.as_str())
+                                }) {
+                                    Ok(token) => token,
+                                    Err(()) => return Decoded::Silent,
+                                }
                             }
                             None => None,
                         };
                         list.push(Value::String(token.unwrap_or(item)));
                     }
-                    Some(Value::Array(list))
+                    Decoded::Says(Value::Array(list))
                 }
-                StoredType::Dict => None,
+                StoredType::Dict => Decoded::Silent,
             }
         }
-        Store::GitConfig { .. } => typed(setting, text.trim()),
+        Store::GitConfig { .. } => says(typed(setting, text.trim())),
         Store::Builtin {
             name: BuiltinStore::LibraryVisible,
-        } => Some(Value::Bool(!text.contains("hidden"))),
+        } => Decoded::Says(Value::Bool(!text.contains("hidden"))),
         Store::Builtin {
             name: BuiltinStore::DockTiles,
-        } => Some(Value::Array(
+        } => Decoded::Says(Value::Array(
             dock_paths(text).into_iter().map(Value::String).collect(),
         )),
-        Store::Builtin { .. } => None,
+        Store::Builtin { .. } => Decoded::Silent,
     }
 }
 
@@ -587,7 +627,7 @@ pub fn check_drift(
         }
         seen.insert(key, Seen::Present(Value::Bool(true)));
     }
-    Ok(report(&Facts {
+    let mut found = report(&Facts {
         plan,
         catalog,
         config,
@@ -595,7 +635,14 @@ pub fn check_drift(
         last: &last,
         unavailable: &unavailable,
         kept: &record.kept_here,
-    }))
+    });
+    // A removal starts Homebrew, which isn't started without the developer tools.
+    if !look.developer_tools_here() {
+        for row in &mut found.rows {
+            row.removable = false;
+        }
+    }
+    Ok(found)
 }
 
 /// The record changes below all take the Run lock, so none can land in the middle of a Run.
@@ -623,9 +670,19 @@ pub fn leave_here(home: &Path, id: &str) -> Result<(), EngineError> {
 /// "Keep it here and stop tracking it", and "Keep it on this Mac only".
 pub fn keep_here(home: &Path, id: &str) -> Result<(), EngineError> {
     with_record(home, |record| {
-        record.last_applied.remove(id);
+        forget_applied(record, id);
         record.kept_here.insert(id.to_string());
     })
+}
+
+/// The record may hold this entry under a name from before a Catalog release.
+fn same_entry(a: &str, b: &str) -> bool {
+    let catalog = Catalog::shipped();
+    current_id(catalog, a) == current_id(catalog, b)
+}
+
+fn forget_applied(record: &mut MachineRecord, id: &str) {
+    record.last_applied.retain(|key, _| !same_entry(key, id));
 }
 
 /// A save GitHub now has. Only this moves the last-applied record.
@@ -637,19 +694,21 @@ pub fn record_saved(
 ) -> Result<(), EngineError> {
     with_record(home, |record| {
         for entry in saved {
-            record.kept_here.remove(&entry.id);
+            record.kept_here.retain(|key| !same_entry(key, &entry.id));
             // Back in the Config by the person's own choice, so "leave it alone" is over.
-            if record.unavailable.get(&entry.id).map(String::as_str)
-                == Some(reason_label(SkipReason::MarkedByPerson))
-            {
-                record.unavailable.remove(&entry.id);
-            }
+            let marked = reason_label(SkipReason::MarkedByPerson);
+            record
+                .unavailable
+                .retain(|key, reason| reason != marked || !same_entry(key, &entry.id));
             match &entry.write {
-                None => {
-                    record.last_applied.remove(&entry.id);
-                }
+                None => forget_applied(record, &entry.id),
                 Some(value) => {
-                    let earlier = record.last_applied.get(&entry.id);
+                    let earlier = record
+                        .last_applied
+                        .iter()
+                        .find(|(key, _)| same_entry(key, &entry.id))
+                        .map(|(_, applied)| applied.clone());
+                    let earlier = earlier.as_ref();
                     let applied = LastApplied {
                         value: value.clone(),
                         applied_at: clock.now_ms(),
@@ -659,6 +718,7 @@ pub fn record_saved(
                         assurance: earlier.map_or(Assurance::Stored, |e| e.assurance),
                         prior_value: earlier.and_then(|e| e.prior_value.clone()),
                     };
+                    forget_applied(record, &entry.id);
                     record.last_applied.insert(entry.id.clone(), applied);
                 }
             }

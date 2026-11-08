@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use soulcaster_core::catalog::Catalog;
 use soulcaster_core::command::CommandRunner;
 use soulcaster_core::config::{Config, MAX_BYTES};
-use soulcaster_core::drift::{Reviewed, adopt_onto, moved_since};
+use soulcaster_core::drift::{Reviewed, adopt_onto, moved_since, respelled};
 
 use crate::address::RepoId;
 use crate::copies::{keep_own, slug};
@@ -16,6 +16,12 @@ use crate::save::{SaveError, SaveOutcome, SaveRequest, WaitReason, savable_text,
 use crate::tools::Tools;
 
 const TRIES: usize = 3;
+
+fn unique(mut ids: Vec<String>) -> Vec<String> {
+    ids.sort();
+    ids.dedup();
+    ids
+}
 
 pub struct AdoptRequest<'a> {
     pub repo_name: &'a str,
@@ -173,13 +179,14 @@ fn send(
 /// An entry that can't go on that copy is left out of it and is asked about on the next Send.
 fn wait_here(
     tools: &Tools,
+    catalog: &Catalog,
     request: &AdoptRequest<'_>,
     always: &BTreeSet<&str>,
     why: WaitReason,
 ) -> Result<AdoptOutcome, SaveError> {
-    let moved = moved_since(request.held, request.reviewed);
-    let can_go: Vec<Reviewed> = request
-        .reviewed
+    let reviewed = respelled(request.held, catalog, request.reviewed);
+    let moved = moved_since(request.held, &reviewed);
+    let can_go: Vec<Reviewed> = reviewed
         .iter()
         .filter(|entry| !moved.contains(&entry.id) && (request.still_true)(entry))
         .cloned()
@@ -233,7 +240,7 @@ pub fn adopt(
     let always: BTreeSet<&str> = catalog.base_items().map(|entry| entry.id()).collect();
     let path = format!("configs/{}.json", slug(request.config_name));
     if tools.gh.is_none() || tools.git.is_none() {
-        return wait_here(tools, request, &always, WaitReason::SignIn);
+        return wait_here(tools, catalog, request, &always, WaitReason::SignIn);
     }
     let github = GitHub::new(runner, tools);
     for _ in 0..TRIES {
@@ -245,7 +252,7 @@ pub fn adopt(
             .collect();
         let latest = match read_latest(&github, request, &path) {
             Ok(latest) => latest,
-            Err(Stop::Wait(why)) => return wait_here(tools, request, &always, why),
+            Err(Stop::Wait(why)) => return wait_here(tools, catalog, request, &always, why),
             Err(Stop::Unreadable) => return Ok(AdoptOutcome::Unreadable),
             Err(Stop::Missing(path)) => return Ok(AdoptOutcome::Missing { path }),
         };
@@ -256,14 +263,16 @@ pub fn adopt(
                 Err(_) => return Ok(AdoptOutcome::Unreadable),
             },
         };
-        let elsewhere = moved_since(&config, request.reviewed);
-        let going: Vec<Reviewed> = request
-            .reviewed
+        let reviewed = respelled(&config, catalog, request.reviewed);
+        // An entry that changed on this Mac too is asked about for that one reason.
+        let mut elsewhere = unique(moved_since(&config, &reviewed));
+        elsewhere.retain(|id| !again.contains(id));
+        let going: Vec<Reviewed> = reviewed
             .iter()
             .filter(|entry| !again.contains(&entry.id) && !elsewhere.contains(&entry.id))
             .cloned()
             .collect();
-        let saved: Vec<String> = going.iter().map(|entry| entry.id.clone()).collect();
+        let saved = unique(going.iter().map(|entry| entry.id.clone()).collect());
         if going.is_empty() {
             return Ok(finished(public, saved, elsewhere, again));
         }
@@ -298,5 +307,5 @@ pub fn adopt(
             Sent::Waiting(why, local) => return Ok(AdoptOutcome::Waiting { why, local }),
         }
     }
-    wait_here(tools, request, &always, WaitReason::Busy)
+    wait_here(tools, catalog, request, &always, WaitReason::Busy)
 }

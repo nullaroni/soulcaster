@@ -360,10 +360,10 @@ pub fn current_id(catalog: &Catalog, raw: &str) -> String {
     }
 }
 
-/// How the file spells this entry, if the file has it at all.
-fn file_key(facts: &Facts<'_>, id: &str) -> Option<String> {
-    let config = facts.config;
-    let spellings = config
+/// Every way the file spells this entry. One entry can be listed as an Item and as the package
+/// that Item covers.
+pub fn spellings_in(config: &Config, catalog: &Catalog, id: &str) -> Vec<String> {
+    config
         .items
         .iter()
         .chain(config.settings.keys())
@@ -375,10 +375,39 @@ fn file_key(facts: &Facts<'_>, id: &str) -> Option<String> {
                 .iter()
                 .map(|f| format!("formula:{f}")),
         )
-        .chain(config.packages.casks.iter().map(|c| format!("cask:{c}")));
-    spellings
+        .chain(config.packages.casks.iter().map(|c| format!("cask:{c}")))
+        .filter(|raw| raw == id || current_id(catalog, raw) == id)
+        .collect()
+}
+
+/// How the file spells this entry, if the file has it at all.
+fn file_key(facts: &Facts<'_>, id: &str) -> Option<String> {
+    spellings_in(facts.config, facts.catalog, id)
         .into_iter()
-        .find(|raw| raw == id || current_id(facts.catalog, raw) == id)
+        .next()
+}
+
+/// The reviewed entries as this Config spells them now. A line that was only respelled is still
+/// the same entry, and taking an entry out takes out every line naming it.
+pub fn respelled(latest: &Config, catalog: &Catalog, reviewed: &[Reviewed]) -> Vec<Reviewed> {
+    let mut out = Vec::new();
+    for entry in reviewed {
+        let spellings = spellings_in(latest, catalog, &entry.id);
+        if spellings.is_empty() || (entry.write.is_some() && spellings.contains(&entry.key)) {
+            out.push(entry.clone());
+        } else if entry.write.is_some() {
+            out.push(Reviewed {
+                key: spellings[0].clone(),
+                ..entry.clone()
+            });
+        } else {
+            out.extend(spellings.into_iter().map(|key| Reviewed {
+                key,
+                ..entry.clone()
+            }));
+        }
+    }
+    out
 }
 
 /// A person's answer to a row.
@@ -461,6 +490,9 @@ impl Row {
             return held_sentence(name);
         }
         match self.kind {
+            RowKind::NewInConfig if self.only_needed => {
+                format!("Something in your Config needs {name}, and it isn't on this Mac.")
+            }
             RowKind::RemovedHere if self.only_needed => {
                 format!("{name} was removed from this Mac, but something in your Config needs it.")
             }
@@ -588,6 +620,16 @@ pub fn report(facts: &Facts<'_>) -> Report {
         .iter()
         .map(|(raw, value)| (current_id(catalog, raw), value))
         .collect();
+    let unavailable: BTreeSet<String> = facts
+        .unavailable
+        .iter()
+        .map(|raw| current_id(catalog, raw))
+        .collect();
+    let kept: BTreeSet<String> = facts
+        .kept
+        .iter()
+        .map(|raw| current_id(catalog, raw))
+        .collect();
     let seen: BTreeMap<String, &Seen> = facts
         .seen
         .iter()
@@ -617,11 +659,11 @@ pub fn report(facts: &Facts<'_>) -> Report {
             continue;
         }
         let config = wanted.get(key);
-        if config.is_some() && facts.unavailable.contains(key) {
+        if config.is_some() && unavailable.contains(key) {
             report.unavailable.push(key.to_string());
             continue;
         }
-        if config.is_none() && facts.kept.contains(key) {
+        if config.is_none() && kept.contains(key) {
             continue;
         }
         let last_value = last.get(key).copied();

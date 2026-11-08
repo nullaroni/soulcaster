@@ -328,6 +328,7 @@ fn homebrew_being_unreachable_is_not_a_failure_and_makes_nothing_up() {
 fn something_recorded_that_the_config_dropped_is_a_dropped_row() {
     let sandbox = Sandbox::new();
     let runner = FakeRunner::new();
+    answer(&runner, "CommandLineTools", Reply::ok(""));
     answer(&runner, "Cellar/nobody-covers-this", Reply::ok(""));
     absent_by_default(&runner);
     remember(

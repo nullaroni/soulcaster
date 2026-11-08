@@ -181,6 +181,8 @@ pub fn brew_uninstall(home: &Path, name: &str, cask: bool) -> Command {
         .env("HOMEBREW_NO_AUTO_UPDATE", "1")
         .env("HOMEBREW_NO_SUDO", "1")
         .env("HOMEBREW_NO_INSTALL_CLEANUP", "1")
+        // Otherwise Homebrew also removes whatever else it thinks is unused.
+        .env("HOMEBREW_NO_AUTOREMOVE", "1")
 }
 
 /// One thing the engine does while performing a step, in order.

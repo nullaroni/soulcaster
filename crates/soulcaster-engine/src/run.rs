@@ -12,8 +12,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use soulcaster_core::ask::{Asks, Password, PasswordRequest, SignInStatus};
+use soulcaster_core::catalog::Catalog;
 use soulcaster_core::command::{Command, CommandEnd, CommandOutput, CommandRunner, OutputStream};
 use soulcaster_core::config::SettingValue;
+use soulcaster_core::drift::{current_id, set_aside};
 use soulcaster_core::event::{
     AskKind, AskStatus, ConfigRef, Event, EventKind, EventSink, LogStream, PlanItem, QueueEntry,
     QueueKind, RunScope, Stamper, StepPhase,
@@ -327,29 +329,22 @@ impl<'a> Engine<'a> {
         })
     }
 
-    /// A person's answers last only as long as what they were about. Only a full Run sees the
-    /// whole Config, so only it can tell.
+    /// A person's answers last only as long as what they were about. Every Run holds the whole
+    /// Config, whatever it acts on, so any Run can tell.
     fn settle_answers(&mut self) {
-        if !matches!(self.scope_kind, RunScope::Full) {
-            return;
-        }
-        let plan = &*self.plan;
-        let listed = |id: &str| plan.entries.iter().any(|entry| entry.id == id);
-        let in_file = |id: &str| {
-            listed(id)
-                || plan.skipped.iter().any(|entry| entry.raw == id)
-                || plan
-                    .conflicts
-                    .iter()
-                    .any(|conflict| conflict.item == id || conflict.other == id)
-        };
+        let catalog = Catalog::shipped();
+        let listed: BTreeSet<String> = self.plan.entries.iter().map(|e| e.id.clone()).collect();
+        let aside = set_aside(self.plan, catalog);
         // "This keep" ends once the Config lists it again.
-        self.record.kept_here.retain(|id| !listed(id));
+        self.record
+            .kept_here
+            .retain(|id| !listed.contains(&current_id(catalog, id)));
         // "Leave this Mac as it is" ends once the entry has left the Config.
         let marked = reason_label(SkipReason::MarkedByPerson);
-        self.record
-            .unavailable
-            .retain(|id, reason| reason != marked || in_file(id));
+        self.record.unavailable.retain(|id, reason| {
+            let id = current_id(catalog, id);
+            reason != marked || listed.contains(&id) || aside.contains(&id)
+        });
     }
 
     fn execute(&mut self) -> Result<RunReport, EngineError> {
@@ -549,8 +544,12 @@ impl<'a> Engine<'a> {
 
     fn skip_reason(&self, entry: &PlanEntry) -> Option<SkipReason> {
         // "Leave this Mac as it is": a Run doesn't quietly undo that answer.
-        if self.record.unavailable.get(&entry.id).map(String::as_str)
-            == Some(reason_label(SkipReason::MarkedByPerson))
+        let marked = reason_label(SkipReason::MarkedByPerson);
+        if self
+            .record
+            .unavailable
+            .iter()
+            .any(|(id, reason)| reason == marked && current_id(Catalog::shipped(), id) == entry.id)
         {
             return Some(SkipReason::MarkedByPerson);
         }
