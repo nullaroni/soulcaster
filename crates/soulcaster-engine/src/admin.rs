@@ -44,6 +44,9 @@ pub enum Validation {
     Wrong,
     /// It couldn't be tried at all. The Run goes on without the password.
     Unavailable(String),
+    /// `sudo -k` failed, so an earlier timestamp may still answer without a password. Nothing was
+    /// checked, and nothing should wait on the person while that may be so.
+    StillSignedIn,
 }
 
 /// One admin step's access. Dropping it closes the socket and removes the folder.
@@ -111,9 +114,7 @@ impl AdminGate for SocketGate {
     fn validate(&self, runner: &dyn CommandRunner, home: &Path, password: &Password) -> Validation {
         // Without this, an earlier timestamp would answer `-v` and nothing would be checked.
         if !self.forget(runner, home) {
-            return Validation::Unavailable(
-                "sudo's earlier sign-in couldn't be cleared".to_string(),
-            );
+            return Validation::StillSignedIn;
         }
         let window = match self.open(password, Budget::One) {
             Ok(window) => window,

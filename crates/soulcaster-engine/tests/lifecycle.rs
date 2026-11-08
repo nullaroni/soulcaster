@@ -3493,12 +3493,13 @@ mod admin_stage {
             |c| file_name(c) == "test" && args_contain(c, "CommandLineTools"),
             vec![Reply::ok(""); 4],
         );
-        h.runner.on(
-            |c| file_name(c) == "git" && args_contain(c, "--get-regexp"),
-            [Reply::ok(
-                "credential.https://github.com.helper !/usr/local/bin/other-helper\n",
-            )],
-        );
+        fs::write(
+            h.home.path().join(".gitconfig"),
+            "[credential \"https://github.com\"]
+	helper = !/usr/local/bin/other-helper
+",
+        )
+        .unwrap();
         let gate = WatchedGate::default();
         let asks = AsksInOrder::default();
         let mut p = plan(vec![gh]);

@@ -272,12 +272,12 @@ fn forget_says_so_when_sudo_wont_clear() {
     let gate = SocketGate::new(PathBuf::from(HELPER), PeerRule::PathOnly).with_sudo(sudo);
     assert!(!gate.forget(&ProcessRunner::new(), sandbox.path()));
     // And the password isn't treated as checked.
-    assert!(matches!(
+    assert_eq!(
         gate.validate(
             &ProcessRunner::new(),
             sandbox.path(),
             &Password::new(SECRET.to_string())
         ),
-        Validation::Unavailable(_)
-    ));
+        Validation::StillSignedIn
+    );
 }

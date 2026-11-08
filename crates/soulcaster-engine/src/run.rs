@@ -1105,6 +1105,13 @@ impl<'a> Engine<'a> {
                     return;
                 }
                 Validation::Wrong => last_was_wrong = true,
+                Validation::StillSignedIn => {
+                    self.sudo_may_be_live = true;
+                    self.emit(EventKind::RunWarning {
+                        text: "sudo's earlier sign-in couldn't be cleared, so the admin work waits for you.".into(),
+                    });
+                    break;
+                }
                 Validation::Unavailable(why) => {
                     self.emit(EventKind::RunWarning {
                         text: format!("The password couldn't be checked: {why}"),
@@ -1434,7 +1441,6 @@ impl<'a> Engine<'a> {
             });
             return Ok(None);
         }
-        let config = act::git_file(self.home);
         // git could write the key into a file named here, and a helper set there isn't visible
         // to the read below. Read as text, so this works before git does.
         let has_include = configs.iter().any(|config| {
@@ -1453,20 +1459,12 @@ impl<'a> Engine<'a> {
         if !self.command_line_tools_present()? {
             return Ok(Some(FailureKind::NotFound));
         }
-        let mut read = act::git_command(self.home);
-        read.args = vec![
-            "config".into(),
-            "--file".into(),
-            config.to_string_lossy().into_owned(),
-            "--get-regexp".into(),
-            "^credential\\..*helper$".into(),
-        ];
-        if let CmdResult::Done(output) = self.run_command(&read, "", false)?
-            && output.is_success()
-            && output.stdout_text().lines().any(|line| {
-                line.to_lowercase().contains("github") && !line.contains("gh auth git-credential")
-            })
-        {
+        // Read as text, like the include check: it's the same two files, and git may not run yet.
+        let other_helper = configs.iter().any(|config| {
+            fs::read_to_string(self.home.join(config))
+                .is_ok_and(|text| has_other_github_helper(&text))
+        });
+        if other_helper {
             self.emit(EventKind::RunWarning {
                 text: "Git already has another sign-in for GitHub, so it was left as it is.".into(),
             });
@@ -2558,7 +2556,8 @@ impl<'a> Engine<'a> {
             }
             match outcome_of(ran) {
                 Ok(output) => return Ok(CmdResult::Done(output)),
-                Err(FailureKind::Network) if attempt < 2 => {
+                // With the password gone there's no retry, so there's nothing to wait for.
+                Err(FailureKind::Network) if attempt < 2 && self.password.is_some() => {
                     self.backoff(attempt);
                     attempt += 1;
                 }
@@ -3051,6 +3050,25 @@ fn link_on_the_way(home: &Path, relative: &Path) -> bool {
     })
 }
 
+/// A `helper` in a `[credential ...]` section that names GitHub, other than `gh`'s own.
+fn has_other_github_helper(text: &str) -> bool {
+    let mut section = String::new();
+    text.lines().any(|line| {
+        let line = line.trim();
+        if line.starts_with('[') {
+            section = line.to_lowercase();
+            return false;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        section.starts_with("[credential")
+            && section.contains("github")
+            && key.trim().eq_ignore_ascii_case("helper")
+            && !value.contains("gh auth git-credential")
+    })
+}
+
 fn outcome_of(
     ran: Result<CommandOutput, soulcaster_core::command::SpawnError>,
 ) -> Result<CommandOutput, FailureKind> {
@@ -3235,5 +3253,29 @@ mod lock_tests {
         }
         drop(held);
         let _ = fs::remove_dir_all(&path);
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::has_other_github_helper;
+
+    #[test]
+    fn only_another_helper_for_github_counts() {
+        assert!(has_other_github_helper(
+            "[credential \"https://github.com\"]\n\thelper = !/usr/local/bin/other\n"
+        ));
+        assert!(has_other_github_helper(
+            "[Credential \"https://GitHub.com\"]\n  HELPER=osxkeychain\n"
+        ));
+        assert!(!has_other_github_helper(
+            "[credential \"https://github.com\"]\n\thelper = !/opt/homebrew/bin/gh auth git-credential\n"
+        ));
+        assert!(!has_other_github_helper(
+            "[credential]\n\thelper = osxkeychain\n"
+        ));
+        assert!(!has_other_github_helper(
+            "[user]\n\tname = github helper\n[credential \"https://gitlab.com\"]\n\thelper = x\n"
+        ));
     }
 }
