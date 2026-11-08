@@ -8,6 +8,7 @@ use soulcaster_core::catalog::Catalog;
 use soulcaster_core::command::CommandRunner;
 use soulcaster_core::config::{Config, MAX_BYTES};
 use soulcaster_core::drift::{Reviewed, adopt_onto, moved_since, respelled};
+use soulcaster_core::plan::Plan;
 
 use crate::address::RepoId;
 use crate::copies::{keep_own, slug};
@@ -308,6 +309,24 @@ pub fn adopt(
             .filter(|entry| !again.contains(&entry.id) && !elsewhere.contains(&entry.id))
             .cloned()
             .collect();
+        // A line that conflicts with one already there would stop both, on every Machine. It's
+        // judged on what's really being written: the latest file and everything going with it.
+        let conflicts_before = Plan::new(&config, catalog).conflicts.len();
+        let mut clear: Vec<Reviewed> = Vec::new();
+        for entry in going {
+            let mut trial = clear.clone();
+            trial.push(entry.clone());
+            let fits = adopt_onto(&config, &trial, &always)
+                .is_ok_and(|after| Plan::new(&after, catalog).conflicts.len() <= conflicts_before);
+            if fits {
+                clear.push(entry);
+            } else {
+                elsewhere.push(entry.id);
+            }
+        }
+        let going = clear;
+        let mut elsewhere = unique(elsewhere);
+        elsewhere.retain(|id| !going.iter().any(|entry| entry.id == *id));
         let saved = unique(going.iter().map(|entry| entry.id.clone()).collect());
         if going.is_empty() {
             return Ok(finished(public, saved, elsewhere, again));
