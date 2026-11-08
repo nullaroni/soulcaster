@@ -194,6 +194,7 @@ fn a_misleading_config_starts_with_everything_off_and_close_as_the_primary_butto
     // Even if this Machine had approved something from it before.
     let dotfiles = review.dotfiles.as_ref().unwrap();
     let approvals = Approvals {
+        taps: Default::default(),
         packages: ["mesa-tools/tap/libxml2".to_string()].into(),
         dotfiles: Some(DotfilesApproval {
             repo: dotfiles.key.clone().unwrap(),

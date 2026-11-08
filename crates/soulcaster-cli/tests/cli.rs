@@ -159,3 +159,22 @@ fn import_and_save_refuse_bad_usage() {
         );
     }
 }
+
+/// Only refusals: a valid Config here would start a real Run on this Mac.
+#[test]
+fn run_refuses_bad_usage_and_a_missing_or_bad_file_before_anything_starts() {
+    let home = tempfile::tempdir().unwrap();
+    let missing = home.path().join("missing.json");
+    let bad = example("invalid/duplicate-key.json");
+    for args in [
+        vec!["run"],
+        vec!["run", "a.json", "b.json"],
+        vec!["run", "a.json", "--nope"],
+        vec!["run", missing.to_str().unwrap()],
+        vec!["run", bad.to_str().unwrap(), "--json"],
+    ] {
+        let out = in_sandbox(home.path(), &args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr(&out));
+    }
+    assert!(!home.path().join("Library").exists());
+}

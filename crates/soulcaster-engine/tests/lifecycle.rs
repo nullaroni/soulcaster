@@ -25,7 +25,7 @@ use soulcaster_core::recipe::{
 };
 use soulcaster_engine::{
     Approvals, Clock, DotfilesApproval, EngineError, ItemOutcome, LastApplied, MachineRecord,
-    RunInput, RunReport, SCHEMA_VERSION, TapApproval, machine_record_path, perform,
+    RunInput, RunReport, SCHEMA_VERSION, machine_record_path, perform,
 };
 
 const SECRET: &str = "s3cret-plover";
@@ -214,6 +214,7 @@ impl Harness {
         let config_name = plan.config_name.clone();
         let asked_before = self.asks.asked();
         let result = perform(RunInput {
+            dotfiles: None,
             admin: &OpenGate,
             plan,
             runner: &self.runner,
@@ -780,6 +781,7 @@ fn cancel_between_items_keeps_a_consistent_record_and_discards_the_password() {
     let mut plan = plan(vec![formula("first", &[]), formula("second", &[])]);
     let mut events = Vec::new();
     let report = perform(RunInput {
+        dotfiles: None,
         admin: &OpenGate,
         plan: &mut plan,
         runner: &Arming {
@@ -843,6 +845,7 @@ fn the_password_is_discarded_after_sixty_minutes_and_the_rest_waits() {
     ]);
     let mut events = Vec::new();
     let report = perform(RunInput {
+        dotfiles: None,
         admin: &OpenGate,
         plan: &mut plan,
         runner: &Jumping {
@@ -968,6 +971,7 @@ fn the_admin_stage_discards_the_password_before_any_user_stage_command() {
     let mut events = Vec::new();
     let log_for_sink = Arc::clone(&log);
     perform(RunInput {
+        dotfiles: None,
         admin: &OpenGate,
         plan: &mut plan,
         runner: &Trace {
@@ -1055,10 +1059,7 @@ fn an_admin_item_that_requires_a_user_stage_tap_does_not_run_that_tap_while_the_
     );
     // The tap is approved so the missing-approval gate does not fire before the stage rule.
     let mut record = MachineRecord::empty();
-    record
-        .approvals
-        .taps
-        .insert("someone/tap".into(), TapApproval { approved_at: 1 });
+    record.approvals.taps.insert("someone/tap".into());
     record.save(harness.home.path()).unwrap();
 
     let mut plan = plan(vec![
@@ -1067,6 +1068,7 @@ fn an_admin_item_that_requires_a_user_stage_tap_does_not_run_that_tap_while_the_
     ]);
     let mut events = Vec::new();
     let report = perform(RunInput {
+        dotfiles: None,
         admin: &OpenGate,
         plan: &mut plan,
         runner: &Trace {
@@ -1228,18 +1230,12 @@ fn a_surprise_admin_need_is_remembered_and_a_third_party_item_is_left_to_the_per
         }];
     }
     let mut record = MachineRecord::empty();
-    record
-        .approvals
-        .taps
-        .insert("someone/tap".into(), TapApproval { approved_at: 1 });
+    record.approvals.taps.insert("someone/tap".into());
     record.save(harness.home.path()).unwrap();
     let harness = Harness::new();
     // Reuse is awkward across homes. Drive the third-party case on this fresh home.
     let mut record = MachineRecord::empty();
-    record
-        .approvals
-        .taps
-        .insert("someone/tap".into(), TapApproval { approved_at: 1 });
+    record.approvals.taps.insert("someone/tap".into());
     record.save(harness.home.path()).unwrap();
     harness.runner.on(
         |command| file_name(command) == "test" && args_contain(command, "Caskroom/tool"),
@@ -1772,22 +1768,24 @@ fn a_shipped_plan_that_already_passes_its_checks_installs_nothing() {
 fn the_machine_record_is_schema_versioned_atomic_and_refuses_a_corrupt_file() {
     let home = Sandbox::new();
     let mut record = MachineRecord::empty();
+    let commit = soulcaster_core::approval::CommitSha::parse(&"a".repeat(40)).unwrap();
     record.approvals = Approvals {
-        taps: BTreeMap::from([("someone/tap".into(), TapApproval { approved_at: 5 })]),
-        packages: BTreeMap::from([("someone/tap/tool".into(), TapApproval { approved_at: 6 })]),
+        taps: ["someone/tap".to_string()].into(),
+        packages: ["someone/tap/tool".to_string()].into(),
         dotfiles: Some(DotfilesApproval {
-            repo: "ada/dotfiles".into(),
-            commit: "abc123".into(),
-            script: true,
+            repo: "github.com/ada/dotfiles".into(),
+            commit: commit.clone(),
+            links: BTreeMap::from([("~/.zshrc".into(), "zsh/zshrc".into())]),
         }),
+        script: None,
     };
     record.clone_path = Some("~/src/dotfiles".into());
     record.local_values.insert("name".into(), "Ada".into());
     record.save(home.path()).unwrap();
     let loaded = MachineRecord::load(home.path()).unwrap();
     assert_eq!(loaded.schema_version, SCHEMA_VERSION);
-    assert_eq!(loaded.approvals.dotfiles.as_ref().unwrap().commit, "abc123");
-    assert_eq!(loaded.approvals.packages["someone/tap/tool"].approved_at, 6);
+    assert_eq!(loaded.approvals.dotfiles.as_ref().unwrap().commit, commit);
+    assert!(loaded.approvals.packages.contains("someone/tap/tool"));
     assert_eq!(loaded, record);
     assert!(
         fs::read_dir(home.path().join("Library/Application Support/Soulcaster"))
@@ -1934,7 +1932,7 @@ mod review {
     use soulcaster_core::config::SettingValue;
     use soulcaster_core::recipe::{GitKey as K, Store as S};
 
-    fn git_setting(id: &str, key: K, value: SettingValue) -> PlanEntry {
+    pub(super) fn git_setting(id: &str, key: K, value: SettingValue) -> PlanEntry {
         let mut e = dock_setting(id, "x", None, EvidenceGroup::Documented);
         if let Recipe::Setting(s) = &mut e.recipe {
             s.stores = vec![S::GitConfig { key }];
@@ -2248,6 +2246,7 @@ mod review {
         let mut sink = SharedSink(seen.clone());
         let mut p = plan(vec![formula("ripgrep", &[])]);
         perform(RunInput {
+            dotfiles: None,
             admin: &OpenGate,
             plan: &mut p,
             runner: &runner,
@@ -2322,9 +2321,7 @@ mod review {
             [Reply::fails(1, ""), Reply::ok("")],
         );
         let mut rec = MachineRecord::empty();
-        rec.approvals
-            .packages
-            .insert("ada/tap/maestro".into(), TapApproval { approved_at: 1 });
+        rec.approvals.packages.insert("ada/tap/maestro".into());
         rec.save(h.home.path()).unwrap();
         let (report, _) = h.run(&mut plan(vec![tap_formula("maestro", "ada/tap/maestro")]));
         assert!(
@@ -2527,6 +2524,7 @@ mod round_two {
         let mut sink = RecordingSink(seen);
         let mut p = plan(vec![formula("ripgrep", &[])]);
         perform(RunInput {
+            dotfiles: None,
             admin: &OpenGate,
             plan: &mut p,
             runner: &runner,
@@ -2593,6 +2591,7 @@ mod round_two {
         let mut events = Vec::new();
         let mut p = plan(vec![formula("ripgrep", &[])]);
         let report = perform(RunInput {
+            dotfiles: None,
             admin: &OpenGate,
             plan: &mut p,
             runner: &runner,
@@ -2807,6 +2806,7 @@ mod admin_stage {
         h.script_machine();
         let mut events = Vec::new();
         let report = perform(RunInput {
+            dotfiles: None,
             admin: gate,
             plan,
             runner: &h.runner,
@@ -3553,4 +3553,254 @@ fn a_duplicate_key_in_the_machine_record_is_a_corrupt_file() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, br#"{"schemaVersion":1,"schemaVersion":1}"#).unwrap();
     assert!(MachineRecord::load(harness.home.path()).is_err());
+}
+
+mod dotfiles_in_run {
+    use super::review::git_setting;
+    use super::*;
+    use soulcaster_core::approval::{ApprovalStore, CommitSha};
+    use soulcaster_core::config::SettingValue;
+    use soulcaster_core::plan::DotfilesPlan;
+    use soulcaster_engine::{DotfilesHook, DotfilesResult, RecordApprovals};
+
+    /// Notes what the Run had done when it was called, and can link `~/.gitconfig` away.
+    struct Watching<'a> {
+        runner: &'a FakeRunner,
+        home: PathBuf,
+        link_gitconfig: bool,
+        calls: Mutex<Vec<(usize, Vec<String>)>>,
+    }
+
+    impl DotfilesHook for Watching<'_> {
+        fn apply(&self, _plan: &DotfilesPlan, approvals: &dyn ApprovalStore) -> DotfilesResult {
+            let installed: Vec<String> = self
+                .runner
+                .calls()
+                .iter()
+                .filter(|c| file_name(c) == "brew" && args_contain(c, "install"))
+                .filter_map(|c| c.args.last().cloned())
+                .collect();
+            self.calls
+                .lock()
+                .unwrap()
+                .push((self.runner.calls().len(), installed));
+            if self.link_gitconfig {
+                std::os::unix::fs::symlink("/nowhere/gitconfig", self.home.join(".gitconfig"))
+                    .unwrap();
+            }
+            let mut held = approvals.read().unwrap();
+            held.taps.insert("written/by-the-step".into());
+            approvals.write(&held).unwrap();
+            DotfilesResult {
+                warnings: vec!["~/.zshrc wasn't linked: a test said so".into()],
+            }
+        }
+    }
+
+    fn dotfiles_plan() -> DotfilesPlan {
+        DotfilesPlan {
+            repo: "example-you/dotfiles".into(),
+            links: BTreeMap::from([("~/.zshrc".into(), "zsh/zshrc".into())]),
+            refused_links: vec![],
+            install_script: None,
+        }
+    }
+
+    fn run_with(h: &Harness, p: &mut Plan, hook: &dyn DotfilesHook) -> (RunReport, Vec<Event>) {
+        h.script_machine();
+        let mut events = Vec::new();
+        let report = perform(RunInput {
+            dotfiles: Some(hook),
+            admin: &OpenGate,
+            plan: p,
+            runner: &h.runner,
+            home: h.home.path(),
+            events: &mut events,
+            asks: &h.asks,
+            cancel: &h.cancel,
+            clock: &h.clock,
+            scope: RunScope::Full,
+            config: ConfigRef::default(),
+            catalog_version: "t",
+            engine_version: "t",
+        })
+        .unwrap();
+        (report, events)
+    }
+
+    fn grouped(mut entry: PlanEntry, group: RunGroup) -> PlanEntry {
+        entry.group = group;
+        entry
+    }
+
+    #[test]
+    fn the_dotfiles_go_after_third_party_items_and_before_git_settings_once() {
+        let h = Harness::new();
+        absent_then_present(&h, "Cellar/");
+        let hook = Watching {
+            runner: &h.runner,
+            home: h.home.path().to_path_buf(),
+            link_gitconfig: false,
+            calls: Mutex::new(vec![]),
+        };
+        let mut p = plan(vec![
+            grouped(formula("third", &[]), RunGroup::ThirdParty),
+            grouped(
+                git_setting(
+                    "git.name",
+                    GitKey::UserName,
+                    SettingValue::String("Ada".into()),
+                ),
+                RunGroup::GitValues,
+            ),
+        ]);
+        p.dotfiles = Some(dotfiles_plan());
+        let (_, events) = run_with(&h, &mut p, &hook);
+        let calls = hook.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "called {} times", calls.len());
+        assert_eq!(calls[0].1, ["third"], "the third-party Item wasn't first");
+        let git_after = h.runner.calls()[calls[0].0..]
+            .iter()
+            .any(|c| file_name(c) == "git");
+        assert!(git_after, "git settings didn't come after the dotfiles");
+        assert!(events.iter().any(|e| matches!(
+            &e.kind,
+            EventKind::RunWarning { text } if text.contains("wasn't linked")
+        )));
+        assert!(!events.iter().any(|e| matches!(
+            &e.kind,
+            EventKind::RunWarning { text } if text.contains("not applied by this Run")
+        )));
+    }
+
+    #[test]
+    fn the_dotfiles_never_run_while_the_password_is_held() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::ok("")],
+        );
+        let hook = Watching {
+            runner: &h.runner,
+            home: h.home.path().to_path_buf(),
+            link_gitconfig: false,
+            calls: Mutex::new(vec![]),
+        };
+        let mut admin = formula("adm", &[]);
+        if let Recipe::Install(install) = &mut admin.recipe {
+            install.steps = vec![Step::Builtin {
+                name: BuiltinStep::XcodeFirstLaunch,
+                admin: true,
+                unless: None,
+            }];
+        }
+        let mut p = plan(vec![admin]);
+        p.dotfiles = Some(dotfiles_plan());
+        let (_, events) = run_with(&h, &mut p, &hook);
+        assert_eq!(hook.calls.lock().unwrap().len(), 1);
+        let discarded = events
+            .iter()
+            .position(|e| matches!(e.kind, EventKind::AdminDiscarded { .. }))
+            .expect("the password was held and discarded");
+        let warned = events
+            .iter()
+            .position(|e| matches!(&e.kind, EventKind::RunWarning { text } if text.contains("wasn't linked")))
+            .unwrap();
+        assert!(
+            warned > discarded,
+            "the dotfiles ran while the password was held"
+        );
+    }
+
+    #[test]
+    fn a_gitconfig_linked_by_the_dotfiles_isnt_written_through() {
+        let h = Harness::new();
+        let hook = Watching {
+            runner: &h.runner,
+            home: h.home.path().to_path_buf(),
+            link_gitconfig: true,
+            calls: Mutex::new(vec![]),
+        };
+        let mut p = plan(vec![grouped(
+            git_setting(
+                "git.name",
+                GitKey::UserName,
+                SettingValue::String("Ada".into()),
+            ),
+            RunGroup::GitValues,
+        )]);
+        p.dotfiles = Some(dotfiles_plan());
+        let (report, _) = run_with(&h, &mut p, &hook);
+        assert_eq!(
+            state(&report, "git.name"),
+            &ItemState::Skipped {
+                reason: SkipReason::WritesThroughLink
+            }
+        );
+        // The opening check reads git, before any link exists. Nothing writes the value.
+        assert!(
+            !h.runner
+                .calls()
+                .iter()
+                .any(|c| file_name(c) == "git" && args_contain(c, "Ada"))
+        );
+    }
+
+    #[test]
+    fn what_the_dotfiles_step_approves_is_saved_with_the_record() {
+        let h = Harness::new();
+        let hook = Watching {
+            runner: &h.runner,
+            home: h.home.path().to_path_buf(),
+            link_gitconfig: false,
+            calls: Mutex::new(vec![]),
+        };
+        let mut p = plan(vec![]);
+        p.dotfiles = Some(dotfiles_plan());
+        run_with(&h, &mut p, &hook);
+        let record = MachineRecord::load(h.home.path()).unwrap();
+        assert!(record.approvals.taps.contains("written/by-the-step"));
+    }
+
+    #[test]
+    fn without_a_hook_the_run_says_the_dotfiles_wait() {
+        let h = Harness::new();
+        let mut p = plan(vec![]);
+        p.dotfiles = Some(dotfiles_plan());
+        let (_, events) = h.run(&mut p);
+        assert!(events.iter().any(|e| matches!(
+            &e.kind,
+            EventKind::RunWarning { text } if text.contains("not applied by this Run")
+        )));
+    }
+
+    #[test]
+    fn approvals_in_the_record_read_back_and_never_land_during_a_run() {
+        let h = Harness::new();
+        let store = RecordApprovals::new(h.home.path().to_path_buf());
+        assert_eq!(store.read().unwrap(), Approvals::default());
+        let mut approvals = Approvals::default();
+        approvals.packages.insert("owner/tap/name".into());
+        approvals.dotfiles = Some(DotfilesApproval {
+            repo: "github.com/example-you/dotfiles".into(),
+            commit: CommitSha::parse(&"b".repeat(40)).unwrap(),
+            links: BTreeMap::new(),
+        });
+        store.write(&approvals).unwrap();
+        assert_eq!(store.read().unwrap(), approvals);
+        // A Run holds its lock. A write then would be overwritten by the Run's own save.
+        let lock_path = h
+            .home
+            .path()
+            .join("Library/Application Support/Soulcaster/run.lock");
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        held.try_lock().unwrap();
+        assert!(store.write(&Approvals::default()).is_err());
+        drop(held);
+        assert_eq!(store.read().unwrap(), approvals);
+    }
 }

@@ -47,8 +47,12 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+      # The release's password helper answers only this team. Empty until the owner enrolls, and
+      # then the helper is checked by path, as on any other build.
       - name: Build the app, ad-hoc signed
-        run: packaging/build-app.sh
+        run: |
+          team=$(sed -n 's/^  local team_id="\(.*\)"$/\1/p' install.sh)
+          SOULCASTER_TEAM_ID="$team" packaging/build-app.sh
 
       # Yields only true or false. All or none: half a set of secrets is a mistake, not a choice.
       - name: Check for the Apple secrets

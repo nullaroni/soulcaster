@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use soulcaster_core::approval::Approvals;
 use soulcaster_core::event::QueueKind;
 use soulcaster_core::lifecycle::{Assurance, FailureKind, SkipReason};
 
@@ -41,36 +42,6 @@ pub struct LastApplied {
     pub assurance: Assurance,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior_value: Option<Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TapApproval {
-    pub approved_at: u64,
-}
-
-/// Round-tripped so a later ticket can read it. This engine does not grant it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DotfilesApproval {
-    pub repo: String,
-    pub commit: String,
-    #[serde(default)]
-    pub script: bool,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Approvals {
-    /// `owner/tap`. Granting one is a person's choice, stored here for the next Run.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub taps: BTreeMap<String, TapApproval>,
-    /// `owner/tap/name`. Import records these; this engine does not grant them.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub packages: BTreeMap<String, TapApproval>,
-    /// The Dotfiles Repo approval is the repo and the commit it was previewed at.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dotfiles: Option<DotfilesApproval>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -141,7 +112,7 @@ pub struct MachineRecord {
     pub schema_version: u32,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub last_applied: BTreeMap<String, LastApplied>,
-    #[serde(default, skip_serializing_if = "Approvals::is_empty")]
+    #[serde(default, skip_serializing_if = "no_approvals")]
     pub approvals: Approvals,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub local_values: BTreeMap<String, String>,
@@ -169,10 +140,8 @@ pub struct MachineRecord {
     pub interruptions: Vec<Interruption>,
 }
 
-impl Approvals {
-    fn is_empty(&self) -> bool {
-        self.taps.is_empty() && self.packages.is_empty() && self.dotfiles.is_none()
-    }
+fn no_approvals(approvals: &Approvals) -> bool {
+    *approvals == Approvals::default()
 }
 
 impl Default for MachineRecord {
@@ -186,11 +155,7 @@ impl MachineRecord {
         Self {
             schema_version: SCHEMA_VERSION,
             last_applied: BTreeMap::new(),
-            approvals: Approvals {
-                taps: BTreeMap::new(),
-                packages: BTreeMap::new(),
-                dotfiles: None,
-            },
+            approvals: Approvals::default(),
             local_values: BTreeMap::new(),
             queue: Vec::new(),
             unavailable: BTreeMap::new(),

@@ -3190,7 +3190,10 @@ dependencies = [
 name = "soulcaster-cli"
 version = "0.1.0"
 dependencies = [
+ "libc",
+ "serde_json",
  "soulcaster-core",
+ "soulcaster-engine",
  "soulcaster-repo",
  "tempfile",
 ]

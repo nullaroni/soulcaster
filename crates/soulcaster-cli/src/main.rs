@@ -1,8 +1,10 @@
-//! The plain CLI. It can read a Config and say what a Run from it would do, Import one for review,
-//! and Save one to the person's own GitHub repo. It never starts a Run. Exit code 2 means refused,
-//! and 1 means a save is waiting on this Mac.
+//! The plain CLI. It can read a Config and say what a Run from it would do, run it on this Mac,
+//! Import one for review, and Save one to the person's own GitHub repo. Exit code 2 means
+//! refused, and 1 means a save is waiting on this Mac. A Run has its own codes: see
+//! [`run_command`].
 
 mod repo_commands;
+mod run_command;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -18,6 +20,7 @@ use crate::repo_commands::{Done, ImportArgs, SaveArgs};
 
 const USAGE: &str = "usage: soulcaster validate <config.json>
        soulcaster plan <config.json>
+       soulcaster run <config.json> [--json]
        soulcaster import <owner/repo or URL> [--config <path>] [--keep]
        soulcaster save <config.json> [--repo <name>]";
 
@@ -30,6 +33,7 @@ fn main() -> ExitCode {
     let result = match args.as_slice() {
         ["validate", path] => read(path).map(|config| validate(&config)),
         ["plan", path] => read(path).map(|config| print_plan(&config)),
+        ["run", rest @ ..] => return run(rest),
         ["import", rest @ ..] => return import(rest),
         ["save", rest @ ..] => return save(rest),
         _ => Err(USAGE.to_string()),
@@ -64,6 +68,66 @@ fn finish(done: Done) -> ExitCode {
             ExitCode::from(WAITING)
         }
     }
+}
+
+/// A real Run, on this Mac. Everything is the real thing here, which is why the tests go through
+/// [`run_command::run_plan`] with fakes instead.
+fn run(rest: &[&str]) -> ExitCode {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+
+    use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
+    use soulcaster_engine::{Clock, MachineRecord, ProcessRunner, SystemClock, gate_beside};
+    use soulcaster_repo::in_run::RunDotfiles;
+
+    let (path, json) = match rest {
+        [path] => (*path, false),
+        [path, "--json"] | ["--json", path] => (*path, true),
+        _ => return refuse_usage(),
+    };
+    let config = match read(path) {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::from(REFUSED);
+        }
+    };
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return refuse_usage();
+    };
+    let Ok(executable) = std::env::current_exe() else {
+        return refuse_usage();
+    };
+    let mut plan = Plan::new(&config, Catalog::shipped());
+    let gate = gate_beside(&executable);
+    let engine_runner = ProcessRunner::new();
+    let repo_runner = runner();
+    let tools = Tools::for_mac(home.clone());
+    let clone_location = MachineRecord::load(&home)
+        .ok()
+        .and_then(|record| record.clone_path)
+        .unwrap_or_else(|| DEFAULT_CLONE_LOCATION.to_string());
+    let stamp = SystemClock.now_ms().to_string();
+    let dotfiles = RunDotfiles {
+        runner: &repo_runner,
+        tools: &tools,
+        clone_location: &clone_location,
+        stamp: &stamp,
+    };
+    let cancel = AtomicBool::new(false);
+    let setup = run_command::Setup {
+        runner: &engine_runner,
+        admin: &gate,
+        dotfiles: Some(&dotfiles),
+        asks: &run_command::TerminalAsks,
+        clock: &SystemClock,
+        cancel: &cancel,
+        home: &home,
+        json,
+    };
+    let _awake = run_command::KeepAwake::start();
+    let out = Arc::new(Mutex::new(std::io::stdout()));
+    ExitCode::from(run_command::run_plan(&mut plan, &setup, out))
 }
 
 fn refuse_usage() -> ExitCode {

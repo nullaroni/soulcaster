@@ -13,6 +13,7 @@ pub mod dotfiles;
 pub mod fake;
 pub mod github;
 pub mod import;
+pub mod in_run;
 pub mod process;
 pub mod review;
 mod safe_fs;

@@ -8,14 +8,23 @@
 
 mod act;
 mod admin;
+mod approvals;
+mod dotfiles;
 mod process;
 mod record;
 mod run;
 
-pub use admin::{AdminGate, AdminWindow, Budget, PeerRule, SocketGate, Validation};
+pub use admin::{
+    ASKPASS_IDENTIFIER, AdminGate, AdminWindow, Budget, PeerRule, SocketGate, Validation,
+    gate_beside,
+};
+pub use approvals::RecordApprovals;
+pub use dotfiles::{DotfilesHook, DotfilesResult};
 pub use process::ProcessRunner;
 pub use record::{
-    Approvals, DotfilesApproval, InProgress, ItemOutcome, LastApplied, MachineRecord, QueueItem,
-    SCHEMA_VERSION, TapApproval, machine_record_path,
+    InProgress, ItemOutcome, LastApplied, MachineRecord, QueueItem, SCHEMA_VERSION,
+    machine_record_path,
 };
 pub use run::{CancelFlag, Clock, EngineError, RunInput, RunReport, SystemClock, perform};
+/// The one approvals type, shared with the review and the Dotfiles Repo.
+pub use soulcaster_core::approval::{Approvals, DotfilesApproval, ScriptApproval};
