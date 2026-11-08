@@ -732,23 +732,26 @@ fn hand_off_keeps_the_copy_when_the_early_account_cannot_be_read() {
 
 #[test]
 fn a_failed_setup_git_keeps_the_bootstrap_copy() {
+    // Changed: the Run no longer runs `gh auth setup-git` at all (see round 8), so there's no
+    // failure to keep the copy for. What this finding guarded against was the check going
+    // green with git's settings half-written. They're now never written by the Run.
     let h = Harness::new("setup-git-fails");
     let gh = hand_off_entry();
-    let copy = write_bootstrap(h.home.path(), &gh);
+    let _copy = write_bootstrap(h.home.path(), &gh);
     script_same_account(&h.runner);
     h.runner
         .on(is_setup_git, [Reply::fails(1, "setup-git failed")]);
     script_pending_hand_off(&h.runner);
     let mut planned = plan(vec![gh]);
-    let _calls = h.perform(
+    let calls = h.perform(
         &mut planned,
         &CountingGate {
             forgotten: Arc::new(AtomicUsize::new(0)),
         },
     );
     assert!(
-        copy.exists(),
-        "a failed gh auth setup-git still deleted the bootstrap copy, so gh-handed-off will not retry it"
+        !calls.iter().any(is_setup_git),
+        "the Run wrote git's credential settings"
     );
 }
 

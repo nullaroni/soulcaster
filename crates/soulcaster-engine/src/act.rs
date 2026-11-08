@@ -529,17 +529,6 @@ pub fn gh_sign_in(home: &Path, program: &Path) -> Command {
         .stall_limit(Duration::from_secs(15 * 60))
 }
 
-/// Writes an absolute path into `~/.gitconfig`, so it only ever runs with Homebrew's `gh`.
-pub fn gh_setup_git(home: &Path) -> Command {
-    base_command(home, BREW_GH)
-        .args(["auth", "setup-git"])
-        .env("GH_PATH", BREW_GH)
-        // Outside any repo, so no repo's own config is read while it writes.
-        .cwd("/")
-        .env("GIT_CEILING_DIRECTORIES", "/")
-        .stall_limit(Duration::from_secs(60))
-}
-
 /// The one-time code in a line of `gh auth login`'s output, such as `ABCD-1234`.
 pub fn gh_code_in(line: &str) -> Option<String> {
     let (_, rest) = line.split_once("one-time code:")?;

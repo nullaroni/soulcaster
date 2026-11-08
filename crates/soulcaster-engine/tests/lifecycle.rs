@@ -3289,7 +3289,7 @@ mod admin_stage {
     }
 
     #[test]
-    fn the_hand_off_sets_up_git_with_homebrews_gh_and_removes_the_copy() {
+    fn the_hand_off_leaves_git_to_the_person_and_removes_the_copy() {
         let h = Harness::new();
         let gh = hand_off_only(&h);
         let copy = make_bootstrap_copy(&h, &gh);
@@ -3297,19 +3297,19 @@ mod admin_stage {
         let gate = WatchedGate::default();
         let asks = AsksInOrder::default();
         let mut p = plan(vec![gh]);
-        perform_with(&h, &mut p, &gate, &asks);
-        let calls = h.runner.calls();
-        let setup = calls
-            .iter()
-            .find(|c| is_gh(c) && args_contain(c, "setup-git"))
-            .expect("git's sign-in was set up");
-        assert_eq!(setup.program, Path::new("/opt/homebrew/bin/gh"));
+        let (report, events) = perform_with(&h, &mut p, &gate, &asks);
         assert!(
-            setup
-                .env
+            !h.runner
+                .calls()
                 .iter()
-                .any(|(key, value)| key == "GH_PATH" && value == "/opt/homebrew/bin/gh")
+                .any(|c| is_gh(c) && args_contain(c, "setup-git")),
+            "the Run wrote git's credential settings"
         );
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            EventKind::RunWarning { text } if text.contains("gh auth setup-git")
+        )));
+        assert!(matches!(state(&report, "gh"), ItemState::Satisfied { .. }));
         assert!(!copy.exists(), "the bootstrap copy is still there");
     }
 
@@ -3479,7 +3479,7 @@ mod admin_stage {
         );
         assert!(events.iter().any(|event| matches!(
             &event.kind,
-            EventKind::RunWarning { text } if text.contains(".gitconfig")
+            EventKind::RunWarning { text } if text.contains("gh auth setup-git")
         )));
     }
 

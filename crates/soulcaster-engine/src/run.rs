@@ -1423,54 +1423,20 @@ impl<'a> Engine<'a> {
         })
     }
 
-    /// `None` when it's done, or left alone on purpose. A failure keeps the bootstrap copy.
+    /// Git's own GitHub sign-in is left to the person. Running `gh auth setup-git` for them
+    /// writes credential settings that git combines with whatever else it reads: other config
+    /// files, a repo at home, `XDG_CONFIG_HOME` from a shell file. Six review rounds each found
+    /// another arrangement where it took over a helper the person relied on. So the Run never
+    /// writes those settings, and says how to do it.
     fn set_up_git_sign_in(&mut self) -> Result<Option<FailureKind>, EngineError> {
         let brew_gh = PathBuf::from(act::brew_gh_path());
-        if self.gh_account(&brew_gh)?.is_none() {
-            return Ok(None);
-        }
-        // `git config --global` writes `~/.config/git/config` when `~/.gitconfig` isn't there, so
-        // both are checked.
-        let configs = [Path::new(".gitconfig"), Path::new(".config/git/config")];
-        if configs
-            .iter()
-            .any(|config| link_on_the_way(self.home, config))
-        {
+        if self.gh_account(&brew_gh)?.is_some() {
             self.emit(EventKind::RunWarning {
-                text: "~/.gitconfig or ~/.config/git/config is reached through a link, so git's GitHub sign-in was left for you to set up.".into(),
+                text: "To let git use your GitHub sign-in, run `gh auth setup-git` in Terminal."
+                    .into(),
             });
-            return Ok(None);
         }
-        // git could write the key into a file named here, and a helper set there isn't visible
-        // to the read below. Read as text, so this works before git does.
-        // Anywhere in the text, not only at a line's start: a byte-order mark or other leading
-        // bytes would otherwise hide it, and git still follows it.
-        // Git's config syntax has too many spellings to tell from text whether another helper
-        // serves GitHub: includes, encodings, comments and escapes each fooled a reader. So
-        // `setup-git` only runs where there is no git config at all, as on a bare Mac. Anywhere
-        // else it's left for the person, and nothing of theirs can be replaced.
-        let any_config = configs
-            .iter()
-            .any(|config| has_git_config(&self.home.join(config)))
-            // A git repo at home brings its own config into every git there, after the global one.
-            || fs::symlink_metadata(self.home.join(".git")).is_ok()
-            // Git uses $XDG_CONFIG_HOME/git/config when that's set, and this git can't see it.
-            || xdg_config_home_in_use(self.home);
-        if any_config {
-            self.emit(EventKind::RunWarning {
-                text: "Git already has settings here, so its GitHub sign-in was left for you. Run `gh auth setup-git` if you want it.".into(),
-            });
-            return Ok(None);
-        }
-        // `gh auth setup-git` calls git, which is Apple's stub until these exist.
-        if !self.command_line_tools_present()? {
-            return Ok(Some(FailureKind::NotFound));
-        }
-        let setup = act::gh_setup_git(self.home);
-        Ok(match self.run_command(&setup, "gh", true)? {
-            CmdResult::Done(_) => None,
-            CmdResult::Failed(kind) => Some(kind),
-        })
+        Ok(None)
     }
 
     fn pending_admin(&self) -> bool {
@@ -3055,38 +3021,6 @@ fn link_on_the_way(home: &Path, relative: &Path) -> bool {
 /// spellings for a reader to tell one helper from another (a key on the section line, a comment,
 /// an escaped subsection), so any mention leaves the file alone. `gh`'s own helper being there
 /// already means there's nothing to set up.
-/// Whether the person may have `XDG_CONFIG_HOME` set: in this process, or in a shell startup
-/// file, since an app started from the Dock usually doesn't inherit a shell's variables.
-fn xdg_config_home_in_use(home: &Path) -> bool {
-    std::env::var_os("XDG_CONFIG_HOME").is_some()
-        || [
-            ".zshenv",
-            ".zprofile",
-            ".zshrc",
-            ".zlogin",
-            ".bash_profile",
-            ".bashrc",
-            ".profile",
-        ]
-        .iter()
-        .any(|file| {
-            fs::read(home.join(file)).is_ok_and(|bytes| {
-                bytes
-                    .windows(b"XDG_CONFIG_HOME".len())
-                    .any(|window| window == b"XDG_CONFIG_HOME")
-            })
-        })
-}
-
-/// Whether a git config file is there with anything in it. One that can't be read could hold
-/// anything, so it counts.
-fn has_git_config(path: &Path) -> bool {
-    match fs::read(path) {
-        Ok(bytes) => !bytes.iter().all(u8::is_ascii_whitespace),
-        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
-    }
-}
-
 fn outcome_of(
     ran: Result<CommandOutput, soulcaster_core::command::SpawnError>,
 ) -> Result<CommandOutput, FailureKind> {
@@ -3271,31 +3205,5 @@ mod lock_tests {
         }
         drop(held);
         let _ = fs::remove_dir_all(&path);
-    }
-}
-
-#[cfg(test)]
-mod git_config_tests {
-    use super::has_git_config;
-
-    #[test]
-    fn only_a_missing_or_blank_file_counts_as_no_config() {
-        let dir = std::env::temp_dir().join(format!("soulcaster-gitcfg-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("config");
-        assert!(!has_git_config(&file));
-        std::fs::write(&file, " \n\t\n").unwrap();
-        assert!(!has_git_config(&file));
-        std::fs::write(&file, [0xef, 0xbb, 0xbf]).unwrap();
-        assert!(
-            has_git_config(&file),
-            "a byte-order mark alone is something"
-        );
-        std::fs::write(&file, [b'[', 0xe9, b']']).unwrap();
-        assert!(has_git_config(&file));
-        std::fs::remove_file(&file).unwrap();
-        std::fs::create_dir(&file).unwrap();
-        assert!(has_git_config(&file), "unreadable counts");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
