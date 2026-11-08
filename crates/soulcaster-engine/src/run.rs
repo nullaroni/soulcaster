@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
-use soulcaster_core::ask::{Asks, Password, PasswordRequest};
+use soulcaster_core::ask::{Asks, Password, PasswordRequest, SignInStatus};
 use soulcaster_core::command::{Command, CommandEnd, CommandOutput, CommandRunner, OutputStream};
 use soulcaster_core::config::SettingValue;
 use soulcaster_core::event::{
@@ -29,6 +29,7 @@ use crate::act::{
     self, Beat, codesign_team_ok, failure_kind, is_network, mask_secrets, pkg_signer_has_team,
     restart_command, setting_json, sha_matches, version_below,
 };
+use crate::admin::{self, AdminGate, Budget, Validation};
 use crate::record::{
     AcceptedLicense, InProgress, Interruption, ItemOutcome, LastApplied, MachineRecord, QueueItem,
     support_dir,
@@ -39,9 +40,13 @@ const LOG_CAP: usize = 10 * 1024 * 1024;
 const LOG_BATCH: Duration = Duration::from_millis(100);
 static RUN_SEQ: AtomicU64 = AtomicU64::new(1);
 
+/// Asking more would risk locking the account. `sudo` itself allows three.
+const PASSWORD_TRIES: u32 = 3;
+
 pub struct RunInput<'a> {
     pub plan: &'a mut Plan,
     pub runner: &'a dyn CommandRunner,
+    pub admin: &'a dyn AdminGate,
     pub home: &'a Path,
     pub events: &'a mut dyn EventSink,
     pub asks: &'a dyn Asks,
@@ -158,6 +163,15 @@ enum Verdict {
     Unset,
 }
 
+/// Only `gh` itself saying nobody is signed in counts as signed out. Anything that could also be a
+/// network problem, or a copy that can't be trusted to answer, can't tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GhSignIn {
+    SignedIn,
+    SignedOut,
+    CantTell,
+}
+
 enum CmdResult {
     Done(CommandOutput),
     Failed(FailureKind),
@@ -182,6 +196,9 @@ impl Drop for RunLock {
 }
 
 struct Engine<'a> {
+    admin: &'a dyn AdminGate,
+    /// `sudo -k` couldn't be confirmed, so root may still be reachable without asking.
+    sudo_may_be_live: bool,
     plan: &'a mut Plan,
     runner: &'a dyn CommandRunner,
     home: &'a Path,
@@ -265,6 +282,8 @@ impl<'a> Engine<'a> {
         Ok(Self {
             plan: input.plan,
             runner: input.runner,
+            admin: input.admin,
+            sudo_may_be_live: false,
             home: input.home,
             events: input.events,
             asks: input.asks,
@@ -314,6 +333,7 @@ impl<'a> Engine<'a> {
         self.note_touch_id()?;
         self.note_dotfiles();
         self.maybe_ask();
+        self.early_github()?;
         self.run_stage(Stage::Admin)?;
         self.discard("the Admin Stage finished");
         self.run_stage(Stage::User)?;
@@ -520,10 +540,9 @@ impl<'a> Engine<'a> {
         if !git {
             return false;
         }
-        let path = act::git_file(self.home);
         // A linked gitconfig would run as soon as git starts. The read happens in precheck via
         // the runner; a synchronous metadata check stays inside the sandbox home.
-        path.is_symlink()
+        link_on_the_way(self.home, Path::new(".gitconfig"))
     }
 
     fn conflict_hit(&mut self, entry: &PlanEntry) -> Result<bool, EngineError> {
@@ -1050,29 +1069,374 @@ impl<'a> Engine<'a> {
             ask: AskKind::Password,
             state: AskStatus::Waiting,
         });
-        let password = self.asks.password(&PasswordRequest {
-            why: "Soulcaster needs your password for the Admin Stage. It is discarded before anything else runs.".into(),
-            last_was_wrong: false,
-        });
-        match password {
-            Some(password) => {
-                self.password = Some(password);
-                self.held_since = Some(self.now());
-                self.emit(EventKind::AskState {
-                    ask: AskKind::Password,
-                    state: AskStatus::Done,
-                });
-                self.emit(EventKind::AdminHeld {
-                    why: "the Admin Stage is starting".into(),
-                });
-            }
-            None => {
-                self.emit(EventKind::AskState {
-                    ask: AskKind::Password,
-                    state: AskStatus::Skipped,
-                });
+        admin::disable_core_dumps();
+        let mut last_was_wrong = false;
+        for _ in 0..PASSWORD_TRIES {
+            let Some(password) = self.asks.password(&PasswordRequest {
+                why: "Soulcaster needs your password for the Admin Stage. It is discarded before anything else runs.".into(),
+                last_was_wrong,
+            }) else {
+                break;
+            };
+            match self.admin.validate(self.runner, self.home, &password) {
+                Validation::Accepted => {
+                    // Checking it left a timestamp. Nothing should have root while the person
+                    // signs in to GitHub, or between steps. If that can't be ended, the password
+                    // isn't held at all.
+                    if !self.admin.forget(self.runner, self.home) {
+                        self.sudo_may_be_live = true;
+                        self.emit(EventKind::RunWarning {
+                            text:
+                                "sudo's sign-in couldn't be ended, so the admin work waits for you."
+                                    .into(),
+                        });
+                        break;
+                    }
+                    admin::lock_in_memory(password.expose().as_bytes());
+                    self.password = Some(password);
+                    self.held_since = Some(self.now());
+                    self.emit(EventKind::AskState {
+                        ask: AskKind::Password,
+                        state: AskStatus::Done,
+                    });
+                    self.emit(EventKind::AdminHeld {
+                        why: "the Admin Stage is starting".into(),
+                    });
+                    return;
+                }
+                Validation::Wrong => last_was_wrong = true,
+                Validation::StillSignedIn => {
+                    self.sudo_may_be_live = true;
+                    self.emit(EventKind::RunWarning {
+                        text: "sudo's earlier sign-in couldn't be cleared, so the admin work waits for you.".into(),
+                    });
+                    break;
+                }
+                Validation::Unavailable(why) => {
+                    self.emit(EventKind::RunWarning {
+                        text: format!("The password couldn't be checked: {why}"),
+                    });
+                    break;
+                }
             }
         }
+        self.emit(EventKind::AskState {
+            ask: AskKind::Password,
+            state: AskStatus::Skipped,
+        });
+    }
+
+    /// The bootstrap `gh`, and GitHub sign-in, while the person is still here. If Homebrew's `gh`
+    /// is on the Machine, or there's no base `gh` Item in this Run, none of this runs, except to
+    /// finish a sign-in that's still waiting in the queue.
+    fn early_github(&mut self) -> Result<(), EngineError> {
+        let wanted = self.entry("gh").and_then(|entry| match &entry.recipe {
+            Recipe::Install(install) if self.scope.contains(&entry.id) => install.bootstrap.clone(),
+            _ => None,
+        });
+        let Some(bootstrap) = wanted else {
+            return Ok(());
+        };
+        let brew_gh = PathBuf::from(act::brew_gh_path());
+        let home_probe =
+            act::base_command(self.home, "/bin/test").args(["-x", act::brew_gh_path()]);
+        if matches!(
+            self.run_command(&home_probe, "", false)?,
+            CmdResult::Done(ref output) if output.is_success()
+        ) {
+            if self.queue_is_open(&queue_id("gh", "sign-in")) {
+                if self.gh_signed_in(&brew_gh)? {
+                    self.close_queue_id(&queue_id("gh", "sign-in"));
+                } else {
+                    self.sign_in_to_github(&brew_gh)?;
+                }
+            }
+            return Ok(());
+        }
+        if self.states.get("gh") != Some(&ItemState::Pending) {
+            return Ok(());
+        }
+        let (_, binary) = act::bootstrap_paths(self.home, &bootstrap);
+        let present = act::base_command(self.home, "/bin/test")
+            .args(["-x".to_string(), binary.to_string_lossy().into_owned()]);
+        let present = matches!(
+            self.run_command(&present, "", false)?,
+            CmdResult::Done(ref output) if output.is_success()
+        );
+        if !present || !self.gh_may_run(&binary)? {
+            // A copy that no longer passes is replaced, never run.
+            self.remove_bootstrap()?;
+            let beats = act::bootstrap_beats(self.home, &bootstrap);
+            if self.run_beats("", &beats)?.is_some() {
+                self.emit(EventKind::RunWarning {
+                    text: "The early GitHub tool couldn't be fetched, so sign-in waits until Homebrew's is in.".into(),
+                });
+                return Ok(());
+            }
+        }
+        if self.gh_signed_in(&binary)? {
+            self.close_queue_id(&queue_id("gh", "sign-in"));
+            return Ok(());
+        }
+        self.sign_in_to_github(&binary)
+    }
+
+    /// Everything that has to hold before any `gh` starts. Its `PATH` folder really is empty, so
+    /// it can't find `git`. The early copy runs while the password is held on the strength of its
+    /// pin, so it's checked again every time. Homebrew's is the Machine's own.
+    fn gh_may_run(&mut self, program: &Path) -> Result<bool, EngineError> {
+        if !self.clear_empty_path() {
+            return Ok(false);
+        }
+        if program == Path::new(act::brew_gh_path()) {
+            return Ok(true);
+        }
+        let Some(bootstrap) = self.entry("gh").and_then(|entry| match &entry.recipe {
+            Recipe::Install(install) => install.bootstrap.clone(),
+            _ => None,
+        }) else {
+            return Ok(false);
+        };
+        let beats = act::bootstrap_check_beats(self.home, &bootstrap);
+        Ok(self.run_beats("", &beats)?.is_none())
+    }
+
+    fn clear_empty_path(&self) -> bool {
+        let support = support_dir(self.home);
+        let empty = support.join("empty-path");
+        let Ok(inside) = support.strip_prefix(self.home) else {
+            return false;
+        };
+        if link_on_the_way(self.home, inside) {
+            return false;
+        }
+        if let Ok(meta) = fs::symlink_metadata(&empty)
+            && !meta.is_dir()
+        {
+            // A link is removed, not followed.
+            if fs::remove_file(&empty).is_err() {
+                return false;
+            }
+        }
+        if fs::create_dir_all(&empty).is_err()
+            || fs::set_permissions(&empty, fs::Permissions::from_mode(0o700)).is_err()
+        {
+            return false;
+        }
+        let Ok(entries) = fs::read_dir(&empty) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let removed = match fs::symlink_metadata(&path) {
+                Ok(meta) if meta.is_dir() => fs::remove_dir_all(&path),
+                _ => fs::remove_file(&path),
+            };
+            if removed.is_err() {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn queue_is_open(&self, id: &str) -> bool {
+        self.record.open_queue_for("gh").any(|entry| entry.id == id)
+    }
+
+    fn gh_signed_in(&mut self, program: &Path) -> Result<bool, EngineError> {
+        Ok(self.gh_sign_in_state(program)? == GhSignIn::SignedIn)
+    }
+
+    fn gh_sign_in_state(&mut self, program: &Path) -> Result<GhSignIn, EngineError> {
+        if !self.gh_may_run(program)? {
+            return Ok(GhSignIn::CantTell);
+        }
+        let status =
+            act::quiet_gh(self.home, program).args(["auth", "status", "--hostname", "github.com"]);
+        // One try, read directly: the words on a failure are what tell these apart.
+        let Ok(output) = self.run_once(&status, "", false) else {
+            return Ok(GhSignIn::CantTell);
+        };
+        let said = format!(
+            "{}{}",
+            output.stdout_text(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if output.is_success() {
+            if said.contains("hosts.yml") {
+                self.emit(EventKind::RunWarning {
+                    text: "Keychain refused the GitHub sign-in, so it's stored in a plain file."
+                        .into(),
+                });
+            }
+            return Ok(GhSignIn::SignedIn);
+        }
+        Ok(
+            if output.end == CommandEnd::Exited(1) && said.to_lowercase().contains("not logged in")
+            {
+                GhSignIn::SignedOut
+            } else {
+                GhSignIn::CantTell
+            },
+        )
+    }
+
+    fn sign_in_to_github(&mut self, program: &Path) -> Result<(), EngineError> {
+        // Not a long wait with root possibly reachable. A later Run asks again.
+        if self.sudo_may_be_live {
+            self.asks.github_status(SignInStatus::Failed);
+            return self.open_queue(
+                "gh",
+                "sign-in",
+                QueueKind::Person,
+                "Sign in to GitHub. Run again when you're ready.",
+                None,
+                false,
+            );
+        }
+        self.emit(EventKind::AskState {
+            ask: AskKind::Github,
+            state: AskStatus::Waiting,
+        });
+        self.asks.github_status(SignInStatus::Waiting);
+        if !self.gh_may_run(program)? {
+            self.asks.github_status(SignInStatus::Failed);
+            self.emit(EventKind::AskState {
+                ask: AskKind::Github,
+                state: AskStatus::Skipped,
+            });
+            return self.open_queue(
+                "gh",
+                "sign-in",
+                QueueKind::Person,
+                "Sign in to GitHub. Run again when you're ready.",
+                None,
+                false,
+            );
+        }
+        let asks = self.asks;
+        let mut shown = false;
+        // What it prints stays out of the log and the events. The code is the person's to use.
+        let ran = self
+            .runner
+            .run(&act::gh_sign_in(self.home, program), &mut |_, line| {
+                if !shown && let Some(code) = act::gh_code_in(line) {
+                    shown = true;
+                    asks.show_github_code(&code, act::GITHUB_DEVICE_URL);
+                }
+            });
+        let finished = ran.is_ok_and(|output| output.is_success());
+        if finished && self.gh_signed_in(program)? {
+            self.asks.github_status(SignInStatus::SignedIn);
+            self.close_queue_id(&queue_id("gh", "sign-in"));
+            self.emit(EventKind::AskState {
+                ask: AskKind::Github,
+                state: AskStatus::Done,
+            });
+            return Ok(());
+        }
+        self.asks.github_status(SignInStatus::Failed);
+        self.emit(EventKind::AskState {
+            ask: AskKind::Github,
+            state: AskStatus::Skipped,
+        });
+        self.open_queue(
+            "gh",
+            "sign-in",
+            QueueKind::Person,
+            "Sign in to GitHub. Run again when you're ready.",
+            None,
+            false,
+        )
+    }
+
+    /// The `command-line-tools` step: the quiet route, then Apple's dialog in the failure path.
+    fn install_command_line_tools(&mut self) -> Result<Option<FailureKind>, EngineError> {
+        let on = act::clt_placeholder_on(self.home);
+        let _ = self.run_command(&on, "command-line-tools", false)?;
+        let result = self.quiet_command_line_tools();
+        let off = act::clt_placeholder_off(self.home);
+        let _ = self.run_command(&off, "command-line-tools", false)?;
+        result
+    }
+
+    fn quiet_command_line_tools(&mut self) -> Result<Option<FailureKind>, EngineError> {
+        let list = act::clt_list(self.home);
+        let output = match self.run_command(&list, "command-line-tools", true)? {
+            CmdResult::Done(output) => output,
+            CmdResult::Failed(kind) => return Ok(Some(kind)),
+        };
+        let Some(label) = act::newest_clt_label(&output.stdout_text()) else {
+            return Ok(Some(FailureKind::NotFound));
+        };
+        let install = Beat::Admin(act::clt_install(self.home, &label));
+        self.run_beats("command-line-tools", &[install])
+    }
+
+    /// The last step of the `gh` Item. Anything short of finishing leaves the bootstrap copy, so
+    /// the `gh-handed-off` check brings this back.
+    fn hand_off_gh(&mut self) -> Result<Option<FailureKind>, EngineError> {
+        let brew_gh = PathBuf::from(act::brew_gh_path());
+        let bootstrap = self.entry("gh").and_then(|entry| match &entry.recipe {
+            Recipe::Install(install) => install.bootstrap.clone(),
+            _ => None,
+        });
+        let early = bootstrap
+            .map(|bootstrap| act::bootstrap_paths(self.home, &bootstrap).1)
+            .filter(|binary| binary.exists());
+        if let Some(early) = &early {
+            match self.gh_sign_in_state(early)? {
+                GhSignIn::SignedIn => {}
+                // Nobody signed in, so there's nothing to carry over. Sign-in waits in the queue,
+                // and a later Run finishes it with Homebrew's `gh`.
+                GhSignIn::SignedOut => {
+                    self.remove_bootstrap()?;
+                    return Ok(None);
+                }
+                // Offline, stalled, or a copy that fails its pin. A real sign-in may be in there.
+                GhSignIn::CantTell => return Ok(Some(FailureKind::Verify)),
+            }
+            let Some(account) = self.gh_account(early)? else {
+                return Ok(Some(FailureKind::Verify));
+            };
+            if self.gh_account(&brew_gh)?.as_deref() != Some(account.as_str()) {
+                return Ok(Some(FailureKind::Verify));
+            }
+        }
+        if let Some(kind) = self.set_up_git_sign_in()? {
+            return Ok(Some(kind));
+        }
+        self.remove_bootstrap()?;
+        Ok(None)
+    }
+
+    fn gh_account(&mut self, program: &Path) -> Result<Option<String>, EngineError> {
+        if !self.gh_may_run(program)? {
+            return Ok(None);
+        }
+        let who = act::quiet_gh(self.home, program).args(["api", "user", "--jq", ".login"]);
+        Ok(match self.run_command(&who, "", false)? {
+            CmdResult::Done(output) if output.is_success() => {
+                Some(output.stdout_text().trim().to_string()).filter(|login| !login.is_empty())
+            }
+            _ => None,
+        })
+    }
+
+    /// Git's own GitHub sign-in is left to the person. Running `gh auth setup-git` for them
+    /// writes credential settings that git combines with whatever else it reads: other config
+    /// files, a repo at home, `XDG_CONFIG_HOME` from a shell file. Six review rounds each found
+    /// another arrangement where it took over a helper the person relied on. So the Run never
+    /// writes those settings, and says how to do it.
+    fn set_up_git_sign_in(&mut self) -> Result<Option<FailureKind>, EngineError> {
+        let brew_gh = PathBuf::from(act::brew_gh_path());
+        if self.gh_account(&brew_gh)?.is_some() {
+            self.emit(EventKind::RunWarning {
+                text: "To let git use your GitHub sign-in, run `gh auth setup-git` in Terminal."
+                    .into(),
+            });
+        }
+        Ok(None)
     }
 
     fn pending_admin(&self) -> bool {
@@ -1084,7 +1448,17 @@ impl<'a> Engine<'a> {
     }
 
     fn discard(&mut self, why: &str) {
-        if self.password.take().is_some() {
+        if let Some(password) = self.password.take() {
+            // Dropping it zeroes and frees it, so the range has to be released first.
+            admin::unlock_memory(password.expose().as_bytes());
+            drop(password);
+            if !self.admin.forget(self.runner, self.home) {
+                self.sudo_may_be_live = true;
+                self.emit(EventKind::RunWarning {
+                    text: "sudo's sign-in couldn't be ended. It runs out by itself within a few minutes."
+                        .into(),
+                });
+            }
             self.held_since = None;
             self.emit(EventKind::AdminDiscarded {
                 why: why.to_string(),
@@ -1367,7 +1741,24 @@ impl<'a> Engine<'a> {
                 phase: StepPhase::Started,
             });
             let beats = act::step_beats(self.home, step);
-            if let Some(kind) = self.run_beats(id, &beats)? {
+            let failed = match step {
+                Step::Builtin {
+                    name: BuiltinStep::CommandLineTools,
+                    ..
+                } => self.install_command_line_tools()?,
+                _ => self.run_beats(id, &beats)?,
+            };
+            let failed = match (failed, step) {
+                (
+                    None,
+                    Step::Builtin {
+                        name: BuiltinStep::GhHandOff,
+                        ..
+                    },
+                ) => self.hand_off_gh()?,
+                (failed, _) => failed,
+            };
+            if let Some(kind) = failed {
                 self.emit(EventKind::ItemStep {
                     item: id.to_string(),
                     index,
@@ -1375,15 +1766,6 @@ impl<'a> Engine<'a> {
                     phase: StepPhase::Finished,
                 });
                 return self.finish_step_failure(id, step, kind);
-            }
-            if matches!(
-                step,
-                Step::Builtin {
-                    name: BuiltinStep::GhHandOff,
-                    ..
-                }
-            ) {
-                self.remove_bootstrap()?;
             }
             self.emit(EventKind::ItemStep {
                 item: id.to_string(),
@@ -1436,8 +1818,13 @@ impl<'a> Engine<'a> {
                         License::Xcode => act::xcode_license(self.home),
                         License::AndroidSdk => act::android_licenses(self.home),
                     };
+                    let beat = if *admin {
+                        Beat::Admin(command)
+                    } else {
+                        Beat::Run(command)
+                    };
                     self.emit_step(id, index, step, StepPhase::Started);
-                    if let Some(kind) = self.run_beats(id, &[Beat::Run(command)])? {
+                    if let Some(kind) = self.run_beats(id, &[beat])? {
                         self.emit_step(id, index, step, StepPhase::Finished);
                         self.finish_step_failure(id, step, kind)?;
                         return Ok(Some(true));
@@ -1560,6 +1947,8 @@ impl<'a> Engine<'a> {
             }
         ) && kind != FailureKind::Interrupted
         {
+            // Once, outside the retries. It's a window on the person's screen.
+            let _ = self.runner.run(&act::clt_dialog(self.home), &mut |_, _| {});
             self.open_queue(
                 id,
                 "command-line-tools",
@@ -1578,6 +1967,13 @@ impl<'a> Engine<'a> {
         let mut previous: Option<(Command, CommandOutput)> = None;
         for beat in beats {
             match beat {
+                Beat::Admin(command) | Beat::AdminBrew(command) => {
+                    let elevate_itself = matches!(beat, Beat::AdminBrew(_));
+                    match self.run_admin(command, elevate_itself, id)? {
+                        CmdResult::Failed(kind) => return Ok(Some(kind)),
+                        CmdResult::Done(output) => previous = Some((command.clone(), output)),
+                    }
+                }
                 Beat::Run(command) => match self.run_command(command, id, true)? {
                     CmdResult::Failed(kind) => {
                         if is_signature_program(command)
@@ -2066,37 +2462,73 @@ impl<'a> Engine<'a> {
         let mut attempt = 0;
         loop {
             let ran = self.run_once(command, item, log);
-            match ran {
-                Err(error) => {
-                    let kind = if is_network(&error.message) {
-                        FailureKind::Network
-                    } else {
-                        FailureKind::ToolExit
-                    };
-                    if kind == FailureKind::Network && attempt < 2 {
-                        self.backoff(attempt);
-                        attempt += 1;
-                        continue;
-                    }
-                    return Ok(CmdResult::Failed(kind));
+            match outcome_of(ran) {
+                Ok(output) => return Ok(CmdResult::Done(output)),
+                Err(FailureKind::Network) if attempt < 2 => {
+                    self.backoff(attempt);
+                    attempt += 1;
                 }
-                Ok(output) => {
-                    if output.is_success() {
-                        return Ok(CmdResult::Done(output));
-                    }
-                    let text = format!(
-                        "{}{}",
-                        output.stdout_text(),
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                    let kind = failure_kind(&text, output.end == CommandEnd::Stalled);
-                    if kind == FailureKind::Network && attempt < 2 {
-                        self.backoff(attempt);
-                        attempt += 1;
-                        continue;
-                    }
-                    return Ok(CmdResult::Failed(kind));
+                Err(kind) => return Ok(CmdResult::Failed(kind)),
+            }
+        }
+    }
+
+    /// One admin step. Only it gets the helper, and only while it runs: the window closes and
+    /// `sudo`'s timestamp ends after every try, so nothing answers during a backoff or between
+    /// steps.
+    fn run_admin(
+        &mut self,
+        command: &Command,
+        elevate_itself: bool,
+        id: &str,
+    ) -> Result<CmdResult, EngineError> {
+        let budget = if elevate_itself {
+            Budget::AsNeeded
+        } else {
+            Budget::One
+        };
+        let mut attempt = 0;
+        loop {
+            if self.hold_expired() {
+                self.discard("the password was held for 60 minutes");
+            }
+            let Some(password) = &self.password else {
+                return Ok(CmdResult::Failed(FailureKind::NeedsAdmin));
+            };
+            let window = match self.admin.open(password, budget) {
+                Ok(window) => window,
+                Err(why) => {
+                    self.emit(EventKind::RunWarning {
+                        text: format!("An admin step couldn't start: {why}"),
+                    });
+                    return Ok(CmdResult::Failed(FailureKind::NeedsAdmin));
                 }
+            };
+            let real = if elevate_itself {
+                window.may_elevate(command.clone())
+            } else {
+                window.elevated(command.clone())
+            };
+            let ran = self.run_once(&real, id, true);
+            drop(window);
+            if !self.admin.forget(self.runner, self.home) {
+                // Root may still be reachable, so no more admin work this Run.
+                self.sudo_may_be_live = true;
+                self.discard("sudo's sign-in couldn't be ended");
+            }
+            match outcome_of(ran) {
+                Ok(output) => return Ok(CmdResult::Done(output)),
+                // It would have been retried, but the password went with the failed clear. It's
+                // admin work for later, not a failure of the step, and not a reason for a dialog.
+                Err(FailureKind::Network) if self.password.is_none() => {
+                    return Ok(CmdResult::Failed(FailureKind::NeedsAdmin));
+                }
+                // With the password gone there's no retry, so there's nothing to wait for.
+                Err(FailureKind::Network) if attempt < 2 && self.password.is_some() => {
+                    self.backoff(attempt);
+                    attempt += 1;
+                }
+                Err(kind) => return Ok(CmdResult::Failed(kind)),
             }
         }
     }
@@ -2567,6 +2999,43 @@ fn rendered_git(value: &SettingValue) -> String {
         SettingValue::Bool(value) => value.to_string(),
         SettingValue::Number(value) => value.to_string(),
         SettingValue::List(list) => list.join("\n"),
+    }
+}
+
+/// Whether `relative`, from `home`, passes through a symlink, `home` itself included. Above `home`
+/// is the system's business: `/var` is a link on every Mac.
+fn link_on_the_way(home: &Path, relative: &Path) -> bool {
+    let is_link =
+        |path: &Path| fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
+    if is_link(home) {
+        return true;
+    }
+    let mut walked = home.to_path_buf();
+    relative.components().any(|part| {
+        walked.push(part);
+        is_link(&walked)
+    })
+}
+
+/// Whether a git config file says anything about signing in to GitHub. Git's syntax has too many
+/// spellings for a reader to tell one helper from another (a key on the section line, a comment,
+/// an escaped subsection), so any mention leaves the file alone. `gh`'s own helper being there
+/// already means there's nothing to set up.
+fn outcome_of(
+    ran: Result<CommandOutput, soulcaster_core::command::SpawnError>,
+) -> Result<CommandOutput, FailureKind> {
+    match ran {
+        Err(error) if is_network(&error.message) => Err(FailureKind::Network),
+        Err(_) => Err(FailureKind::ToolExit),
+        Ok(output) if output.is_success() => Ok(output),
+        Ok(output) => {
+            let text = format!(
+                "{}{}",
+                output.stdout_text(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Err(failure_kind(&text, output.end == CommandEnd::Stalled))
+        }
     }
 }
 

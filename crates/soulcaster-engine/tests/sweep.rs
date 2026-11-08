@@ -30,6 +30,45 @@ use soulcaster_engine::{Clock, EngineError, InProgress, MachineRecord, RunInput,
 const SCENARIOS: u64 = 1_000;
 const SECRET: &str = "sweep-secret";
 
+/// Hands the command back unwrapped, so a test's runner sees `installer` rather than `sudo`.
+/// `tests/admin.rs` covers the real gate.
+struct OpenGate;
+
+struct OpenWindow;
+
+impl soulcaster_engine::AdminWindow for OpenWindow {
+    fn elevated(&self, inner: Command) -> Command {
+        inner.env("SUDO_ASKPASS", "/sandbox/askpass")
+    }
+
+    fn may_elevate(&self, inner: Command) -> Command {
+        inner.env("SUDO_ASKPASS", "/sandbox/askpass")
+    }
+}
+
+impl soulcaster_engine::AdminGate for OpenGate {
+    fn validate(
+        &self,
+        _runner: &dyn CommandRunner,
+        _home: &Path,
+        _password: &Password,
+    ) -> soulcaster_engine::Validation {
+        soulcaster_engine::Validation::Accepted
+    }
+
+    fn open(
+        &self,
+        _password: &Password,
+        _budget: soulcaster_engine::Budget,
+    ) -> Result<Box<dyn soulcaster_engine::AdminWindow>, String> {
+        Ok(Box::new(OpenWindow))
+    }
+
+    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) -> bool {
+        true
+    }
+}
+
 struct Rng(u64);
 
 impl Rng {
@@ -320,9 +359,21 @@ fn answer(world: &mut World, facts: &Facts, home: &Path, command: &Command) -> A
         "test" => answer_test(world, &command.args),
         "brew" => answer_brew(world, facts, home, &command.args),
         "softwareupdate" => {
+            if command.args.first().map(String::as_str) == Some("-l") {
+                return ok("* Label: Command Line Tools for Xcode-16.4\n");
+            }
             world.clt = true;
             ok("")
         }
+        // The bootstrap copy and Homebrew's both answer. Sign-in is covered by name elsewhere.
+        "gh" => {
+            if command.args.iter().any(|arg| arg == "user") {
+                ok("someone\n")
+            } else {
+                ok("")
+            }
+        }
+        "touch" | "xcode-select" => ok(""),
         "curl" => ok(""),
         "shasum" => answer_shasum(facts, &command.args),
         "codesign" => ok(""),
@@ -927,6 +978,7 @@ fn scenario(seed: u64, facts: &Arc<Facts>, catalog: &Catalog, root: &Path) {
             log: Arc::clone(&log),
         };
         let report = perform(RunInput {
+            admin: &OpenGate,
             plan: &mut plan,
             runner: &sim,
             home: &home,
@@ -1072,13 +1124,21 @@ fn check_run(
                     !rendered.contains(SECRET),
                     "seed {seed} pass {pass} put the password on a command"
                 );
+                assert!(
+                    !env_has(command, "SUDO_ASKPASS") || admin_command(command),
+                    "seed {seed} pass {pass} gave the helper to a step that isn't admin: {command:?}"
+                );
                 if held {
                     assert!(
                         !third_party(command),
                         "seed {seed} pass {pass} ran third-party code while the password was held: {command:?}"
                     );
                     assert!(
-                        !(is_brew(command) && env_has(command, "HOMEBREW_NO_SUDO")),
+                        // Fetching a cask is the one unprivileged brew while it's held, and runs
+                        // no package's code.
+                        !(is_brew(command)
+                            && env_has(command, "HOMEBREW_NO_SUDO")
+                            && !command.args.iter().any(|arg| arg == "fetch")),
                         "seed {seed} pass {pass} ran a formula while the password was held: {command:?}"
                     );
                 }

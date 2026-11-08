@@ -13,7 +13,7 @@ version=$(packaging/version.sh)
 minimum_macos=$(plutil -extract LSMinimumSystemVersion raw packaging/Info.plist)
 
 MACOSX_DEPLOYMENT_TARGET="$minimum_macos" cargo build --release --locked \
-  --target "$rust_target" -p soulcaster-app -p soulcaster-cli
+  --target "$rust_target" -p soulcaster-app -p soulcaster-cli -p soulcaster-engine
 
 rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Helpers" "$contents/Resources/licenses"
@@ -22,6 +22,7 @@ mkdir -p "$contents/MacOS" "$contents/Helpers" "$contents/Resources/licenses"
 # the same file on a case-insensitive volume.
 cp "target/$rust_target/release/soulcaster-app" "$contents/MacOS/Soulcaster"
 cp "target/$rust_target/release/soulcaster" "$contents/Helpers/soulcaster"
+cp "target/$rust_target/release/soulcaster-askpass" "$contents/Helpers/soulcaster-askpass"
 
 cp packaging/Info.plist "$contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$version" "$contents/Info.plist"

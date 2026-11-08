@@ -9,7 +9,8 @@ use soulcaster_core::command::Command;
 use soulcaster_core::config::SettingValue;
 use soulcaster_core::lifecycle::FailureKind;
 use soulcaster_core::recipe::{
-    ArchiveKind, BuiltinProbe, BuiltinStep, Effect, Probe, Step, Store, StoredType, VersionFlag,
+    ArchiveKind, Bootstrap, BuiltinProbe, BuiltinStep, Effect, Probe, Step, Store, StoredType,
+    VersionFlag,
 };
 
 use crate::record::support_dir;
@@ -160,6 +161,10 @@ pub fn brew_command(home: &Path, name: &str, cask: bool, step_is_admin: bool) ->
 
 /// One thing the engine does while performing a step, in order.
 pub enum Beat {
+    /// Run through `sudo -A`, with one answer available.
+    Admin(Command),
+    /// An admin `brew` cask, which calls `sudo -A` itself as often as it needs.
+    AdminBrew(Command),
     Run(Command),
     /// The previous command's stdout must start with this SHA-256.
     Sha256(String),
@@ -173,7 +178,17 @@ pub fn step_beats(home: &Path, step: &Step) -> Vec<Beat> {
             vec![Beat::Run(brew_command(home, name, false, false))]
         }
         Step::BrewCask { name, admin, .. } => {
-            vec![Beat::Run(brew_command(home, name, true, *admin))]
+            let command = brew_command(home, name, true, *admin);
+            if *admin {
+                // The download can take a long time, and it needs no helper. Nothing answers
+                // until the install itself.
+                vec![
+                    Beat::Run(brew_fetch_cask(home, name)),
+                    Beat::AdminBrew(command),
+                ]
+            } else {
+                vec![Beat::Run(command)]
+            }
         }
         Step::Download {
             tool,
@@ -222,47 +237,25 @@ fn download_beats(
     links: &[soulcaster_core::recipe::ToolLink],
 ) -> Vec<Beat> {
     let dest = support_dir(home).join("downloads").join(tool).join(version);
-    let file_name = url.rsplit('/').next().unwrap_or("download");
-    let archive_path = dest.join(file_name);
     // Extract beside the download. The tools directory is where the check looks, and a refused
     // signer must not leave a binary there for the next Run to call satisfied.
     let staging = support_dir(home).join("staging").join(tool).join(version);
     let tools = support_dir(home).join("tools").join(tool).join(version);
-    let mut beats = fetch_beats(home, url, &archive_path, sha256);
-    // A refused or interrupted attempt must not leave files that travel with this one.
-    beats.push(Beat::Run(
-        base_command(home, "/bin/rm").args(["-rf", &staging.to_string_lossy()]),
-    ));
-    beats.push(Beat::Run(
-        base_command(home, "/bin/mkdir").args(["-p", &staging.to_string_lossy()]),
-    ));
-    beats.push(Beat::Run(extract(home, archive, &archive_path, &staging)));
-    let signed = staging.join(signed_file);
-    let requirement = format!("anchor apple generic and certificate leaf[subject.OU] = \"{team}\"");
-    beats.push(Beat::Run(base_command(home, "/usr/bin/codesign").args([
-        "--verify",
-        "--strict",
-        &format!("-R={requirement}"),
-        &signed.to_string_lossy(),
-    ])));
-    beats.push(Beat::Team(team.to_string()));
-    if let Some(parent) = tools.parent() {
-        beats.push(Beat::Run(
-            base_command(home, "/bin/mkdir").args(["-p", &parent.to_string_lossy()]),
-        ));
-    }
-    let staging_path = staging.to_string_lossy().into_owned();
-    let tools_path = tools.to_string_lossy().into_owned();
-    // `mv` into an existing folder would nest there, and the check would never pass.
-    beats.push(Beat::Run(
-        base_command(home, "/bin/rm").args(["-rf", tools_path.as_str()]),
-    ));
-    beats.push(Beat::Run(
-        base_command(home, "/bin/mv").args([staging_path, tools_path]),
-    ));
+    let mut beats = download_into(
+        home,
+        url,
+        sha256,
+        archive,
+        team,
+        signed_file,
+        &dest,
+        &staging,
+        &tools,
+    );
     for link in links {
         if link.target.contains("..") {
             continue;
+            // A refused or interrupted attempt must not leave files that travel with this one.
         }
         let target = tools.join(&link.target);
         let path = home.join(".local").join("bin").join(&link.name);
@@ -288,12 +281,81 @@ fn pkg_beats(home: &Path, url: &str, sha256: &str, team: &str) -> Vec<Beat> {
         base_command(home, "/usr/sbin/pkgutil").args(["--check-signature", &pkg.to_string_lossy()]),
     ));
     beats.push(Beat::Team(team.to_string()));
-    // `sudo -A` is the password-helper ticket. This command runs only while the password is held;
-    // the helper attaches itself. The password is never an argument or an environment entry.
-    beats.push(Beat::Run(
+    beats.push(Beat::Admin(
         base_command(home, "/usr/sbin/installer")
             .args(["-pkg", &pkg.to_string_lossy(), "-target", "/"])
             .stall_limit(QUIET_ADMIN_STEP),
+    ));
+    beats
+}
+
+fn brew_fetch_cask(home: &Path, name: &str) -> Command {
+    base_command(home, BREW)
+        .args(["fetch", "--cask", name])
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("HOMEBREW_NO_SUDO", "1")
+        .stall_limit(Duration::from_secs(10 * 60))
+}
+
+/// The copy on disk against its pin. Its signature seals its contents, so this covers both.
+pub fn bootstrap_check_beats(home: &Path, bootstrap: &Bootstrap) -> Vec<Beat> {
+    let (_, binary) = bootstrap_paths(home, bootstrap);
+    vec![
+        Beat::Run(signer_check(home, &bootstrap.signed_by, &binary)),
+        Beat::Team(bootstrap.signed_by.clone()),
+    ]
+}
+
+fn signer_check(home: &Path, team: &str, file: &Path) -> Command {
+    let requirement = format!("anchor apple generic and certificate leaf[subject.OU] = \"{team}\"");
+    base_command(home, "/usr/bin/codesign").args([
+        "--verify",
+        "--strict",
+        &format!("-R={requirement}"),
+        &file.to_string_lossy(),
+    ])
+}
+
+/// Fetch, check the SHA-256, extract, check the signer, then swap into place.
+#[allow(clippy::too_many_arguments)]
+fn download_into(
+    home: &Path,
+    url: &str,
+    sha256: &str,
+    archive: ArchiveKind,
+    team: &str,
+    signed_file: &str,
+    downloads: &Path,
+    staging: &Path,
+    place: &Path,
+) -> Vec<Beat> {
+    let file_name = url.rsplit('/').next().unwrap_or("download");
+    let archive_path = downloads.join(file_name);
+    let tools = place;
+    let mut beats = fetch_beats(home, url, &archive_path, sha256);
+    beats.push(Beat::Run(
+        base_command(home, "/bin/rm").args(["-rf", &staging.to_string_lossy()]),
+    ));
+    beats.push(Beat::Run(
+        base_command(home, "/bin/mkdir").args(["-p", &staging.to_string_lossy()]),
+    ));
+    beats.push(Beat::Run(extract(home, archive, &archive_path, staging)));
+    let signed = staging.join(signed_file);
+    beats.push(Beat::Run(signer_check(home, team, &signed)));
+    beats.push(Beat::Team(team.to_string()));
+    if let Some(parent) = tools.parent() {
+        beats.push(Beat::Run(
+            base_command(home, "/bin/mkdir").args(["-p", &parent.to_string_lossy()]),
+        ));
+    }
+    let staging_path = staging.to_string_lossy().into_owned();
+    let tools_path = tools.to_string_lossy().into_owned();
+    // `mv` into an existing folder would nest there, and the check would never pass.
+    beats.push(Beat::Run(
+        base_command(home, "/bin/rm").args(["-rf", tools_path.as_str()]),
+    ));
+    beats.push(Beat::Run(
+        base_command(home, "/bin/mv").args([staging_path, tools_path]),
     ));
     beats
 }
@@ -350,21 +412,140 @@ fn sdkmanager(home: &Path, packages: &[soulcaster_core::recipe::SdkPackage]) -> 
 
 fn builtin_beats(home: &Path, name: BuiltinStep) -> Vec<Beat> {
     match name {
-        // The placeholder-file route and Apple's dialog are the base-bootstrap ticket. A failure
-        // here is queued instead of opening that dialog.
-        BuiltinStep::CommandLineTools => vec![Beat::Run(
-            base_command(home, "/usr/sbin/softwareupdate")
-                .args(["-i", "Command Line Tools for Xcode"])
-                .stall_limit(Duration::from_secs(30 * 60)),
-        )],
-        BuiltinStep::GhHandOff => Vec::new(),
-        BuiltinStep::XcodeFirstLaunch => vec![Beat::Run(
+        // Both of these need what a command returned, so the Run does them itself.
+        BuiltinStep::CommandLineTools | BuiltinStep::GhHandOff => Vec::new(),
+        BuiltinStep::XcodeFirstLaunch => vec![Beat::Admin(
             base_command(home, "/usr/bin/xcodebuild")
                 .args(["-runFirstLaunch"])
                 .stall_limit(QUIET_ADMIN_STEP),
         )],
     }
 }
+
+/// While this file exists, `softwareupdate -l` lists Command Line Tools.
+const CLT_PLACEHOLDER: &str = "/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress";
+
+pub fn clt_placeholder_on(home: &Path) -> Command {
+    base_command(home, "/usr/bin/touch").args([CLT_PLACEHOLDER])
+}
+
+pub fn clt_placeholder_off(home: &Path) -> Command {
+    base_command(home, "/bin/rm").args(["-f", CLT_PLACEHOLDER])
+}
+
+pub fn clt_list(home: &Path) -> Command {
+    base_command(home, "/usr/sbin/softwareupdate")
+        .args(["-l"])
+        .stall_limit(Duration::from_secs(10 * 60))
+}
+
+pub fn clt_install(home: &Path, label: &str) -> Command {
+    base_command(home, "/usr/sbin/softwareupdate")
+        .args(["-i", label])
+        .stall_limit(Duration::from_secs(30 * 60))
+}
+
+/// Opens Apple's own dialog, for when the quiet route fails.
+pub fn clt_dialog(home: &Path) -> Command {
+    base_command(home, "/usr/bin/xcode-select").args(["--install"])
+}
+
+/// The newest release in `softwareupdate -l`, such as `Command Line Tools for Xcode-16.4`. A beta
+/// isn't a release, and anything else in the list isn't ours to install.
+pub fn newest_clt_label(listing: &str) -> Option<String> {
+    let version = |label: &str| -> Option<Vec<u32>> {
+        let number = label.strip_prefix("Command Line Tools for Xcode-")?;
+        number
+            .split('.')
+            .map(|part| part.parse().ok())
+            .collect::<Option<Vec<u32>>>()
+    };
+    listing
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("* Label: "))
+        .filter_map(|label| Some((version(label)?, label.to_string())))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, label)| label)
+}
+
+const BREW_GH: &str = "/opt/homebrew/bin/gh";
+
+pub fn brew_gh_path() -> &'static str {
+    BREW_GH
+}
+
+/// The bootstrap copy's folder, and its binary inside. Never on the person's `PATH`.
+pub fn bootstrap_paths(home: &Path, bootstrap: &Bootstrap) -> (PathBuf, PathBuf) {
+    let folder = support_dir(home)
+        .join("bootstrap-gh")
+        .join(&bootstrap.version);
+    let binary = folder.join(&bootstrap.binary);
+    (folder, binary)
+}
+
+pub fn bootstrap_beats(home: &Path, bootstrap: &Bootstrap) -> Vec<Beat> {
+    let (folder, _) = bootstrap_paths(home, bootstrap);
+    download_into(
+        home,
+        &bootstrap.url,
+        &bootstrap.sha256,
+        ArchiveKind::Zip,
+        &bootstrap.signed_by,
+        &bootstrap.binary,
+        &support_dir(home).join("downloads").join("bootstrap-gh"),
+        &support_dir(home).join("staging").join("bootstrap-gh"),
+        &folder,
+    )
+}
+
+/// `gh` for reading what it knows. An empty `PATH` folder, because sign-in calls `git` otherwise,
+/// and on a bare Mac `/usr/bin/git` is the stub that opens Apple's dialog.
+pub fn quiet_gh(home: &Path, program: &Path) -> Command {
+    let empty = support_dir(home).join("empty-path");
+    Command::new(program)
+        .env("HOME", home_string(home))
+        .env("PATH", empty.to_string_lossy())
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("GH_TELEMETRY", "false")
+        .env("GH_NO_UPDATE_NOTIFIER", "1")
+        .cwd(home)
+        .stall_limit(Duration::from_secs(60))
+}
+
+pub fn gh_sign_in(home: &Path, program: &Path) -> Command {
+    quiet_gh(home, program)
+        .args([
+            "auth",
+            "login",
+            "--web",
+            "--clipboard=false",
+            "--hostname",
+            "github.com",
+            "--git-protocol",
+            "https",
+            "--skip-ssh-key",
+        ])
+        // It prints the code, then says nothing until the person has finished in the browser.
+        .stall_limit(Duration::from_secs(15 * 60))
+}
+
+/// The one-time code in a line of `gh auth login`'s output, such as `ABCD-1234`.
+pub fn gh_code_in(line: &str) -> Option<String> {
+    let (_, rest) = line.split_once("one-time code:")?;
+    let code = rest.split_whitespace().next()?;
+    let shaped = code.len() == 9
+        && code.char_indices().all(|(at, c)| {
+            if at == 4 {
+                c == '-'
+            } else {
+                c.is_ascii_uppercase() || c.is_ascii_digit()
+            }
+        });
+    shaped.then(|| code.to_string())
+}
+
+/// GitHub's device page, and nothing else `gh` might print.
+pub const GITHUB_DEVICE_URL: &str = "https://github.com/login/device";
 
 pub fn xcode_license(home: &Path) -> Command {
     base_command(home, "/usr/bin/xcodebuild").args(["-license", "accept"])
