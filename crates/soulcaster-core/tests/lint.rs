@@ -136,3 +136,49 @@ fn the_clone_location_is_an_input_because_a_machine_can_override_it() {
     assert_eq!(lint(&config, &stub(), DEFAULT_CLONE_LOCATION), vec![]);
     assert_eq!(lint(&config, &stub(), "~/code/dots")[0].kind, K::LinkClone);
 }
+
+#[test]
+fn a_link_cannot_land_in_soulcasters_own_folder() {
+    for target in [
+        "~/Library/Application Support/Soulcaster",
+        "~/Library/Application Support/Soulcaster/machine.json",
+        "~/library/application support/SOULCASTER/machine.json",
+    ] {
+        let text = serde_json::json!({
+            "schemaVersion": 1,
+            "name": "x",
+            "dotfiles": {"repo": "a/b", "links": {target: "x"}}
+        })
+        .to_string();
+        let config = Config::parse(text.as_bytes()).unwrap();
+        let found = lint(&config, &stub(), DEFAULT_CLONE_LOCATION);
+        assert!(
+            found.iter().any(|f| f.kind == K::LinkOwnFolder),
+            "{target}: {found:?}"
+        );
+    }
+}
+
+#[test]
+fn a_folded_spelling_does_not_get_past_the_protected_list() {
+    // U+017F folds to s on the Mac's volume, and Rust's to_lowercase leaves it alone.
+    let text = "{\"schemaVersion\":1,\"name\":\"x\",\"dotfiles\":{\"repo\":\"a/b\",\"links\":{\"~/De\u{17f}ktop\":\"x\"}}}";
+    let config = Config::parse(text.as_bytes()).unwrap();
+    assert_eq!(
+        lint(&config, &stub(), DEFAULT_CLONE_LOCATION)[0].kind,
+        K::LinkProtected
+    );
+}
+
+#[test]
+fn both_sides_of_a_clash_are_refused_so_the_file_cannot_choose_the_winner() {
+    use soulcaster_core::lint::refused_links;
+    let refused = refused_links(
+        ["~/.zshrc", "~/.ZSHRC", "~/.a", "~/.a/b", "~/.fine"].into_iter(),
+        DEFAULT_CLONE_LOCATION,
+    );
+    for target in ["~/.zshrc", "~/.ZSHRC", "~/.a", "~/.a/b"] {
+        assert!(refused.contains_key(target), "{target}: {refused:?}");
+    }
+    assert!(!refused.contains_key("~/.fine"));
+}

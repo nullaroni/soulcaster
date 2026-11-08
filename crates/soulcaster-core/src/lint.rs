@@ -2,6 +2,7 @@
 //! skips that entry and reports it, and the rest of the Config applies. Secret detection is best
 //! effort: the real guard is that a Config has no free-form field.
 
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -13,6 +14,10 @@ use crate::config::{Config, SettingValue};
 use crate::recipe::{Recipe, Store};
 
 pub const DEFAULT_CLONE_LOCATION: &str = "~/Developer/dotfiles";
+
+/// Where this app keeps the Machine Record, approvals and backups. A link here could grant itself
+/// an approval, so it is refused like the clone location.
+pub const OWN_FOLDER: &str = "~/Library/Application Support/Soulcaster";
 
 const PROTECTED: &[&str] = &[
     "~/Applications",
@@ -52,6 +57,7 @@ pub enum FindingKind {
     LinkOverlap,
     LinkProtected,
     LinkClone,
+    LinkOwnFolder,
     WritesThroughLink,
 }
 
@@ -200,8 +206,14 @@ fn secret_findings(config: &Config, catalog: &Catalog) -> Vec<Finding> {
 }
 
 /// How macOS's default volume compares names: case-insensitive and normalization-insensitive.
-fn fold(path: &str) -> String {
-    path.nfc().collect::<String>().to_lowercase()
+/// Going through uppercase also folds what plain lowercasing leaves alone, such as U+017F to `s`.
+pub fn fold(path: &str) -> String {
+    let composed = path.nfc().collect::<String>();
+    composed
+        .to_uppercase()
+        .to_lowercase()
+        .nfc()
+        .collect::<String>()
 }
 
 fn overlaps(a: &str, b: &str) -> bool {
@@ -233,7 +245,15 @@ fn link_findings<'a>(links: impl Iterator<Item = &'a str>, clone_location: &str)
         }
     }
     let clone = fold(clone_location);
+    let own = fold(OWN_FOLDER);
     for (name, fold_name) in names.iter().zip(&folded) {
+        if overlaps(fold_name, &own) {
+            found.push(Finding::new(
+                FindingKind::LinkOwnFolder,
+                name,
+                format!("{name} is at, above or inside Soulcaster's own folder"),
+            ));
+        }
         if PROTECTED.iter().any(|p| fold(p) == *fold_name) {
             found.push(Finding::new(
                 FindingKind::LinkProtected,
@@ -250,6 +270,40 @@ fn link_findings<'a>(links: impl Iterator<Item = &'a str>, clone_location: &str)
         }
     }
     found
+}
+
+/// Every link that must not be applied, naming both sides of a clash. A finding names one side,
+/// and applying the other would let the file's own spelling choose which link wins.
+pub fn refused_links<'a>(
+    links: impl Iterator<Item = &'a str>,
+    clone_location: &str,
+) -> BTreeMap<String, FindingKind> {
+    let names: Vec<&str> = links.collect();
+    let mut refused = BTreeMap::new();
+    for finding in link_findings(names.iter().copied(), clone_location) {
+        refused.entry(finding.at).or_insert(finding.kind);
+    }
+    let folded: Vec<String> = names.iter().map(|name| fold(name)).collect();
+    for (i, a) in names.iter().enumerate() {
+        for (j, b) in names.iter().enumerate().skip(i + 1) {
+            if folded[i] == folded[j] {
+                refused
+                    .entry((*a).to_string())
+                    .or_insert(FindingKind::LinkDuplicate);
+                refused
+                    .entry((*b).to_string())
+                    .or_insert(FindingKind::LinkDuplicate);
+            } else if overlaps(&folded[i], &folded[j]) {
+                refused
+                    .entry((*a).to_string())
+                    .or_insert(FindingKind::LinkOverlap);
+                refused
+                    .entry((*b).to_string())
+                    .or_insert(FindingKind::LinkOverlap);
+            }
+        }
+    }
+    refused
 }
 
 /// Files a Recipe writes to, for the rule that a written value never goes through a link into the repo.

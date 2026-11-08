@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "My other Mac",
+  "items": [
+    "ghostty"
+  ],
+  "dotfiles": {
+    "repo": "example-you/dotfiles",
+    "links": {
+      "~/.config/nvim": "nvim",
+      "~/.zshrc": "zsh/zshrc"
+    },
+    "installScript": "install.sh"
+  }
+}

@@ -1,6 +1,7 @@
 //! Soulcaster's engine vocabulary, shared by the app, the CLI and the engine. It has no GUI
 //! dependency and starts no process: anything external goes through [`command::CommandRunner`].
 
+pub mod approval;
 pub mod ask;
 pub mod catalog;
 pub mod command;
