@@ -24,6 +24,8 @@ const GIT_HARDENING: &[&str] = &[
     "submodule.recurse=false",
     "fetch.recurseSubmodules=false",
     "protocol.allow=never",
+    // A replace ref shows a different tree under the approved commit's id. Read the real objects.
+    "core.useReplaceRefs=false",
     "protocol.https.allow=always",
     "transfer.fsckObjects=true",
     "http.followRedirects=false",
@@ -174,6 +176,7 @@ impl Tools {
             .env("GIT_ATTR_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_ALLOW_PROTOCOL", "https")
+            .env("GIT_NO_REPLACE_OBJECTS", "1")
             .env("GIT_LFS_SKIP_SMUDGE", "1")
             .stall_limit(Duration::from_secs(120));
         if let Some(cwd) = cwd {
