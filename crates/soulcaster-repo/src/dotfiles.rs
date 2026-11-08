@@ -397,23 +397,33 @@ impl DotfilesStep<'_> {
     }
 
     /// Whether the files on disk are exactly `commit`'s. Nothing the clone holds is trusted for
-    /// this: a fresh index is built from the commit, git hashes every file against it, and only
-    /// then says what differs. So index flags, forged file times, a commit-graph and
-    /// `core.worktree` can't hide a change. `ignored_in` also counts ignored files under those
-    /// paths, because a linked folder carries them along.
+    /// this but its objects, which git checks against their ids as it reads them. The check runs in
+    /// a new, empty git folder that borrows those objects, so the clone's config, attributes, clean
+    /// filters, hooks, index, commit-graph and `core.worktree` never apply. There a fresh index is
+    /// built from the commit, git hashes every file against it, and only then says what differs.
+    /// `ignored_in` also counts ignored files under those paths, because a linked folder carries
+    /// them along.
     fn matches_commit(
         &self,
         clone: &Path,
         commit: &CommitSha,
         ignored_in: &[&str],
     ) -> Result<bool, DotfilesError> {
-        let git_dir = clone.join(".git");
-        if !fs::symlink_metadata(&git_dir).is_ok_and(|meta| meta.is_dir()) {
+        let objects = clone.join(".git").join("objects");
+        if !fs::symlink_metadata(&objects).is_ok_and(|meta| meta.is_dir()) {
             return Ok(false);
         }
-        let index = git_dir.join("soulcaster-check-index");
-        let _ = fs::remove_file(&index);
-        let env = [("GIT_INDEX_FILE", index.to_string_lossy().into_owned())];
+        let Some(scratch) = self.scratch_git_dir(&objects, commit) else {
+            return Ok(false);
+        };
+        let env = [
+            ("GIT_DIR", scratch.to_string_lossy().into_owned()),
+            ("GIT_WORK_TREE", clone.to_string_lossy().into_owned()),
+            (
+                "GIT_INDEX_FILE",
+                scratch.join("index").to_string_lossy().into_owned(),
+            ),
+        ];
         let result = (|| {
             let built =
                 self.git_with(GitCred::None, clone, &["read-tree", commit.as_str()], &env)?;
@@ -449,8 +459,50 @@ impl DotfilesStep<'_> {
             let ignored = self.git_with(GitCred::None, clone, &args, &env)?;
             Ok(ignored.is_success() && ignored.stdout.is_empty())
         })();
-        let _ = fs::remove_file(&index);
+        let _ = fs::remove_dir_all(&scratch);
         result
+    }
+
+    /// A new git folder, private to this user, whose only link to the clone is that it reads the
+    /// clone's objects. Written by hand rather than by `git init`, so nothing from a template or
+    /// the clone shapes it.
+    fn scratch_git_dir(&self, objects: &Path, commit: &CommitSha) -> Option<PathBuf> {
+        use std::os::unix::fs::DirBuilderExt;
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let support = self
+            .tools
+            .home
+            .join("Library/Application Support/Soulcaster");
+        fs::create_dir_all(&support).ok()?;
+        let scratch = support.join(format!(
+            "check-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        // Fails if anything is already there, so nothing can be planted in advance.
+        fs::DirBuilder::new().mode(0o700).create(&scratch).ok()?;
+        let made = (|| {
+            fs::create_dir_all(scratch.join("objects/info"))?;
+            fs::create_dir_all(scratch.join("refs"))?;
+            // The clone's own git folder sits in the files being checked. It isn't one of them.
+            fs::create_dir_all(scratch.join("info"))?;
+            fs::write(scratch.join("info/exclude"), "/.git\n")?;
+            // HEAD is the approved commit itself, so `status` compares against exactly that.
+            fs::write(scratch.join("HEAD"), format!("{commit}\n"))?;
+            fs::write(
+                scratch.join("config"),
+                "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tautocrlf = false\n",
+            )?;
+            fs::write(
+                scratch.join("objects/info/alternates"),
+                format!("{}\n", objects.to_string_lossy()),
+            )
+        })();
+        if made.is_err() {
+            let _ = fs::remove_dir_all(&scratch);
+            return None;
+        }
+        Some(scratch)
     }
 
     fn fetch(

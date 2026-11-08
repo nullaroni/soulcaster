@@ -135,7 +135,7 @@ impl RepoSim {
             std::fs::create_dir_all(at.parent().expect("has a parent")).expect("a test folder");
             std::fs::write(at, text).expect("a test file");
         }
-        std::fs::create_dir_all(clone.join(".git")).expect("a test folder");
+        std::fs::create_dir_all(clone.join(".git/objects")).expect("a test folder");
         std::fs::write(home.join(".zshrc"), "# what was here before\n").expect("a test file");
         std::fs::create_dir_all(home.join("Documents")).expect("a test folder");
         self.github.on_git(

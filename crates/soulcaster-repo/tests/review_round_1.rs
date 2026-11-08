@@ -81,7 +81,8 @@ fn sandbox() -> Sandbox {
     let dir = tempfile::tempdir().unwrap();
     let home = fs::canonicalize(dir.path()).unwrap();
     let clone = home.join("Developer/dotfiles");
-    fs::create_dir_all(clone.join(".git")).unwrap();
+    // A real clone always has its objects folder, which the check reads.
+    fs::create_dir_all(clone.join(".git/objects")).unwrap();
     fs::create_dir_all(clone.join("zsh")).unwrap();
     fs::write(clone.join("zsh/zshrc"), "export EDITOR=nvim\n").unwrap();
     fs::write(clone.join("setup.sh"), "echo approved\n").unwrap();
