@@ -337,7 +337,52 @@ impl FakeGitHub {
                 };
             }
         }
+        if command.args.iter().any(|a| a == "ls-tree") {
+            return Self::list_as_on_disk(command);
+        }
         Reply::ok("")
+    }
+
+    /// A commit that is exactly what's on disk, as a clean clone at the approved commit would
+    /// be. Tests of a clone that differs use real git.
+    fn list_as_on_disk(command: &Command) -> Reply {
+        use std::os::unix::ffi::OsStrExt;
+        let Some(cwd) = command.cwd.as_deref() else {
+            return Reply::fails(128, "fatal: not a git repository");
+        };
+        fn walk(root: &Path, at: &Path, out: &mut Vec<u8>) {
+            let Ok(entries) = std::fs::read_dir(at) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+                if relative == Path::new(".git") || entry.file_name() == ".DS_Store" {
+                    continue;
+                }
+                let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                    continue;
+                };
+                let (mode, bytes) = if meta.is_dir() {
+                    walk(root, &path, out);
+                    continue;
+                } else if meta.file_type().is_symlink() {
+                    let target = std::fs::read_link(&path).unwrap_or_default();
+                    ("120000", target.as_os_str().as_bytes().to_vec())
+                } else {
+                    ("100644", std::fs::read(&path).unwrap_or_default())
+                };
+                let mut hasher = sha1_smol::Sha1::new();
+                hasher.update(format!("blob {}\0", bytes.len()).as_bytes());
+                hasher.update(&bytes);
+                out.extend_from_slice(format!("{mode} blob {}\t", hasher.digest()).as_bytes());
+                out.extend_from_slice(relative.as_os_str().as_bytes());
+                out.push(0);
+            }
+        }
+        let mut out = Vec::new();
+        walk(cwd, cwd, &mut out);
+        Reply::ok(String::from_utf8_lossy(&out).into_owned())
     }
 }
 

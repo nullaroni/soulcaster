@@ -3,6 +3,7 @@
 //! between `ThirdParty` and `GitValues`, with the script after everything. Every call reads the
 //! approval again, so nothing here can run on what a Config says about itself.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -309,6 +310,76 @@ fn verify_source(root: &Path, source: &str) -> Result<PathBuf, LinkRefusal> {
     Ok(literal)
 }
 
+/// `ls-tree -r -z`: mode, type, id, then the path. `None` for anything unexpected.
+fn tree_entries(listing: &[u8]) -> Option<BTreeMap<PathBuf, (String, String)>> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut entries = BTreeMap::new();
+    // The runner ends its output with a newline, so a last record of only that is no entry.
+    for record in listing
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.iter().all(u8::is_ascii_whitespace))
+    {
+        let tab = record.iter().position(|byte| *byte == b'\t')?;
+        let head = std::str::from_utf8(&record[..tab]).ok()?;
+        let mut parts = head.split(' ');
+        let (mode, _kind, id) = (parts.next()?, parts.next()?, parts.next()?);
+        let path = PathBuf::from(std::ffi::OsStr::from_bytes(&record[tab + 1..]));
+        entries.insert(path, (mode.to_string(), id.to_string()));
+    }
+    Some(entries)
+}
+
+/// Every file and link under the clone, not following links, except its own git folder and
+/// the `.DS_Store` files Finder leaves. A nested git folder is just more files that the commit
+/// doesn't have.
+fn files_on_disk(clone: &Path) -> Option<Vec<PathBuf>> {
+    fn walk(root: &Path, at: &Path, out: &mut Vec<PathBuf>) -> Option<()> {
+        for entry in fs::read_dir(at).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            let relative = path.strip_prefix(root).ok()?.to_path_buf();
+            if relative == Path::new(".git") || entry.file_name() == ".DS_Store" {
+                continue;
+            }
+            let meta = fs::symlink_metadata(&path).ok()?;
+            if meta.is_dir() {
+                walk(root, &path, out)?;
+            } else {
+                out.push(relative);
+            }
+        }
+        Some(())
+    }
+    let mut out = Vec::new();
+    walk(clone, clone, &mut out)?;
+    Some(out)
+}
+
+/// The blob id git gives these bytes.
+fn blob_id(bytes: &[u8]) -> String {
+    let mut hasher = sha1_smol::Sha1::new();
+    hasher.update(format!("blob {}\0", bytes.len()).as_bytes());
+    hasher.update(bytes);
+    hasher.digest().to_string()
+}
+
+/// A file against its entry: a plain file by its bytes, a link by where it points. A submodule,
+/// or anything else, never matches. A commit with longer ids than SHA-1's doesn't either.
+fn file_matches(path: &Path, mode: &str, id: &str) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    let bytes = match mode {
+        "100644" | "100755" if meta.is_file() => fs::read(path).ok(),
+        "120000" if meta.file_type().is_symlink() => fs::read_link(path)
+            .ok()
+            .map(|target| target.as_os_str().as_bytes().to_vec()),
+        _ => None,
+    };
+    bytes.is_some_and(|bytes| blob_id(&bytes) == id)
+}
+
 fn refusal_of(trouble: PathTrouble) -> LinkRefusal {
     match trouble {
         PathTrouble::SymlinkInPath { at } => LinkRefusal::SymlinkInPath { at },
@@ -396,19 +467,13 @@ impl DotfilesStep<'_> {
         CommitSha::parse(output.stdout_text().trim()).ok_or(DotfilesError::LocationBusy)
     }
 
-    /// Whether the files on disk are exactly `commit`'s. Nothing the clone holds is trusted for
-    /// this but its objects, which git checks against their ids as it reads them. The check runs in
-    /// a new, empty git folder that borrows those objects, so the clone's config, attributes, clean
-    /// filters, hooks, index, commit-graph and `core.worktree` never apply. There a fresh index is
-    /// built from the commit, git hashes every file against it, and only then says what differs.
-    /// `ignored_in` also counts ignored files under those paths, because a linked folder carries
-    /// them along.
-    fn matches_commit(
-        &self,
-        clone: &Path,
-        commit: &CommitSha,
-        ignored_in: &[&str],
-    ) -> Result<bool, DotfilesError> {
+    /// Whether the files on disk are exactly `commit`'s. Git is asked only to list the commit's
+    /// files and their ids, which reads objects git checks against their ids, from a git folder
+    /// the clone can't shape. It never looks at the files on disk, so no attribute, filter,
+    /// submodule or setting in the clone or in those files can change the answer or run a
+    /// program. The files are then walked and hashed here: every one must match, and nothing may
+    /// be there that the commit doesn't have.
+    fn matches_commit(&self, clone: &Path, commit: &CommitSha) -> Result<bool, DotfilesError> {
         let objects = clone.join(".git").join("objects");
         if !fs::symlink_metadata(&objects).is_ok_and(|meta| meta.is_dir()) {
             return Ok(false);
@@ -416,51 +481,30 @@ impl DotfilesStep<'_> {
         let Some(scratch) = self.scratch_git_dir(&objects, commit) else {
             return Ok(false);
         };
-        let env = [
-            ("GIT_DIR", scratch.to_string_lossy().into_owned()),
-            ("GIT_WORK_TREE", clone.to_string_lossy().into_owned()),
-            (
-                "GIT_INDEX_FILE",
-                scratch.join("index").to_string_lossy().into_owned(),
-            ),
-        ];
-        let result = (|| {
-            let built =
-                self.git_with(GitCred::None, clone, &["read-tree", commit.as_str()], &env)?;
-            if !built.is_success() {
-                return Ok(false);
-            }
-            let _ = self.git_with(
-                GitCred::None,
-                clone,
-                &["update-index", "-q", "--refresh"],
-                &env,
-            )?;
-            let status = self.git_with(
-                GitCred::None,
-                clone,
-                &["status", "--porcelain=v1", "--untracked-files=all"],
-                &env,
-            )?;
-            if !status.is_success() || !status.stdout.is_empty() {
-                return Ok(false);
-            }
-            if ignored_in.is_empty() {
-                return Ok(true);
-            }
-            let mut args = vec![
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=all",
-                "--ignored=matching",
-                "--",
-            ];
-            args.extend(ignored_in);
-            let ignored = self.git_with(GitCred::None, clone, &args, &env)?;
-            Ok(ignored.is_success() && ignored.stdout.is_empty())
-        })();
+        let env = [("GIT_DIR", scratch.to_string_lossy().into_owned())];
+        let listed = self.git_with(
+            GitCred::None,
+            clone,
+            &["ls-tree", "-r", "-z", "--full-tree", commit.as_str()],
+            &env,
+        );
         let _ = fs::remove_dir_all(&scratch);
-        result
+        let listed = listed?;
+        if !listed.is_success() {
+            return Ok(false);
+        }
+        let Some(wanted) = tree_entries(&listed.stdout) else {
+            return Ok(false);
+        };
+        let Some(present) = files_on_disk(clone) else {
+            return Ok(false);
+        };
+        if present.len() != wanted.len() || present.iter().any(|path| !wanted.contains_key(path)) {
+            return Ok(false);
+        }
+        Ok(wanted
+            .iter()
+            .all(|(path, (mode, id))| file_matches(&clone.join(path), mode, id)))
     }
 
     /// A new git folder, private to this user, whose only link to the clone is that it reads the
@@ -484,9 +528,6 @@ impl DotfilesStep<'_> {
         let made = (|| {
             fs::create_dir_all(scratch.join("objects/info"))?;
             fs::create_dir_all(scratch.join("refs"))?;
-            // The clone's own git folder sits in the files being checked. It isn't one of them.
-            fs::create_dir_all(scratch.join("info"))?;
-            fs::write(scratch.join("info/exclude"), "/.git\n")?;
             // HEAD is the approved commit itself, so `status` compares against exactly that.
             fs::write(scratch.join("HEAD"), format!("{commit}\n"))?;
             fs::write(
@@ -661,10 +702,7 @@ impl DotfilesStep<'_> {
         let held = self.approval(plan).ok_or(DotfilesError::NotApproved)?;
         let root = SafeRoot::open(&self.tools.home).map_err(|_| DotfilesError::LocationBusy)?;
         // The same rule a move uses. A file that was edited here isn't what was approved.
-        let sources: Vec<&str> = plan.links.values().map(String::as_str).collect();
-        let clean = self
-            .matches_commit(&clone, &held.commit, &sources)
-            .unwrap_or(false);
+        let clean = self.matches_commit(&clone, &held.commit).unwrap_or(false);
         let clone = fs::canonicalize(&clone).map_err(|_| DotfilesError::LocationBusy)?;
         let refused = refused_links(plan.links.keys().map(String::as_str), self.clone_location);
         let mut rows = Vec::with_capacity(plan.links.len());
@@ -746,7 +784,7 @@ impl DotfilesStep<'_> {
             Err(DotfilesError::PastApproved { .. }) => return ScriptOutcome::HeldForReview,
             Err(_) => return ScriptOutcome::CouldNotRun,
         };
-        match self.matches_commit(&clone, &held.commit, &[path]) {
+        match self.matches_commit(&clone, &held.commit) {
             Ok(true) => {}
             Ok(false) => return ScriptOutcome::HeldForReview,
             Err(_) => return ScriptOutcome::CouldNotRun,
@@ -859,7 +897,7 @@ impl DotfilesStep<'_> {
         let source = DotfilesSource::parse(&plan.repo).ok_or(DotfilesError::NotApproved)?;
         let clone = self.existing_clone()?;
         self.check_existing(&clone, &source)?;
-        if !self.matches_commit(&clone, &held.commit, &[])? {
+        if !self.matches_commit(&clone, &held.commit)? {
             return Err(DotfilesError::ChangesOnThisMac);
         }
         self.fetch(&source, &clone, &preview.to)?;

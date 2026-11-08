@@ -684,7 +684,8 @@ fn the_script_does_not_run_past_its_commit_or_with_changes_on_disk_or_through_a_
     let sandbox = crate::sandbox();
     approve(&sandbox, &plan);
     approve_script(&sandbox, &plan, "setup.sh");
-    sandbox.gh.on_git("status", Reply::ok(" M setup.sh\n"));
+    // A commit that doesn't hold what's on disk: here, one with nothing in it.
+    sandbox.gh.on_git("ls-tree", Reply::ok(""));
     assert_eq!(run_script(&sandbox, &plan), ScriptOutcome::HeldForReview);
 
     // Someone else's path in the approval.
@@ -809,7 +810,8 @@ fn moving_takes_a_preview_and_a_clean_repo_and_voids_the_script_approval() {
     let sandbox = crate::sandbox();
     approve(&sandbox, &plan);
     let preview = step(&sandbox).preview_move(&plan, &newer).unwrap();
-    sandbox.gh.on_git("status", Reply::ok(" M zsh/zshrc\n"));
+    // A commit that doesn't hold what's on disk: here, one with nothing in it.
+    sandbox.gh.on_git("ls-tree", Reply::ok(""));
     assert_eq!(
         step(&sandbox)
             .move_after_review(&plan, &preview)
