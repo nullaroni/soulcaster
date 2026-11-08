@@ -838,6 +838,11 @@ pub fn record_saved(
     })
 }
 
+/// The Config this Mac follows, as it last read it.
+pub fn set_followed(home: &Path, followed: Value) -> Result<(), EngineError> {
+    with_record(home, |record| record.follows = Some(followed))
+}
+
 /// Saves that are still only on this Mac, kept until they're sent or discarded.
 pub fn waiting_saves(home: &Path) -> Result<Vec<Reviewed>, EngineError> {
     Ok(MachineRecord::load(home)?.waiting_saves)

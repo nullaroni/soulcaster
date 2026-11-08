@@ -93,7 +93,8 @@ fn wait_for(error: &FetchError) -> WaitReason {
 
 fn read_latest(
     github: &GitHub<'_>,
-    request: &AdoptRequest<'_>,
+    repo_name: &str,
+    ever_saved: bool,
     path: &str,
 ) -> Result<Latest, Stop> {
     let identity = match github.sign_in() {
@@ -101,10 +102,10 @@ fn read_latest(
         SignIn::SignedOut => return Err(Stop::Wait(WaitReason::SignIn)),
         SignIn::Unreachable => return Err(Stop::Wait(WaitReason::Offline)),
     };
-    let repo = RepoId::new(&identity.login, request.repo_name)
-        .map_err(|_| Stop::Wait(WaitReason::Denied))?;
+    let repo =
+        RepoId::new(&identity.login, repo_name).map_err(|_| Stop::Wait(WaitReason::Denied))?;
     let gone = || {
-        if request.ever_saved {
+        if ever_saved {
             Err(Stop::Missing(path.to_string()))
         } else {
             Ok(Latest::Nothing)
@@ -140,6 +141,41 @@ fn parse_latest(text: &str, config_name: &str) -> Result<Config, Stop> {
         return Err(Stop::Unreadable);
     }
     Ok(config)
+}
+
+/// What GitHub has for the Config this Mac follows.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Followed {
+    Latest(Config),
+    /// It hasn't been sent, so there's nothing there to read.
+    NeverSent,
+    Waiting(WaitReason),
+    Unreadable,
+    Missing(String),
+}
+
+/// Reads the followed Config for a check. It sends nothing.
+pub fn read_followed(
+    runner: &dyn CommandRunner,
+    tools: &Tools,
+    repo_name: &str,
+    config_name: &str,
+    ever_saved: bool,
+) -> Followed {
+    if tools.gh.is_none() || tools.git.is_none() {
+        return Followed::Waiting(WaitReason::SignIn);
+    }
+    let path = format!("configs/{}.json", slug(config_name));
+    let github = GitHub::new(runner, tools);
+    match read_latest(&github, repo_name, ever_saved, &path) {
+        Ok(Latest::Nothing) => Followed::NeverSent,
+        Ok(Latest::Text { text, .. }) => {
+            parse_latest(&text, config_name).map_or(Followed::Unreadable, Followed::Latest)
+        }
+        Err(Stop::Wait(why)) => Followed::Waiting(why),
+        Err(Stop::Unreadable) => Followed::Unreadable,
+        Err(Stop::Missing(path)) => Followed::Missing(path),
+    }
 }
 
 enum Sent {
@@ -250,7 +286,7 @@ pub fn adopt(
             .filter(|entry| !(request.still_true)(entry))
             .map(|entry| entry.id.clone())
             .collect();
-        let latest = match read_latest(&github, request, &path) {
+        let latest = match read_latest(&github, request.repo_name, request.ever_saved, &path) {
             Ok(latest) => latest,
             Err(Stop::Wait(why)) => return wait_here(tools, catalog, request, &always, why),
             Err(Stop::Unreadable) => return Ok(AdoptOutcome::Unreadable),

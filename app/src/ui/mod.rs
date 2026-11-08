@@ -134,13 +134,13 @@ fn titlebar(app: &App, leading: f32) -> El {
             "Drift",
             on_drift,
             |app: &mut App, _| {
-                app.screen = if app.screen != Screen::Drift {
-                    Screen::Drift
+                if app.screen != Screen::Drift {
+                    app.open_drift();
                 } else if app.run_finished {
-                    Screen::Finish
+                    app.screen = Screen::Finish;
                 } else {
-                    Screen::Catalog
-                };
+                    app.screen = Screen::Catalog;
+                }
             },
         )
     };
