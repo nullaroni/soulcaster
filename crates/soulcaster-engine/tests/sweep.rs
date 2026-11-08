@@ -978,6 +978,7 @@ fn scenario(seed: u64, facts: &Arc<Facts>, catalog: &Catalog, root: &Path) {
             log: Arc::clone(&log),
         };
         let report = perform(RunInput {
+            dotfiles: None,
             admin: &OpenGate,
             plan: &mut plan,
             runner: &sim,

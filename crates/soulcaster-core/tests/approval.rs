@@ -34,6 +34,7 @@ fn a_record_holding_a_bad_commit_or_an_unknown_field_does_not_load() {
 #[test]
 fn approvals_round_trip_with_repo_and_commit_together() {
     let approvals = Approvals {
+        taps: Default::default(),
         packages: ["mobile-dev-inc/tap/maestro".to_string()].into(),
         dotfiles: Some(DotfilesApproval {
             repo: "github.com/a/b".to_string(),

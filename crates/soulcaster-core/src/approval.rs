@@ -72,6 +72,9 @@ pub struct ScriptApproval {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Approvals {
+    /// `owner/tap`. Approving a tap covers every package from it.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub taps: BTreeSet<String>,
     /// Full names such as `owner/tap/name`. Approving one package doesn't cover the rest of its tap.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub packages: BTreeSet<String>,

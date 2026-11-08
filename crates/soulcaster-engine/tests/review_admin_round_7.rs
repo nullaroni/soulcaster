@@ -129,6 +129,7 @@ impl Harness {
         );
         let mut events: Vec<Event> = Vec::new();
         perform(RunInput {
+            dotfiles: None,
             admin: &QuietGate,
             plan,
             runner: &self.runner,

@@ -81,6 +81,7 @@ fn approve(sandbox: &Sandbox, plan: &DotfilesPlan) {
     sandbox
         .store
         .write(&Approvals {
+            taps: Default::default(),
             packages: Default::default(),
             dotfiles: Some(DotfilesApproval {
                 repo: KEY.to_string(),
@@ -553,6 +554,7 @@ fn the_token_goes_only_to_github_never_to_another_host() {
     sandbox
         .store
         .write(&Approvals {
+            taps: Default::default(),
             packages: Default::default(),
             dotfiles: Some(DotfilesApproval {
                 repo: "https://github.com.evil.example/you/dotfiles".to_string(),
@@ -717,6 +719,7 @@ fn the_script_does_not_run_past_its_commit_or_with_changes_on_disk_or_through_a_
 fn the_engine_stays_at_the_approved_commit_until_a_new_approval_says_otherwise() {
     let links = plan(&[("~/.zshrc", "zsh/zshrc")]);
     let approvals = Approvals {
+        taps: Default::default(),
         packages: Default::default(),
         dotfiles: Some(DotfilesApproval {
             repo: KEY.to_string(),

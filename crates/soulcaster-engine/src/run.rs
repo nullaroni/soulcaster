@@ -19,7 +19,7 @@ use soulcaster_core::event::{
     QueueKind, RunScope, Stamper, StepPhase,
 };
 use soulcaster_core::lifecycle::{Assurance, FailureKind, ItemState, SkipReason, Stage};
-use soulcaster_core::plan::{Plan, PlanEntry, Why};
+use soulcaster_core::plan::{Plan, PlanEntry, RunGroup, Why};
 use soulcaster_core::recipe::{
     BuiltinStep, Completion, Effect, EvidenceGroup, License, Probe, Recipe, SettingRecipe, Step,
     Store, StoredType,
@@ -30,6 +30,7 @@ use crate::act::{
     restart_command, setting_json, sha_matches, version_below,
 };
 use crate::admin::{self, AdminGate, Budget, Validation};
+use crate::dotfiles::DotfilesHook;
 use crate::record::{
     AcceptedLicense, InProgress, Interruption, ItemOutcome, LastApplied, MachineRecord, QueueItem,
     support_dir,
@@ -47,6 +48,9 @@ pub struct RunInput<'a> {
     pub plan: &'a mut Plan,
     pub runner: &'a dyn CommandRunner,
     pub admin: &'a dyn AdminGate,
+    /// Applies the Dotfiles Repo inside the Run. Without one, a plan's Dotfiles Repo is left for
+    /// later and the Run says so.
+    pub dotfiles: Option<&'a dyn DotfilesHook>,
     pub home: &'a Path,
     pub events: &'a mut dyn EventSink,
     pub asks: &'a dyn Asks,
@@ -177,7 +181,7 @@ enum CmdResult {
     Failed(FailureKind),
 }
 
-struct RunLock(File);
+pub(crate) struct RunLock(File);
 
 /// A Needs-You entry discovered while checking, opened only after `run.started`.
 struct PendingQueue {
@@ -197,6 +201,8 @@ impl Drop for RunLock {
 
 struct Engine<'a> {
     admin: &'a dyn AdminGate,
+    dotfiles: Option<&'a dyn DotfilesHook>,
+    dotfiles_done: bool,
     /// `sudo -k` couldn't be confirmed, so root may still be reachable without asking.
     sudo_may_be_live: bool,
     plan: &'a mut Plan,
@@ -244,7 +250,7 @@ pub fn perform(input: RunInput<'_>) -> Result<RunReport, EngineError> {
     engine.execute()
 }
 
-fn lock_run(home: &Path) -> Result<RunLock, EngineError> {
+pub(crate) fn lock_run(home: &Path) -> Result<RunLock, EngineError> {
     let dir = support_dir(home);
     fs::create_dir_all(&dir).map_err(|error| EngineError::RecordIo {
         path: dir.clone(),
@@ -283,6 +289,8 @@ impl<'a> Engine<'a> {
             plan: input.plan,
             runner: input.runner,
             admin: input.admin,
+            dotfiles: input.dotfiles,
+            dotfiles_done: false,
             sudo_may_be_live: false,
             home: input.home,
             events: input.events,
@@ -337,6 +345,9 @@ impl<'a> Engine<'a> {
         self.run_stage(Stage::Admin)?;
         self.discard("the Admin Stage finished");
         self.run_stage(Stage::User)?;
+        if !self.cancelled {
+            self.apply_dotfiles()?;
+        }
         self.finish()
     }
 
@@ -570,8 +581,8 @@ impl<'a> Engine<'a> {
             let Some(tap) = soulcaster_core::recipe::tap_of(name) else {
                 return false;
             };
-            let tap_ok = self.record.approvals.taps.contains_key(&tap);
-            let package_ok = self.record.approvals.packages.contains_key(name);
+            let tap_ok = self.record.approvals.taps.contains(&tap);
+            let package_ok = self.record.approvals.packages.contains(name);
             !tap_ok && !package_ok
         })
     }
@@ -1048,8 +1059,30 @@ impl<'a> Engine<'a> {
         Ok(())
     }
 
+    /// Once per Run, and never while the password is held.
+    fn apply_dotfiles(&mut self) -> Result<(), EngineError> {
+        if self.dotfiles_done || self.password.is_some() {
+            return Ok(());
+        }
+        self.dotfiles_done = true;
+        let (Some(hook), Some(plan)) = (self.dotfiles, self.plan.dotfiles.clone()) else {
+            return Ok(());
+        };
+        let held =
+            crate::approvals::HeldApprovals(std::sync::Mutex::new(self.record.approvals.clone()));
+        let result = hook.apply(&plan, &held);
+        if let Ok(approvals) = held.0.into_inner() {
+            self.record.approvals = approvals;
+        }
+        self.record.save(self.home)?;
+        for text in result.warnings {
+            self.emit(EventKind::RunWarning { text });
+        }
+        Ok(())
+    }
+
     fn note_dotfiles(&mut self) {
-        if self.plan.dotfiles.is_some() {
+        if self.plan.dotfiles.is_some() && self.dotfiles.is_none() {
             self.emit(EventKind::RunWarning {
                 text: "The Dotfiles Repo is not applied by this Run.".into(),
             });
@@ -1491,6 +1524,27 @@ impl<'a> Engine<'a> {
                 break;
             }
             let id = ids[index].clone();
+            if stage == Stage::User
+                && self
+                    .entry(&id)
+                    .is_some_and(|entry| entry.group == RunGroup::GitValues)
+            {
+                // Links go after third-party Items and before git settings.
+                self.apply_dotfiles()?;
+                // A link may now carry `~/.gitconfig` into the repo, and git settings must not
+                // write through it.
+                if self.states.get(&id) == Some(&ItemState::Pending)
+                    && let Some(entry) = self.entry(&id).cloned()
+                    && self.writes_through_link(&entry)
+                {
+                    self.move_item(
+                        &id,
+                        ItemState::Skipped {
+                            reason: SkipReason::WritesThroughLink,
+                        },
+                    )?;
+                }
+            }
             if self.states.get(&id) != Some(&ItemState::Pending) {
                 index += 1;
                 continue;
