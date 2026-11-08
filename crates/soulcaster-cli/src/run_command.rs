@@ -187,6 +187,8 @@ struct SavedTerminal(UnsafeCell<MaybeUninit<libc::termios>>);
 unsafe impl Sync for SavedTerminal {}
 
 static SAVED_TERMINAL: SavedTerminal = SavedTerminal(UnsafeCell::new(MaybeUninit::uninit()));
+/// The same, with echo off. A shell turns echo back on when a stopped job continues.
+static QUIET_TERMINAL: SavedTerminal = SavedTerminal(UnsafeCell::new(MaybeUninit::uninit()));
 static TTY_FD: AtomicI32 = AtomicI32::new(-1);
 const ENDING_SIGNALS: [libc::c_int; 4] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT];
 
@@ -202,6 +204,16 @@ extern "C" fn restore_echo_and_die(signal: libc::c_int) {
     unsafe {
         libc::signal(signal, libc::SIG_DFL);
         libc::raise(signal);
+    }
+}
+
+/// A stop that can't be ignored, such as `kill -STOP`, ends with the shell's own terminal
+/// settings. This puts echo back off before the prompt reads anything else.
+extern "C" fn quiet_again(_signal: libc::c_int) {
+    let fd = TTY_FD.load(Ordering::Acquire);
+    if fd >= 0 {
+        // SAFETY: a non-negative `fd` means `QUIET_TERMINAL` holds a valid `termios`.
+        unsafe { libc::tcsetattr(fd, libc::TCSANOW, (*QUIET_TERMINAL.0.get()).as_ptr()) };
     }
 }
 
@@ -221,16 +233,29 @@ fn read_without_echo(prompt: &str) -> Option<String> {
     }
     // SAFETY: `tcgetattr` succeeded, so `before` is initialized.
     let before = unsafe { before.assume_init() };
-    // SAFETY: no handler is installed yet and `TTY_FD` is still -1, so nothing reads this.
-    unsafe { (*SAVED_TERMINAL.0.get()).write(before) };
+    let mut quiet = before;
+    quiet.c_lflag &= !libc::ECHO;
+    // SAFETY: no handler is installed yet and `TTY_FD` is still -1, so nothing reads these.
+    unsafe {
+        (*SAVED_TERMINAL.0.get()).write(before);
+        (*QUIET_TERMINAL.0.get()).write(quiet);
+    }
     TTY_FD.store(fd, Ordering::Release);
 
     let handler = restore_echo_and_die as extern "C" fn(libc::c_int) as libc::sighandler_t;
     // SAFETY: installs a handler that only makes async-signal-safe calls, and keeps the old ones.
     let previous = ENDING_SIGNALS.map(|signal| unsafe { libc::signal(signal, handler) });
+    let resume = quiet_again as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: as above. Ctrl-Z is ignored while the prompt is up, because stopping here is what
+    // lets a shell turn echo back on. `SIGTTOU` is ignored so restoring works from the background.
+    let (old_stop, old_output, old_continue) = unsafe {
+        (
+            libc::signal(libc::SIGTSTP, libc::SIG_IGN),
+            libc::signal(libc::SIGTTOU, libc::SIG_IGN),
+            libc::signal(libc::SIGCONT, resume),
+        )
+    };
 
-    let mut quiet = before;
-    quiet.c_lflag &= !libc::ECHO;
     let line = (&tty)
         .write_all(prompt.as_bytes())
         .ok()
@@ -246,6 +271,12 @@ fn read_without_echo(prompt: &str) -> Option<String> {
     for (signal, old) in ENDING_SIGNALS.into_iter().zip(previous) {
         // SAFETY: puts back what `signal` returned above.
         unsafe { libc::signal(signal, old) };
+    }
+    // SAFETY: the same.
+    unsafe {
+        libc::signal(libc::SIGTSTP, old_stop);
+        libc::signal(libc::SIGTTOU, old_output);
+        libc::signal(libc::SIGCONT, old_continue);
     }
     TTY_FD.store(-1, Ordering::Release);
     let _ = (&tty).write_all(b"\n");
@@ -789,19 +820,19 @@ mod tests {
         std::thread::sleep(Duration::from_millis(150));
         // The terminal's suspend character, Ctrl-Z, not a direct kill.
         write_pty(primary_fd, b"\x1a");
-        let suspended = wait_for(primary_fd, &mut seen, b"suspended", Duration::from_secs(3));
-        assert!(
-            suspended,
-            "zsh did not suspend the prompt: {}",
-            String::from_utf8_lossy(&seen)
-        );
-        write_pty(primary_fd, b"fg\n");
-        let continued = wait_for(primary_fd, &mut seen, b"continued", Duration::from_secs(3));
-        assert!(
-            continued,
-            "zsh did not continue the prompt: {}",
-            String::from_utf8_lossy(&seen)
-        );
+        // Changed from requiring a suspension: the fix ignores Ctrl-Z while the prompt is up, so
+        // usually there's none. If a shell suspends it anyway, this still resumes it, and the
+        // check below on what got echoed is unchanged.
+        let suspended = wait_for(primary_fd, &mut seen, b"suspended", Duration::from_secs(1));
+        if suspended {
+            write_pty(primary_fd, b"fg\n");
+            let continued = wait_for(primary_fd, &mut seen, b"continued", Duration::from_secs(3));
+            assert!(
+                continued,
+                "zsh did not continue the prompt: {}",
+                String::from_utf8_lossy(&seen)
+            );
+        }
         let password = b"s3cret-password\n";
         write_pty(primary_fd, password);
         let mut after = Vec::new();
