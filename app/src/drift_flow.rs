@@ -709,4 +709,159 @@ mod tests {
         world.follow(TEXT, false);
         assert!(following(world.dir.path()).unwrap().ever_saved);
     }
+
+    // Review of PR #43, round 1. Each of these fails on the reviewed commit.
+
+    /// GitHub comes back, holding exactly these files.
+    fn github_holds(world: &mut World, files: &[(&str, &str)]) {
+        let gh = FakeGitHub::new();
+        gh.sign_in("example-you", 42);
+        gh.on_git("rev-parse", Reply::ok(format!("{PUSHED}\n")));
+        gh.add_repo(
+            "example-you",
+            CONFIG_REPO_NAME,
+            RepoShape::private("main", SHA),
+        );
+        let canonical: Vec<(String, String)> = files
+            .iter()
+            .map(|(path, text)| {
+                let config = Config::parse(text.as_bytes()).unwrap();
+                ((*path).to_string(), config.to_canonical_json())
+            })
+            .collect();
+        for (path, text) in &canonical {
+            gh.add_file("example-you", CONFIG_REPO_NAME, SHA, path, text.as_bytes());
+        }
+        gh.set_git_files(
+            "checkout",
+            canonical
+                .iter()
+                .map(|(path, text)| (path.as_str(), text.as_str()))
+                .collect(),
+        );
+        world.gh = gh;
+    }
+
+    #[test]
+    fn review_a_second_save_while_offline_keeps_the_first_one_waiting() {
+        const TWO: &str = r#"{"schemaVersion":1,"name":"My Mac","settings":{"dock.autohide":true,"keyboard.key-repeat":2}}"#;
+        let world = World::new();
+        world.follow(TWO, true);
+        world.on_github(TWO);
+        world.remember("keyboard.key-repeat", json!(2));
+        world.remember("dock.autohide", json!(true));
+        world.mac_says("read NSGlobalDomain KeyRepeat", Reply::ok("6\n"));
+        world.mac_says("read com.apple.dock autohide", Reply::ok("0\n"));
+        world.nothing_else_here();
+        let rows = check(&world.deps()).report.rows;
+        let row = |id: &str| rows.iter().find(|row| row.id == id).unwrap().clone();
+        world.gh.go_offline();
+        carry_out(
+            &world.deps(),
+            &[(row("keyboard.key-repeat"), Choice::Adopt)],
+        );
+        carry_out(&world.deps(), &[(row("dock.autohide"), Choice::Adopt)]);
+        let waiting: Vec<String> = world
+            .record()
+            .waiting_saves
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect();
+        assert!(
+            waiting.contains(&"keyboard.key-repeat".to_string())
+                && waiting.contains(&"dock.autohide".to_string()),
+            "the person saved both while offline, and only these are waiting: {waiting:?}"
+        );
+    }
+
+    #[test]
+    fn review_a_waiting_save_does_not_go_into_a_config_followed_later() {
+        const WORK: &str =
+            r#"{"schemaVersion":1,"name":"Work","settings":{"keyboard.key-repeat":2}}"#;
+        const HOME: &str =
+            r#"{"schemaVersion":1,"name":"Home","settings":{"keyboard.key-repeat":2}}"#;
+        let mut world = World::new();
+        world.follow(WORK, true);
+        github_holds(&mut world, &[("configs/work.json", WORK)]);
+        world.remember("keyboard.key-repeat", json!(2));
+        world.mac_says("read NSGlobalDomain KeyRepeat", Reply::ok("6\n"));
+        world.nothing_else_here();
+        let row = check(&world.deps()).report.rows[0].clone();
+        world.gh.go_offline();
+        carry_out(&world.deps(), &[(row, Choice::Adopt)]);
+        assert_eq!(world.record().waiting_saves.len(), 1, "saved for Work");
+
+        // Later, a Run or a save of another Config, and GitHub is back.
+        world.follow(HOME, true);
+        github_holds(
+            &mut world,
+            &[("configs/work.json", WORK), ("configs/home.json", HOME)],
+        );
+        send_waiting(&world.deps());
+        assert_eq!(
+            world.pushes(),
+            0,
+            "Send to GitHub wrote a save reviewed for Work into configs/home.json: {:?}",
+            world.gh.file_at_git("add", "configs/home.json")
+        );
+        assert_eq!(
+            world.record().last_applied["keyboard.key-repeat"].value,
+            json!(2),
+            "GitHub's Work Config doesn't have this"
+        );
+    }
+
+    #[test]
+    fn review_a_config_read_from_github_stops_changes_once_its_file_is_gone() {
+        // A second Mac imports its Config from GitHub and Runs it, which follows it unsaved.
+        let mut world = World::new();
+        world.follow(TEXT, false);
+        github_holds(&mut world, &[(PATH, TEXT)]);
+        world.remember("keyboard.key-repeat", json!(2));
+        world.mac_says("read NSGlobalDomain KeyRepeat", Reply::ok("6\n"));
+        world.nothing_else_here();
+        let checked = check(&world.deps());
+        assert_eq!(checked.status, Status::Current, "GitHub has it");
+        let row = checked.report.rows[0].clone();
+
+        github_holds(&mut world, &[]);
+        let carried = carry_out(&world.deps(), &[(row, Choice::Adopt)]);
+        assert_eq!(
+            world.pushes(),
+            0,
+            "the file was deleted on GitHub and this put it back: {:?}",
+            carried.notes
+        );
+        assert_eq!(
+            check(&world.deps()).status,
+            Status::Missing {
+                path: PATH.to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn review_send_settles_a_waiting_save_github_already_has() {
+        const SIX: &str =
+            r#"{"schemaVersion":1,"name":"My Mac","settings":{"keyboard.key-repeat":6}}"#;
+        let mut world = World::new();
+        let row = world.key_repeat_moved().report.rows[0].clone();
+        world.gh.go_offline();
+        carry_out(&world.deps(), &[(row, Choice::Adopt)]);
+        assert_eq!(world.record().waiting_saves.len(), 1);
+
+        // The push landed before the app died, or another Mac sent the same value.
+        github_holds(&mut world, &[(PATH, SIX)]);
+        let notes = send_waiting(&world.deps());
+        assert_eq!(
+            notes,
+            Vec::<String>::new(),
+            "GitHub and this Mac both say 6, and the person is told it wasn't saved"
+        );
+        assert!(world.record().waiting_saves.is_empty(), "it's on GitHub");
+        assert_eq!(
+            world.record().last_applied["keyboard.key-repeat"].value,
+            json!(6)
+        );
+    }
 }
