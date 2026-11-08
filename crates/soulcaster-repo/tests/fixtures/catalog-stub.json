@@ -1,0 +1,1615 @@
+{
+  "_prototype": "Illustrative only. It holds what examples/ references, in the Item lifecycle's recipe format plus five fields this draft owns: renamedTo, deprecated, retired, coversPackages and conflictsWith. check.py lints it, and validates it against the lifecycle's recipe schema with those five fields removed. Retired Items keep their install and detection data forever.",
+  "schemaVersion": 1,
+  "recipes": [
+    {
+      "id": "aerospace",
+      "kind": "app",
+      "title": "AeroSpace",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-cask",
+          "name": "nikitabobko/tap/aerospace"
+        }
+      ],
+      "facts": [
+        {
+          "id": "accessibility",
+          "label": "Accessibility permission",
+          "probe": {
+            "type": "unknowable",
+            "reason": "macOS 27 doesn't let apps read the privacy database."
+          }
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-cask",
+          "name": "nikitabobko/tap/aerospace"
+        },
+        {
+          "type": "needs-you",
+          "id": "grant-accessibility",
+          "text": "Allow AeroSpace under Accessibility in System Settings.",
+          "link": "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility",
+          "completion": {
+            "confirm": true
+          }
+        }
+      ],
+      "coversPackages": [
+        "cask:nikitabobko/tap/aerospace"
+      ]
+    },
+    {
+      "id": "android-emulator",
+      "kind": "cli",
+      "title": "Android emulator",
+      "requires": [
+        "android-sdk"
+      ],
+      "checks": [
+        {
+          "type": "file",
+          "path": "~/Library/Android/sdk/emulator/package.xml"
+        }
+      ],
+      "steps": [
+        {
+          "type": "sdkmanager",
+          "packages": [
+            {
+              "literal": "emulator"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "android-sdk",
+      "kind": "cli",
+      "title": "Android SDK",
+      "requires": [
+        "homebrew",
+        "openjdk"
+      ],
+      "checks": [
+        {
+          "type": "brew-cask",
+          "name": "android-commandlinetools"
+        },
+        {
+          "type": "file",
+          "path": "~/Library/Android/sdk/platform-tools/package.xml"
+        },
+        {
+          "type": "file",
+          "path": "~/Library/Android/sdk/platforms/android-35/package.xml"
+        },
+        {
+          "type": "file",
+          "path": "~/Library/Android/sdk/build-tools/35.0.0/package.xml"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-cask",
+          "name": "android-commandlinetools"
+        },
+        {
+          "type": "accept-license",
+          "id": "android-licenses",
+          "license": "android-sdk",
+          "text": "Read and accept the Android SDK licenses.",
+          "link": "https://developer.android.com/studio/terms",
+          "unless": {
+            "type": "file",
+            "path": "~/Library/Android/sdk/licenses/android-sdk-license"
+          }
+        },
+        {
+          "type": "sdkmanager",
+          "packages": [
+            {
+              "literal": "platform-tools"
+            },
+            {
+              "literal": "platforms;android-35"
+            },
+            {
+              "literal": "build-tools;35.0.0"
+            }
+          ]
+        }
+      ],
+      "coversPackages": [
+        "cask:android-commandlinetools"
+      ]
+    },
+    {
+      "id": "claude-code",
+      "kind": "cli",
+      "title": "Claude Code",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-cask",
+          "name": "claude-code"
+        }
+      ],
+      "facts": [
+        {
+          "id": "signed-in",
+          "label": "Signed in",
+          "probe": {
+            "type": "unknowable",
+            "reason": "Agent CLIs are install-only, so Soulcaster doesn't run them to check."
+          }
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-cask",
+          "name": "claude-code"
+        }
+      ],
+      "notes": [
+        "Installed only. Sign in when you first open it."
+      ],
+      "coversPackages": [
+        "cask:claude-code"
+      ]
+    },
+    {
+      "id": "codex",
+      "kind": "cli",
+      "title": "Codex",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-cask",
+          "name": "codex"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-cask",
+          "name": "codex"
+        }
+      ],
+      "coversPackages": [
+        "cask:codex"
+      ],
+      "facts": [
+        {
+          "id": "signed-in",
+          "label": "Signed in",
+          "probe": {
+            "type": "unknowable",
+            "reason": "Agent CLIs are install-only, so Soulcaster doesn't run them to check."
+          }
+        }
+      ],
+      "notes": [
+        "Installed only. Sign in when you first open it."
+      ]
+    },
+    {
+      "id": "command-line-tools",
+      "kind": "cli",
+      "title": "Command Line Tools",
+      "base": true,
+      "checks": [
+        {
+          "type": "builtin",
+          "name": "command-line-tools"
+        }
+      ],
+      "steps": [
+        {
+          "type": "builtin",
+          "name": "command-line-tools",
+          "admin": true
+        }
+      ]
+    },
+    {
+      "id": "dock.apps",
+      "kind": "setting",
+      "title": "Dock contents",
+      "valueType": "string-list",
+      "stores": [
+        {
+          "type": "builtin",
+          "name": "dock-tiles"
+        }
+      ],
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock",
+      "pattern": "^(?:/System/Applications|/Applications|~/Applications)(?:/[^/.][^/]*)+\\.app$",
+      "requires": [
+        "dockutil"
+      ]
+    },
+    {
+      "id": "dock.autohide",
+      "kind": "setting",
+      "title": "Automatically hide the Dock",
+      "valueType": "boolean",
+      "unsetMeans": false,
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "autohide",
+          "storedType": "bool"
+        }
+      ],
+      "effect": "restart-dock",
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      }
+    },
+    {
+      "id": "dock.position",
+      "kind": "setting",
+      "title": "Dock position",
+      "valueType": "string",
+      "values": [
+        "bottom",
+        "left",
+        "right"
+      ],
+      "unsetMeans": "bottom",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "orientation",
+          "storedType": "string"
+        }
+      ],
+      "effect": "restart-dock",
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      }
+    },
+    {
+      "id": "dock.show-recents",
+      "kind": "setting",
+      "title": "Show suggested and recent apps",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "show-recents",
+          "storedType": "bool"
+        }
+      ],
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock",
+      "unsetMeans": true
+    },
+    {
+      "id": "dockutil",
+      "kind": "cli",
+      "title": "dockutil",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-formula",
+          "name": "dockutil"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-formula",
+          "name": "dockutil"
+        }
+      ],
+      "coversPackages": [
+        "formula:dockutil"
+      ]
+    },
+    {
+      "id": "example-deprecated-tool",
+      "kind": "cli",
+      "title": "Example deprecated tool",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-formula",
+          "name": "example-deprecated-formula"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-formula",
+          "name": "example-deprecated-formula"
+        }
+      ],
+      "coversPackages": [
+        "formula:example-deprecated-formula"
+      ],
+      "deprecated": {
+        "message": "Upstream has stopped maintaining this.",
+        "replacedBy": "ghostty"
+      }
+    },
+    {
+      "id": "example-old-name",
+      "renamedTo": "ghostty"
+    },
+    {
+      "id": "example-retired-tool",
+      "kind": "cli",
+      "title": "Example retired tool",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-formula",
+          "name": "example-retired-formula"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-formula",
+          "name": "example-retired-formula"
+        }
+      ],
+      "coversPackages": [
+        "formula:example-retired-formula"
+      ],
+      "retired": {
+        "message": "The vendor shut this down.",
+        "replacedBy": "ghostty"
+      }
+    },
+    {
+      "id": "example.old-setting",
+      "renamedTo": "dock.show-recents"
+    },
+    {
+      "id": "example.retired-setting",
+      "kind": "setting",
+      "title": "Example retired setting",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "example-retired",
+          "storedType": "bool"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock",
+      "retired": {
+        "message": "macOS removed this.",
+        "replacedBy": "dock.show-recents"
+      }
+    },
+    {
+      "id": "finder.default-view",
+      "kind": "setting",
+      "title": "Finder default view",
+      "valueType": "string",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.finder",
+          "key": "FXPreferredViewStyle",
+          "storedType": "string",
+          "encode": {
+            "column": "clmv",
+            "gallery": "glyv",
+            "icon": "icnv",
+            "list": "Nlsv"
+          }
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-finder",
+      "values": [
+        "column",
+        "gallery",
+        "icon",
+        "list"
+      ]
+    },
+    {
+      "id": "finder.info-panes-expanded",
+      "kind": "setting",
+      "title": "Expanded Get Info sections",
+      "valueType": "string-list",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.finder",
+          "key": "FXInfoPanesExpanded",
+          "storedType": "dict",
+          "encode": {
+            "general": "General",
+            "open-with": "OpenWith",
+            "privileges": "Privileges"
+          }
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-finder",
+      "values": [
+        "general",
+        "open-with",
+        "privileges"
+      ]
+    },
+    {
+      "id": "finder.new-window-target",
+      "kind": "setting",
+      "title": "New Finder window opens",
+      "valueType": "string",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.finder",
+          "key": "NewWindowTarget",
+          "storedType": "string",
+          "encode": {
+            "documents": "PfDo"
+          }
+        },
+        {
+          "type": "defaults",
+          "domain": "com.apple.finder",
+          "key": "NewWindowTargetPath",
+          "storedType": "string",
+          "encode": {
+            "documents": "file://<home>/Documents/"
+          }
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-finder",
+      "values": [
+        "documents"
+      ]
+    },
+    {
+      "id": "finder.search-scope",
+      "kind": "setting",
+      "title": "Finder search scope",
+      "valueType": "string",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.finder",
+          "key": "FXDefaultSearchScope",
+          "storedType": "string",
+          "encode": {
+            "current-folder": "SCcf"
+          }
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-finder",
+      "values": [
+        "current-folder"
+      ]
+    },
+    {
+      "id": "finder.show-library-folder",
+      "kind": "setting",
+      "title": "Show the Library folder",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "builtin",
+          "name": "library-visible"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "none"
+    },
+    {
+      "id": "finder.show-path-bar",
+      "kind": "setting",
+      "title": "Show the path bar",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.finder",
+          "key": "ShowPathbar",
+          "storedType": "bool"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-finder"
+    },
+    {
+      "id": "finder.show-recent-tags",
+      "kind": "setting",
+      "title": "Show recent tags",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.finder",
+          "key": "ShowRecentTags",
+          "storedType": "bool"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-finder"
+    },
+    {
+      "id": "finder.show-status-bar",
+      "kind": "setting",
+      "title": "Show the status bar",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.finder",
+          "key": "ShowStatusBar",
+          "storedType": "bool"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-finder"
+    },
+    {
+      "id": "finder.sidebar-favorites",
+      "kind": "setting",
+      "title": "Finder sidebar favorites",
+      "valueType": "string-list",
+      "stores": [
+        {
+          "type": "builtin",
+          "name": "sidebar-favorites"
+        }
+      ],
+      "evidence": {
+        "group": "broken",
+        "confirmedOn": []
+      },
+      "effect": "none",
+      "pattern": "^~(?:/\\.?[A-Za-z0-9_+@-][A-Za-z0-9._+@ -]*)+$",
+      "notes": [
+        "Skipped: sfltool add-item no longer works on macOS 27."
+      ]
+    },
+    {
+      "id": "gh",
+      "kind": "cli",
+      "title": "GitHub CLI",
+      "base": true,
+      "requires": [
+        "homebrew"
+      ],
+      "bootstrap": {
+        "version": "2.103.3",
+        "url": "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_macOS_arm64.zip",
+        "sha256": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062",
+        "signedBy": "VEKTX9H2N7",
+        "binary": "gh_2.103.3_macOS_arm64/bin/gh"
+      },
+      "checks": [
+        {
+          "type": "brew-formula",
+          "name": "gh"
+        },
+        {
+          "type": "builtin",
+          "name": "gh-handed-off"
+        }
+      ],
+      "facts": [
+        {
+          "id": "signed-in",
+          "label": "Signed in to GitHub",
+          "probe": {
+            "type": "builtin",
+            "name": "github-signed-in"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-formula",
+          "name": "gh"
+        },
+        {
+          "type": "builtin",
+          "name": "gh-hand-off"
+        }
+      ],
+      "coversPackages": [
+        "formula:gh"
+      ]
+    },
+    {
+      "id": "ghostty",
+      "kind": "app",
+      "title": "Ghostty",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-cask",
+          "name": "ghostty"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-cask",
+          "name": "ghostty"
+        }
+      ],
+      "coversPackages": [
+        "cask:ghostty"
+      ]
+    },
+    {
+      "id": "git-identity",
+      "kind": "machine-values",
+      "title": "Git identity",
+      "requires": [
+        "command-line-tools"
+      ],
+      "values": [
+        {
+          "name": "git.user.name",
+          "label": "Name for Git commits",
+          "store": {
+            "type": "git-config",
+            "key": "user.name"
+          }
+        },
+        {
+          "name": "git.user.email",
+          "label": "Email for Git commits",
+          "store": {
+            "type": "git-config",
+            "key": "user.email"
+          }
+        }
+      ]
+    },
+    {
+      "id": "git.default-branch",
+      "kind": "setting",
+      "title": "Default Git branch",
+      "valueType": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "requires": [
+        "command-line-tools"
+      ],
+      "stores": [
+        {
+          "type": "git-config",
+          "key": "init.defaultBranch"
+        }
+      ],
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      }
+    },
+    {
+      "id": "git.excludes-file",
+      "kind": "setting",
+      "title": "Global Git ignore file",
+      "valueType": "string",
+      "stores": [
+        {
+          "type": "git-config",
+          "key": "core.excludesfile"
+        }
+      ],
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      },
+      "pattern": "^~(?:/\\.?[A-Za-z0-9_+@-][A-Za-z0-9._+@ -]*)+$",
+      "requires": [
+        "command-line-tools"
+      ]
+    },
+    {
+      "id": "git.pull-rebase",
+      "kind": "setting",
+      "title": "Rebase on git pull",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "git-config",
+          "key": "pull.rebase"
+        }
+      ],
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      },
+      "requires": [
+        "command-line-tools"
+      ]
+    },
+    {
+      "id": "git.push-auto-setup-remote",
+      "kind": "setting",
+      "title": "Set up the remote on first push",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "git-config",
+          "key": "push.autoSetupRemote"
+        }
+      ],
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      },
+      "requires": [
+        "command-line-tools"
+      ]
+    },
+    {
+      "id": "git.rerere",
+      "kind": "setting",
+      "title": "Reuse recorded conflict resolutions",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "git-config",
+          "key": "rerere.enabled"
+        }
+      ],
+      "evidence": {
+        "group": "documented",
+        "confirmedOn": []
+      },
+      "requires": [
+        "command-line-tools"
+      ]
+    },
+    {
+      "id": "homebrew",
+      "kind": "cli",
+      "title": "Homebrew",
+      "base": true,
+      "requires": [
+        "command-line-tools"
+      ],
+      "checks": [
+        {
+          "type": "builtin",
+          "name": "homebrew"
+        }
+      ],
+      "steps": [
+        {
+          "type": "pkg-install",
+          "url": "https://github.com/Homebrew/brew/releases/download/7.0.12/Homebrew.pkg",
+          "sha256": "a9825310dce8d94bc97f70140700089183c3a894b1048501d933865d7c2441bd",
+          "signedBy": "927JGANW46"
+        }
+      ]
+    },
+    {
+      "id": "hot-corners.bottom-left",
+      "kind": "setting",
+      "title": "Hot corner: bottom left",
+      "valueType": "string",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "wvous-bl-corner",
+          "storedType": "int",
+          "encode": {
+            "none": 1,
+            "mission-control": 2,
+            "application-windows": 3,
+            "desktop": 4,
+            "start-screensaver": 5,
+            "disable-screensaver": 6,
+            "display-sleep": 10,
+            "launchpad": 11,
+            "notification-center": 12,
+            "lock-screen": 13,
+            "quick-note": 14
+          }
+        },
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "wvous-bl-modifier",
+          "storedType": "int",
+          "encode": {
+            "none": 0,
+            "mission-control": 0,
+            "application-windows": 0,
+            "desktop": 0,
+            "start-screensaver": 0,
+            "disable-screensaver": 0,
+            "display-sleep": 0,
+            "launchpad": 0,
+            "notification-center": 0,
+            "lock-screen": 0,
+            "quick-note": 0
+          }
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock",
+      "values": [
+        "none",
+        "mission-control",
+        "application-windows",
+        "desktop",
+        "start-screensaver",
+        "disable-screensaver",
+        "display-sleep",
+        "launchpad",
+        "notification-center",
+        "lock-screen",
+        "quick-note"
+      ]
+    },
+    {
+      "id": "hot-corners.bottom-right",
+      "kind": "setting",
+      "title": "Hot corner: bottom right",
+      "valueType": "string",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "wvous-br-corner",
+          "storedType": "int",
+          "encode": {
+            "none": 1,
+            "mission-control": 2,
+            "application-windows": 3,
+            "desktop": 4,
+            "start-screensaver": 5,
+            "disable-screensaver": 6,
+            "display-sleep": 10,
+            "launchpad": 11,
+            "notification-center": 12,
+            "lock-screen": 13,
+            "quick-note": 14
+          }
+        },
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "wvous-br-modifier",
+          "storedType": "int",
+          "encode": {
+            "none": 0,
+            "mission-control": 0,
+            "application-windows": 0,
+            "desktop": 0,
+            "start-screensaver": 0,
+            "disable-screensaver": 0,
+            "display-sleep": 0,
+            "launchpad": 0,
+            "notification-center": 0,
+            "lock-screen": 0,
+            "quick-note": 0
+          }
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock",
+      "values": [
+        "none",
+        "mission-control",
+        "application-windows",
+        "desktop",
+        "start-screensaver",
+        "disable-screensaver",
+        "display-sleep",
+        "launchpad",
+        "notification-center",
+        "lock-screen",
+        "quick-note"
+      ]
+    },
+    {
+      "id": "hot-corners.top-left",
+      "kind": "setting",
+      "title": "Hot corner: top left",
+      "valueType": "string",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "wvous-tl-corner",
+          "storedType": "int",
+          "encode": {
+            "none": 1,
+            "mission-control": 2,
+            "application-windows": 3,
+            "desktop": 4,
+            "start-screensaver": 5,
+            "disable-screensaver": 6,
+            "display-sleep": 10,
+            "launchpad": 11,
+            "notification-center": 12,
+            "lock-screen": 13,
+            "quick-note": 14
+          }
+        },
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "wvous-tl-modifier",
+          "storedType": "int",
+          "encode": {
+            "none": 0,
+            "mission-control": 0,
+            "application-windows": 0,
+            "desktop": 0,
+            "start-screensaver": 0,
+            "disable-screensaver": 0,
+            "display-sleep": 0,
+            "launchpad": 0,
+            "notification-center": 0,
+            "lock-screen": 0,
+            "quick-note": 0
+          }
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock",
+      "values": [
+        "none",
+        "mission-control",
+        "application-windows",
+        "desktop",
+        "start-screensaver",
+        "disable-screensaver",
+        "display-sleep",
+        "launchpad",
+        "notification-center",
+        "lock-screen",
+        "quick-note"
+      ]
+    },
+    {
+      "id": "hot-corners.top-right",
+      "kind": "setting",
+      "title": "Hot corner: top right",
+      "valueType": "string",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "wvous-tr-corner",
+          "storedType": "int",
+          "encode": {
+            "none": 1,
+            "mission-control": 2,
+            "application-windows": 3,
+            "desktop": 4,
+            "start-screensaver": 5,
+            "disable-screensaver": 6,
+            "display-sleep": 10,
+            "launchpad": 11,
+            "notification-center": 12,
+            "lock-screen": 13,
+            "quick-note": 14
+          }
+        },
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "wvous-tr-modifier",
+          "storedType": "int",
+          "encode": {
+            "none": 0,
+            "mission-control": 0,
+            "application-windows": 0,
+            "desktop": 0,
+            "start-screensaver": 0,
+            "disable-screensaver": 0,
+            "display-sleep": 0,
+            "launchpad": 0,
+            "notification-center": 0,
+            "lock-screen": 0,
+            "quick-note": 0
+          }
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock",
+      "values": [
+        "none",
+        "mission-control",
+        "application-windows",
+        "desktop",
+        "start-screensaver",
+        "disable-screensaver",
+        "display-sleep",
+        "launchpad",
+        "notification-center",
+        "lock-screen",
+        "quick-note"
+      ]
+    },
+    {
+      "id": "junie",
+      "kind": "cli",
+      "title": "Junie",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-cask",
+          "name": "junie"
+        }
+      ],
+      "facts": [
+        {
+          "id": "signed-in",
+          "label": "Signed in",
+          "probe": {
+            "type": "unknowable",
+            "reason": "Junie has no documented sign-in check."
+          }
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-cask",
+          "name": "junie"
+        }
+      ],
+      "notes": [
+        "Installed only. Sign in when you first open it."
+      ],
+      "coversPackages": [
+        "cask:junie",
+        "formula:jetbrains/junie/junie"
+      ]
+    },
+    {
+      "id": "keyboard.initial-key-repeat",
+      "kind": "setting",
+      "title": "Delay until key repeat",
+      "valueType": "integer",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "NSGlobalDomain",
+          "key": "InitialKeyRepeat",
+          "storedType": "int"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "log-out",
+      "minimum": 10,
+      "maximum": 120
+    },
+    {
+      "id": "keyboard.key-repeat",
+      "kind": "setting",
+      "title": "Key repeat rate",
+      "valueType": "integer",
+      "minimum": 1,
+      "maximum": 120,
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "NSGlobalDomain",
+          "key": "KeyRepeat",
+          "storedType": "int"
+        }
+      ],
+      "effect": "log-out",
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      }
+    },
+    {
+      "id": "keyboard.press-and-hold",
+      "kind": "setting",
+      "title": "Press and hold for accents",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "NSGlobalDomain",
+          "key": "ApplePressAndHoldEnabled",
+          "storedType": "bool"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-affected-apps"
+    },
+    {
+      "id": "kotlin",
+      "kind": "cli",
+      "title": "Kotlin",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-formula",
+          "name": "kotlin"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-formula",
+          "name": "kotlin"
+        }
+      ],
+      "coversPackages": [
+        "formula:kotlin"
+      ]
+    },
+    {
+      "id": "kotlin-lsp",
+      "kind": "cli",
+      "title": "Kotlin Language Server",
+      "checks": [
+        {
+          "type": "managed-tool",
+          "tool": "kotlin-lsp",
+          "version": "263.7084.0",
+          "file": "kotlin-server-263.7084.0/build.txt"
+        },
+        {
+          "type": "tool-version",
+          "path": "~/.local/bin/kotlin-lsp",
+          "flag": "--version"
+        }
+      ],
+      "steps": [
+        {
+          "type": "download",
+          "tool": "kotlin-lsp",
+          "version": "263.7084.0",
+          "url": "https://download.jetbrains.com/language-server/kotlin-server/263.7084.0/kotlin-server-263.7084.0-aarch64.sit",
+          "sha256": "b403bf8a54bd458e3ba6731cf8abb3340be08b439c03576dfc02b13faf3694b8",
+          "archive": "zip",
+          "signedBy": "2ZEFAR8TH3",
+          "signedFile": "kotlin-server-263.7084.0/bin/intellij-server",
+          "links": [
+            {
+              "name": "kotlin-lsp",
+              "target": "kotlin-server-263.7084.0/bin/intellij-server"
+            }
+          ]
+        }
+      ],
+      "notes": [
+        "Installed under Soulcaster's tools folder, no longer inside /opt/homebrew."
+      ]
+    },
+    {
+      "id": "menu-bar.extras",
+      "kind": "setting",
+      "title": "Menu bar extras",
+      "valueType": "string-list",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.systemuiserver",
+          "key": "menuExtras",
+          "storedType": "string-array",
+          "encode": {
+            "airport": "AirPort.menu",
+            "battery": "Battery.menu",
+            "bluetooth": "Bluetooth.menu",
+            "clock": "Clock.menu",
+            "volume": "Volume.menu"
+          }
+        }
+      ],
+      "evidence": {
+        "group": "broken",
+        "confirmedOn": []
+      },
+      "effect": "restart-systemuiserver",
+      "values": [
+        "airport",
+        "battery",
+        "bluetooth",
+        "clock",
+        "volume"
+      ],
+      "notes": [
+        "Skipped: most of these paths no longer exist on macOS 27."
+      ]
+    },
+    {
+      "id": "menu-bar.show-spotlight",
+      "kind": "setting",
+      "title": "Show Spotlight in the menu bar",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.Spotlight",
+          "key": "MenuItemHidden",
+          "storedType": "bool",
+          "encode": {
+            "true": false,
+            "false": true
+          }
+        }
+      ],
+      "effect": "restart-controlcenter",
+      "evidence": {
+        "group": "unconfirmed",
+        "confirmedOn": []
+      }
+    },
+    {
+      "id": "menu-bar.show-weather",
+      "kind": "setting",
+      "title": "Show Weather in the menu bar",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.controlcenter",
+          "key": "NSStatusItem Visible com.apple.WeatherWidget",
+          "storedType": "bool"
+        },
+        {
+          "type": "defaults",
+          "domain": "com.apple.controlcenter",
+          "key": "NSStatusItem Preferred Position com.apple.WeatherWidget",
+          "storedType": "int",
+          "encode": {
+            "true": 100,
+            "false": 100
+          }
+        }
+      ],
+      "evidence": {
+        "group": "unconfirmed",
+        "confirmedOn": []
+      },
+      "effect": "restart-controlcenter"
+    },
+    {
+      "id": "mission-control.group-windows-by-app",
+      "kind": "setting",
+      "title": "Group windows by app",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "expose-group-apps",
+          "storedType": "bool"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock"
+    },
+    {
+      "id": "opencode",
+      "kind": "cli",
+      "title": "opencode",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-formula",
+          "name": "opencode"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-formula",
+          "name": "opencode"
+        }
+      ],
+      "coversPackages": [
+        "formula:opencode"
+      ],
+      "facts": [
+        {
+          "id": "signed-in",
+          "label": "Signed in",
+          "probe": {
+            "type": "unknowable",
+            "reason": "Agent CLIs are install-only, so Soulcaster doesn't run them to check."
+          }
+        }
+      ],
+      "notes": [
+        "Installed only. Sign in when you first open it."
+      ],
+      "conflictsWith": [
+        "formula:anomalyco/tap/opencode",
+        "formula:anomalyco/tap/opencode-v2"
+      ]
+    },
+    {
+      "id": "openjdk",
+      "kind": "cli",
+      "title": "OpenJDK",
+      "requires": [
+        "homebrew"
+      ],
+      "checks": [
+        {
+          "type": "brew-formula",
+          "name": "openjdk"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-formula",
+          "name": "openjdk"
+        }
+      ],
+      "coversPackages": [
+        "formula:openjdk"
+      ]
+    },
+    {
+      "id": "spaces.auto-rearrange",
+      "kind": "setting",
+      "title": "Rearrange Spaces by recent use",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.dock",
+          "key": "mru-spaces",
+          "storedType": "bool"
+        }
+      ],
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      },
+      "effect": "restart-dock"
+    },
+    {
+      "id": "tailscale",
+      "kind": "app",
+      "title": "Tailscale",
+      "requires": [
+        "homebrew"
+      ],
+      "conflicts": [
+        {
+          "probe": {
+            "type": "app-bundle",
+            "bundleId": "io.tailscale.ipn.macos",
+            "path": "/Applications/Tailscale.app"
+          },
+          "message": "The App Store copy of Tailscale is installed. Remove it first, because the installer would stop to ask."
+        },
+        {
+          "probe": {
+            "type": "brew-formula",
+            "name": "tailscale"
+          },
+          "message": "The Homebrew tailscale formula is installed. Remove it first, because the installer would stop to ask."
+        }
+      ],
+      "checks": [
+        {
+          "type": "brew-cask",
+          "name": "tailscale-app"
+        },
+        {
+          "type": "pkg-receipt",
+          "pkgId": "com.tailscale.ipn.macsys"
+        }
+      ],
+      "steps": [
+        {
+          "type": "brew-cask",
+          "name": "tailscale-app",
+          "admin": true
+        }
+      ],
+      "notes": [
+        "Installed only. Open Tailscale to approve its system extension and sign in."
+      ],
+      "coversPackages": [
+        "cask:tailscale-app"
+      ],
+      "conflictsWith": [
+        "formula:tailscale"
+      ]
+    },
+    {
+      "id": "trackpad.tap-to-click",
+      "kind": "setting",
+      "title": "Tap to click",
+      "valueType": "boolean",
+      "stores": [
+        {
+          "type": "defaults",
+          "domain": "com.apple.AppleMultitouchTrackpad",
+          "key": "Clicking",
+          "storedType": "int",
+          "encode": {
+            "true": 1,
+            "false": 0
+          }
+        },
+        {
+          "type": "defaults",
+          "domain": "com.apple.driver.AppleBluetoothMultitouch.trackpad",
+          "key": "Clicking",
+          "storedType": "int",
+          "encode": {
+            "true": 1,
+            "false": 0
+          }
+        }
+      ],
+      "effect": "log-out",
+      "evidence": {
+        "group": "probable",
+        "confirmedOn": []
+      }
+    },
+    {
+      "id": "xcode",
+      "kind": "app",
+      "title": "Xcode",
+      "minMacOS": "26.6",
+      "checks": [
+        {
+          "type": "app-bundle",
+          "bundleId": "com.apple.dt.Xcode",
+          "path": "/Applications/Xcode.app"
+        },
+        {
+          "type": "builtin",
+          "name": "xcode-ready"
+        }
+      ],
+      "facts": [
+        {
+          "id": "app-store-sign-in",
+          "label": "Signed in to the App Store",
+          "probe": {
+            "type": "unknowable",
+            "reason": "Neither mas nor Apple's tools can report this."
+          }
+        },
+        {
+          "id": "xcode-account",
+          "label": "Apple Account added in Xcode",
+          "probe": {
+            "type": "unknowable",
+            "reason": "No documented command reports this."
+          }
+        }
+      ],
+      "steps": [
+        {
+          "type": "needs-you",
+          "id": "get-xcode",
+          "text": "Sign in to the App Store with your Apple Account and click Get on Xcode. This can take a while.",
+          "link": "macappstore://apps.apple.com/app/id497799835",
+          "completion": {
+            "until": {
+              "type": "app-bundle",
+              "bundleId": "com.apple.dt.Xcode",
+              "path": "/Applications/Xcode.app"
+            }
+          },
+          "unless": {
+            "type": "app-bundle",
+            "bundleId": "com.apple.dt.Xcode",
+            "path": "/Applications/Xcode.app"
+          }
+        },
+        {
+          "type": "accept-license",
+          "id": "xcode-license",
+          "license": "xcode",
+          "admin": true,
+          "text": "Read and accept the Xcode license.",
+          "link": "https://www.apple.com/legal/sla/",
+          "unless": {
+            "type": "builtin",
+            "name": "xcode-ready"
+          }
+        },
+        {
+          "type": "builtin",
+          "name": "xcode-first-launch",
+          "admin": true,
+          "unless": {
+            "type": "builtin",
+            "name": "xcode-ready"
+          }
+        }
+      ]
+    }
+  ]
+}

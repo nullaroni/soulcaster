@@ -218,7 +218,9 @@ impl<'de> Deserialize<'de> for Strict {
     }
 }
 
-fn strict_parse(bytes: &[u8]) -> Result<Value, String> {
+/// JSON with no duplicate key at any depth. serde_json would keep the last one, so anything that
+/// decides from a file reads it through this.
+pub fn strict_parse(bytes: &[u8]) -> Result<Value, String> {
     serde_json::from_slice::<Strict>(bytes)
         .map(|strict| strict.0)
         .map_err(|e| e.to_string())

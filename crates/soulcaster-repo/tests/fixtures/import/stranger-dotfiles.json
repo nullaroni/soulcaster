@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "Terminal setup from a blog post",
+  "items": [
+    "ghostty"
+  ],
+  "packages": {
+    "formulae": [
+      "fd",
+      "ripgrep"
+    ]
+  },
+  "settings": {
+    "dock.autohide": true,
+    "git.pull-rebase": true
+  },
+  "dotfiles": {
+    "repo": "example-stranger/dotfiles",
+    "links": {
+      "~/.config/nvim": "nvim",
+      "~/.config/starship.toml": "starship/starship.toml",
+      "~/.gitconfig": "git/gitconfig",
+      "~/.zshrc": "zsh/zshrc"
+    },
+    "installScript": "script/setup"
+  }
+}

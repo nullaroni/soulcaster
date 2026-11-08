@@ -1,6 +1,6 @@
 [package]
 name = "soulcaster-cli"
-description = "The plain Soulcaster CLI, on the same core as the app. For now it can validate a Config and print its plan."
+description = "The plain Soulcaster CLI, on the same core as the app. It can validate a Config, print its plan, Import one for review and Save one to GitHub."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -11,3 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 soulcaster-core.workspace = true
+soulcaster-repo.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

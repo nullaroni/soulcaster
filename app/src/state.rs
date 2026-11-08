@@ -24,6 +24,9 @@ pub enum Screen {
     Run,
     Finish,
     Drift,
+    Import,
+    Save,
+    Dotfiles,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -139,6 +142,9 @@ pub struct App {
     pub drift_applying: bool,
     pub show_untracked: bool,
 
+    // Save, Import and the Dotfiles Repo
+    pub repo: crate::repo_flow::RepoFlow,
+
     pub toast: Option<String>,
 }
 
@@ -187,6 +193,7 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         drift_password: TextEdit::new("").secure(),
         drift_applying: false,
         show_untracked: false,
+        repo: crate::repo_flow::RepoFlow::simulated(),
         toast: None,
     };
     app.rebuild_rows();

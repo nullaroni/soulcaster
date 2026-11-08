@@ -9,7 +9,7 @@ use crate::catalog::{Catalog, Entry, Lifecycle, ListingNeedKind, Lookup};
 use crate::config::{Config, SettingValue};
 use crate::event::PlanItem;
 use crate::lifecycle::{ItemId, SkipReason, Stage};
-use crate::lint::{DEFAULT_CLONE_LOCATION, Finding, FindingKind, lint};
+use crate::lint::{DEFAULT_CLONE_LOCATION, Finding, FindingKind, lint, refused_links};
 use crate::recipe::{InstallKind, InstallRecipe, Probe, Recipe, Step, Store, tap_of};
 
 /// Where an entry falls within its stage, from the lifecycle's Run order. Dotfiles links run after
@@ -327,6 +327,7 @@ fn package_recipe(key: &str, cask: bool, name: &str) -> Recipe {
 struct Builder<'a> {
     config: &'a Config,
     catalog: &'a Catalog,
+    clone_location: &'a str,
     entries: Vec<PlanEntry>,
     seen: BTreeSet<String>,
     skipped: Vec<SkippedEntry>,
@@ -337,7 +338,7 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(config: &'a Config, catalog: &'a Catalog, clone_location: &str) -> Self {
+    fn new(config: &'a Config, catalog: &'a Catalog, clone_location: &'a str) -> Self {
         let findings = lint(config, catalog, clone_location);
         let flagged = findings
             .iter()
@@ -346,6 +347,7 @@ impl<'a> Builder<'a> {
         Self {
             config,
             catalog,
+            clone_location,
             entries: Vec::new(),
             seen: BTreeSet::new(),
             skipped: Vec::new(),
@@ -659,10 +661,14 @@ impl<'a> Builder<'a> {
         if self.flagged.contains_key("dotfiles.repo") {
             return None;
         }
+        let clashes = refused_links(
+            dotfiles.links.keys().map(String::as_str),
+            self.clone_location,
+        );
         let refused: BTreeSet<&String> = dotfiles
             .links
             .keys()
-            .filter(|target| self.flagged.contains_key(*target))
+            .filter(|target| self.flagged.contains_key(*target) || clashes.contains_key(*target))
             .collect();
         Some(DotfilesPlan {
             repo: dotfiles.repo.clone(),

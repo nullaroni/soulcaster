@@ -2667,3 +2667,12 @@ mod round_two {
         );
     }
 }
+
+#[test]
+fn a_duplicate_key_in_the_machine_record_is_a_corrupt_file() {
+    let harness = Harness::new();
+    let path = machine_record_path(harness.home.path());
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, br#"{"schemaVersion":1,"schemaVersion":1}"#).unwrap();
+    assert!(MachineRecord::load(harness.home.path()).is_err());
+}

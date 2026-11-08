@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "name": "Plain dev laptop",
+  "items": [
+    "claude-code",
+    "ghostty",
+    "git-identity",
+    "opencode"
+  ],
+  "packages": {
+    "formulae": [
+      "fd",
+      "jq",
+      "ripgrep"
+    ],
+    "casks": [
+      "firefox",
+      "rectangle"
+    ]
+  },
+  "settings": {
+    "dock.autohide": true,
+    "dock.position": "left",
+    "finder.show-path-bar": true,
+    "git.pull-rebase": true,
+    "keyboard.key-repeat": 2,
+    "trackpad.tap-to-click": true
+  }
+}
