@@ -824,6 +824,37 @@ mod tests {
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
+    /// The import copies its tap into the Review answers so that row shows Allowed. That copy
+    /// is how the package shows as answered. It is not a tap approval, and a tap approval
+    /// covers every package from the tap. Editing the selection does not tick the row again.
+    #[test]
+    fn a_selection_edit_does_not_widen_an_imported_package_approval_to_the_tap() {
+        let mut app = imported();
+        assert!(
+            app.answers.taps.contains("mobile-dev-inc/tap"),
+            "the import should show its tap as answered"
+        );
+        assert!(
+            app.plan().taps.contains_key("mobile-dev-inc/tap"),
+            "the imported package should put its tap on the plan"
+        );
+        let answers_before = app.answers.taps.clone();
+        app.selected.insert("ripgrep".to_string());
+        assert_eq!(
+            app.answers.taps, answers_before,
+            "the edit should not tick or clear the tap"
+        );
+        assert!(
+            app.plan().taps.contains_key("mobile-dev-inc/tap"),
+            "the imported package should stay on the plan"
+        );
+        let handed = taps_handed(&mut app);
+        assert!(
+            !handed.iter().any(|tap| tap == "mobile-dev-inc/tap"),
+            "editing the selection handed the engine the tap {handed:?}, which approves every package from it; the import only stored mobile-dev-inc/tap/maestro and the tap was not ticked again"
+        );
+    }
+
     #[test]
     fn saving_never_gets_in_the_way_of_a_run() {
         // With nothing saved yet and no network, a Run still starts from the same selection.
