@@ -10,7 +10,7 @@ use soulcaster_core::approval::CommitSha;
 use soulcaster_core::catalog::Catalog;
 use soulcaster_core::command::{CommandOutput, CommandRunner};
 use soulcaster_core::config::{Config, ConfigError, MAX_BYTES};
-use soulcaster_core::lint::{DEFAULT_CLONE_LOCATION, Finding, FindingKind, lint};
+use soulcaster_core::lint::{DEFAULT_CLONE_LOCATION, Finding, lint};
 
 use crate::address::RepoId;
 use crate::copies::{CopyError, SUPPORT, keep_own, slug};
@@ -115,15 +115,18 @@ impl fmt::Display for SaveError {
 
 impl std::error::Error for SaveError {}
 
-fn must_stay_on_this_mac(finding: &Finding) -> bool {
-    matches!(
-        finding.kind,
-        FindingKind::SecretValue
-            | FindingKind::SecretKey
-            | FindingKind::EmailValue
-            | FindingKind::HomePathValue
-            | FindingKind::MachineValue
-    )
+/// The canonical text of a Config that's allowed to leave this Mac.
+pub(crate) fn savable_text(config: &Config, catalog: &Catalog) -> Result<String, SaveError> {
+    let text = config.to_canonical_json();
+    Config::parse(text.as_bytes()).map_err(SaveError::Invalid)?;
+    let blocked: Vec<Finding> = lint(config, catalog, DEFAULT_CLONE_LOCATION)
+        .into_iter()
+        .filter(Finding::must_stay_on_this_mac)
+        .collect();
+    if !blocked.is_empty() {
+        return Err(SaveError::Blocked(blocked));
+    }
+    Ok(text)
 }
 
 /// Saves on this Mac, then sends to GitHub. The local save happens first and stays whatever GitHub
@@ -135,15 +138,7 @@ pub fn save(
     request: &SaveRequest<'_>,
 ) -> Result<SaveOutcome, SaveError> {
     let config = request.config;
-    let text = config.to_canonical_json();
-    Config::parse(text.as_bytes()).map_err(SaveError::Invalid)?;
-    let blocked: Vec<Finding> = lint(config, catalog, DEFAULT_CLONE_LOCATION)
-        .into_iter()
-        .filter(must_stay_on_this_mac)
-        .collect();
-    if !blocked.is_empty() {
-        return Err(SaveError::Blocked(blocked));
-    }
+    let text = savable_text(config, catalog)?;
     let local = keep_own(&tools.home, &config.name, &text).map_err(SaveError::LocalWrite)?;
     let waiting = |why| SaveOutcome::Waiting {
         why,

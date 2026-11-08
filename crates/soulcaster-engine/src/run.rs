@@ -12,8 +12,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use soulcaster_core::ask::{Asks, Password, PasswordRequest, SignInStatus};
+use soulcaster_core::catalog::Catalog;
 use soulcaster_core::command::{Command, CommandEnd, CommandOutput, CommandRunner, OutputStream};
 use soulcaster_core::config::SettingValue;
+use soulcaster_core::drift::{current_id, set_aside};
 use soulcaster_core::event::{
     AskKind, AskStatus, ConfigRef, Event, EventKind, EventSink, LogStream, PlanItem, QueueEntry,
     QueueKind, RunScope, Stamper, StepPhase,
@@ -327,7 +329,26 @@ impl<'a> Engine<'a> {
         })
     }
 
+    /// A person's answers last only as long as what they were about. Every Run holds the whole
+    /// Config, whatever it acts on, so any Run can tell.
+    fn settle_answers(&mut self) {
+        let catalog = Catalog::shipped();
+        let listed: BTreeSet<String> = self.plan.entries.iter().map(|e| e.id.clone()).collect();
+        let aside = set_aside(self.plan, catalog);
+        // "This keep" ends once the Config lists it again.
+        self.record
+            .kept_here
+            .retain(|id| !listed.contains(&current_id(catalog, id)));
+        // "Leave this Mac as it is" ends once the entry has left the Config.
+        let marked = reason_label(SkipReason::MarkedByPerson);
+        self.record.unavailable.retain(|id, reason| {
+            let id = current_id(catalog, id);
+            reason != marked || listed.contains(&id) || aside.contains(&id)
+        });
+    }
+
     fn execute(&mut self) -> Result<RunReport, EngineError> {
+        self.settle_answers();
         self.prepare_run_dir();
         self.preflight()?;
         self.reconcile()?;
@@ -522,6 +543,16 @@ impl<'a> Engine<'a> {
     }
 
     fn skip_reason(&self, entry: &PlanEntry) -> Option<SkipReason> {
+        // "Leave this Mac as it is": a Run doesn't quietly undo that answer.
+        let marked = reason_label(SkipReason::MarkedByPerson);
+        if self
+            .record
+            .unavailable
+            .iter()
+            .any(|(id, reason)| reason == marked && current_id(Catalog::shipped(), id) == entry.id)
+        {
+            return Some(SkipReason::MarkedByPerson);
+        }
         if let Recipe::Setting(setting) = &entry.recipe
             && setting.is_broken()
         {
@@ -759,6 +790,7 @@ impl<'a> Engine<'a> {
         store: &Store,
         desired: &SettingValue,
     ) -> Result<ReadBack, EngineError> {
+        let store = &act::with_home(self.home, store);
         match store {
             Store::Defaults { .. } => {
                 let Some(command) = act::defaults_read(self.home, store) else {
@@ -805,7 +837,7 @@ impl<'a> Engine<'a> {
     fn read_library(&mut self, id: &str, desired: &SettingValue) -> Result<ReadBack, EngineError> {
         match self.run_command(&act::library_read(self.home), id, false)? {
             CmdResult::Done(output) if output.is_success() => {
-                let hidden = output.stdout_text().contains("hidden");
+                let hidden = library_hidden(&output.stdout_text());
                 let visible = !hidden;
                 let wanted = matches!(desired, SettingValue::Bool(true));
                 Ok(if visible == wanted {
@@ -826,10 +858,10 @@ impl<'a> Engine<'a> {
             CmdResult::Done(output) if output.is_success() => {
                 let got = dock_paths(&output.stdout_text());
                 let same = got.len() == wanted.len()
-                    && got
-                        .iter()
-                        .zip(wanted.iter())
-                        .all(|(got, want)| dock_path(got) == dock_path(want));
+                    && got.iter().zip(wanted.iter()).all(|(got, want)| {
+                        dock_path(got)
+                            == dock_path(&act::expand_home(self.home, want).to_string_lossy())
+                    });
                 Ok(if same {
                     ReadBack::Match
                 } else {
@@ -2157,7 +2189,17 @@ impl<'a> Engine<'a> {
                 }
                 soulcaster_core::recipe::BuiltinStore::DockTiles => {
                     if let SettingValue::List(apps) = value {
-                        for command in act::dock_write(self.home, apps) {
+                        // Without knowing what's there, the Dock is left as it is.
+                        let CmdResult::Done(listing) =
+                            self.run_command(&act::dock_list(self.home), id, false)?
+                        else {
+                            return Ok(());
+                        };
+                        if !listing.is_success() {
+                            return Ok(());
+                        }
+                        let tiles = dock_app_tiles(&listing.stdout_text());
+                        for command in act::dock_write(self.home, &tiles, apps) {
                             let _ = self.run_command(&command, id, true)?;
                         }
                     }
@@ -2397,6 +2439,11 @@ impl<'a> Engine<'a> {
             self.record
                 .unavailable
                 .insert(id.to_string(), reason_label(*reason).to_string());
+        } else if self.record.unavailable.get(id).map(String::as_str)
+            != Some(reason_label(SkipReason::MarkedByPerson))
+        {
+            // The Machine changed, so what it couldn't do no longer hides the entry from Drift.
+            self.record.unavailable.remove(id);
         }
         if let ItemState::Satisfied { assurance } = state {
             self.remember_applied(id, *assurance);
@@ -2859,6 +2906,21 @@ fn scope_of(scope: &RunScope, plan: &Plan) -> BTreeSet<String> {
     let ids: BTreeSet<String> = plan.entries.iter().map(|entry| entry.id.clone()).collect();
     match scope {
         RunScope::Full => ids,
+        // An Apply changes what was chosen and what that needs. What depends on it is left alone,
+        // because each of those is its own row.
+        RunScope::Only { items } => {
+            let mut out: BTreeSet<String> = items
+                .iter()
+                .filter(|id| ids.contains(*id))
+                .cloned()
+                .collect();
+            let seeds: Vec<String> = out.iter().cloned().collect();
+            for id in seeds {
+                add_requirements(plan, &id, &mut out);
+            }
+            out.retain(|id| ids.contains(id));
+            out
+        }
         RunScope::Items { items } => {
             let mut out = BTreeSet::new();
             let mut todo = items.clone();
@@ -2926,14 +2988,14 @@ fn assurance_of(setting: &SettingRecipe, macos: Option<&str>) -> Assurance {
     }
 }
 
-enum ReadBack {
+pub(crate) enum ReadBack {
     Match,
     Differ,
     Unset,
     Unknown,
 }
 
-fn compare_defaults(store: &Store, desired: &SettingValue, stdout: &str) -> ReadBack {
+pub(crate) fn compare_defaults(store: &Store, desired: &SettingValue, stdout: &str) -> ReadBack {
     let Store::Defaults {
         stored_type,
         encode,
@@ -2946,7 +3008,7 @@ fn compare_defaults(store: &Store, desired: &SettingValue, stdout: &str) -> Read
     match stored_type {
         StoredType::Bool => {
             let got = matches!(text, "1" | "true");
-            let wanted = matches!(desired, SettingValue::Bool(true));
+            let wanted = act::stored_bool(desired, encode);
             if (text == "0" || text == "false" || text == "1" || text == "true") && got == wanted {
                 ReadBack::Match
             } else if text == "0" || text == "false" || text == "1" || text == "true" {
@@ -3020,7 +3082,7 @@ fn encoded_lookup(text: &str, encode: &Option<BTreeMap<String, Value>>) -> Strin
         .to_string()
 }
 
-fn parse_array(text: &str) -> Vec<String> {
+pub(crate) fn parse_array(text: &str) -> Vec<String> {
     text.lines()
         .map(|line| {
             line.trim()
@@ -3049,7 +3111,7 @@ fn parse_defaults(store: &Store, stdout: &str) -> Option<Value> {
     }
 }
 
-fn rendered_git(value: &SettingValue) -> String {
+pub(crate) fn rendered_git(value: &SettingValue) -> String {
     match value {
         SettingValue::String(text) => text.clone(),
         SettingValue::Bool(value) => value.to_string(),
@@ -3060,7 +3122,7 @@ fn rendered_git(value: &SettingValue) -> String {
 
 /// Whether `relative`, from `home`, passes through a symlink, `home` itself included. Above `home`
 /// is the system's business: `/var` is a link on every Mac.
-fn link_on_the_way(home: &Path, relative: &Path) -> bool {
+pub(crate) fn link_on_the_way(home: &Path, relative: &Path) -> bool {
     let is_link =
         |path: &Path| fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
     if is_link(home) {
@@ -3095,7 +3157,20 @@ fn outcome_of(
     }
 }
 
-fn dock_path(path: &str) -> String {
+/// Whether `ls -ldO` lists `hidden` among a folder's flags. The flags column comes right before
+/// the size, so a name with "hidden" in it elsewhere on the line doesn't count.
+pub(crate) fn library_hidden(listing: &str) -> bool {
+    let fields: Vec<&str> = listing.split_whitespace().collect();
+    let size = fields
+        .iter()
+        .skip(2)
+        .position(|field| field.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(|at| at + 2);
+    size.and_then(|at| fields.get(at.checked_sub(1)?))
+        .is_some_and(|flags| flags.split(',').any(|flag| flag == "hidden"))
+}
+
+pub(crate) fn dock_path(path: &str) -> String {
     let path = path.trim();
     let path = path.strip_prefix("file://").unwrap_or(path);
     percent_decode(path.trim_end_matches('/'))
@@ -3143,21 +3218,48 @@ fn private_append(path: &Path) -> std::io::Result<File> {
         .open(path)
 }
 
-fn dock_paths(stdout: &str) -> Vec<String> {
+pub(crate) fn dock_paths(stdout: &str) -> Vec<String> {
     stdout
         .lines()
         .filter_map(|line| {
-            let field = line.split('\t').nth(1).unwrap_or(line).trim();
-            if field.is_empty() {
-                None
-            } else {
-                Some(dock_path(field))
-            }
+            let mut fields = line.split('\t');
+            let path = fields.nth(1).unwrap_or(line).trim();
+            // `--list` also prints recent apps and folders, which aren't tiles a person placed.
+            let tile = fields
+                .next()
+                .is_none_or(|section| section == "persistentApps");
+            (tile && !path.is_empty()).then(|| dock_path(path))
         })
         .collect()
 }
 
-fn git_key(key: &soulcaster_core::recipe::GitKey) -> &'static str {
+/// What to name each app tile by when removing it: the bundle ID, or the label for a tile with
+/// none. A name dockutil would read as an option, or as `all`, is left alone.
+fn dock_app_tiles(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let is_app = fields
+                .get(2)
+                .is_none_or(|section| *section == "persistentApps");
+            let has_path = fields.get(1).is_some_and(|path| !path.trim().is_empty());
+            let id = fields
+                .get(4)
+                .map(|bundle| bundle.trim())
+                .filter(|bundle| !bundle.is_empty())
+                .or(fields.first().map(|label| label.trim()))?;
+            (is_app
+                && has_path
+                && !id.is_empty()
+                && !id.starts_with('-')
+                && !id.eq_ignore_ascii_case("all"))
+            .then(|| id.to_string())
+        })
+        .collect()
+}
+
+pub(crate) fn git_key(key: &soulcaster_core::recipe::GitKey) -> &'static str {
     match key {
         soulcaster_core::recipe::GitKey::UserName => "user.name",
         soulcaster_core::recipe::GitKey::UserEmail => "user.email",
@@ -3199,7 +3301,7 @@ fn kind_name(kind: FailureKind) -> &'static str {
     }
 }
 
-fn reason_label(reason: SkipReason) -> &'static str {
+pub(crate) fn reason_label(reason: SkipReason) -> &'static str {
     match reason {
         SkipReason::UnknownId => "unknown-id",
         SkipReason::Retired => "retired",
@@ -3219,6 +3321,21 @@ fn reason_label(reason: SkipReason) -> &'static str {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn only_app_tiles_are_removed_and_never_by_a_name_dockutil_would_misread() {
+        assert_eq!(
+            dock_app_tiles(
+                "Mail\tfile:///System/Applications/Mail.app/\tpersistentApps\t/p\tcom.apple.mail\n\
+                 Downloads\tfile:///Users/x/Downloads/\tpersistentOthers\t/p\t\n\
+                 Zed\tfile:///Applications/Zed.app/\trecentApps\t/p\tdev.zed.Zed\n\
+                 all\tfile:///Applications/all.app/\tpersistentApps\t/p\t\n\
+                 --zap\tfile:///Applications/z.app/\tpersistentApps\t/p\t\n\
+                 Thing\tfile:///Applications/Thing.app/\tpersistentApps\t/p\t\n"
+            ),
+            ["com.apple.mail", "Thing"]
+        );
+    }
 
     #[test]
     fn dock_paths_are_compared_as_paths_not_as_urls() {

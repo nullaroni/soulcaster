@@ -11,6 +11,7 @@ mod admin;
 mod approvals;
 mod awake;
 mod dotfiles;
+mod inspect;
 mod process;
 mod record;
 mod run;
@@ -22,7 +23,20 @@ pub use admin::{
 pub use approvals::RecordApprovals;
 pub use awake::KeepAwake;
 pub use dotfiles::{DotfilesHook, DotfilesResult};
+pub use inspect::{
+    Removal, RemovalConfirmed, check_drift, keep_here, leave_here, record_saved, remove_from_mac,
+    set_waiting_saves, waiting_saves,
+};
 pub use process::ProcessRunner;
+
+/// What a Run would write for a setting, for tests that check it without running anything.
+pub fn defaults_write_for_test(
+    home: &std::path::Path,
+    store: &soulcaster_core::recipe::Store,
+    value: &soulcaster_core::config::SettingValue,
+) -> soulcaster_core::command::Command {
+    act::defaults_write(home, store, value).expect("a defaults store")
+}
 pub use record::{
     InProgress, ItemOutcome, LastApplied, MachineRecord, QueueItem, SCHEMA_VERSION,
     machine_record_path,

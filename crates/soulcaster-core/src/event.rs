@@ -95,6 +95,10 @@ pub enum RunScope {
     Items {
         items: Vec<ItemId>,
     },
+    /// An Apply: these and what they need, and nothing that depends on them.
+    Only {
+        items: Vec<ItemId>,
+    },
 }
 
 /// Which Config a Run follows. The repo fields stay empty for a local file.

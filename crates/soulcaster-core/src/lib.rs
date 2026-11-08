@@ -6,6 +6,7 @@ pub mod ask;
 pub mod catalog;
 pub mod command;
 pub mod config;
+pub mod drift;
 pub mod event;
 pub mod lifecycle;
 pub mod lint;

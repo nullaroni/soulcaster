@@ -307,6 +307,14 @@ impl Catalog {
             .filter(|entry| matches!(entry.recipe, Recipe::Setting(_)))
     }
 
+    /// An old ID that now means `id`, if it has one.
+    pub fn renames_to(&self, id: &str) -> Option<&str> {
+        self.renames
+            .iter()
+            .find(|(_, new)| new.as_str() == id)
+            .map(|(old, _)| old.as_str())
+    }
+
     /// Follows old IDs, forever, for an ID read from a Config.
     pub fn lookup<'a>(&'a self, raw: &'a str) -> Lookup<'a> {
         let mut seen: BTreeSet<&str> = BTreeSet::from([raw]);

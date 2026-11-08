@@ -1,7 +1,7 @@
 //! The Machine Record: last-applied values, approvals, Machine-local values and the queue.
 //! It lives under the injected home, mode 0600, and a crash mid-write leaves the previous file.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use soulcaster_core::approval::Approvals;
+use soulcaster_core::drift::Reviewed;
 use soulcaster_core::event::QueueKind;
 use soulcaster_core::lifecycle::{Assurance, FailureKind, SkipReason};
 
@@ -138,6 +139,12 @@ pub struct MachineRecord {
     pub running: Option<InProgress>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub interruptions: Vec<Interruption>,
+    /// Kept on this Mac by choice, so Drift stops asking while the Config doesn't list them.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub kept_here: BTreeSet<String>,
+    /// Reviewed saves GitHub doesn't have yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting_saves: Vec<Reviewed>,
 }
 
 fn no_approvals(approvals: &Approvals) -> bool {
@@ -168,6 +175,8 @@ impl MachineRecord {
             outcomes: BTreeMap::new(),
             running: None,
             interruptions: Vec::new(),
+            kept_here: BTreeSet::new(),
+            waiting_saves: Vec::new(),
         }
     }
 

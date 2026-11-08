@@ -31,6 +31,24 @@ pub enum Recipe {
 }
 
 impl Recipe {
+    /// The check for a package a Config named, with nothing to perform.
+    pub fn package_check(id: &str, probe: Probe) -> Self {
+        Self::Install(InstallRecipe {
+            id: id.to_string(),
+            kind: InstallKind::Cli,
+            title: id.to_string(),
+            base: false,
+            requires: Vec::new(),
+            min_macos: None,
+            conflicts: Vec::new(),
+            checks: vec![probe],
+            facts: Vec::new(),
+            steps: Vec::new(),
+            notes: Vec::new(),
+            bootstrap: None,
+        })
+    }
+
     pub fn id(&self) -> &str {
         match self {
             Self::Install(r) => &r.id,

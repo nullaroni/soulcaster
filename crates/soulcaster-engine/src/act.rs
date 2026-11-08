@@ -42,13 +42,13 @@ fn home_string(home: &Path) -> String {
 }
 
 pub fn expand_home(home: &Path, path: &str) -> PathBuf {
-    let home_str = home_string(home);
     if let Some(rest) = path.strip_prefix("~/") {
         home.join(rest)
     } else if path == "~" {
         home.to_path_buf()
     } else {
-        PathBuf::from(path.replace("~", &home_str))
+        // Only a leading `~` means the home folder. Anywhere else it's part of a name.
+        PathBuf::from(path)
     }
 }
 
@@ -157,6 +157,32 @@ pub fn brew_command(home: &Path, name: &str, cask: bool, step_is_admin: bool) ->
         command = command.env("HOMEBREW_NO_SUDO", "1");
     }
     command
+}
+
+/// A question for Homebrew that changes nothing and doesn't look for updates.
+pub fn brew_read(home: &Path, args: &[&str]) -> Command {
+    base_command(home, BREW)
+        .args(args.iter().copied())
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("HOMEBREW_NO_ANALYTICS", "1")
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .env("HOMEBREW_NO_SUDO", "1")
+}
+
+/// Never privileged: a removal doesn't ask for the password.
+pub fn brew_uninstall(home: &Path, name: &str, cask: bool) -> Command {
+    let mut args = vec!["uninstall".to_string()];
+    if cask {
+        args.push("--cask".to_string());
+    }
+    args.push(name.to_string());
+    base_command(home, BREW)
+        .args(args)
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("HOMEBREW_NO_SUDO", "1")
+        .env("HOMEBREW_NO_INSTALL_CLEANUP", "1")
+        // Otherwise Homebrew also removes whatever else it thinks is unused.
+        .env("HOMEBREW_NO_AUTOREMOVE", "1")
 }
 
 /// One thing the engine does while performing a step, in order.
@@ -590,7 +616,40 @@ pub fn defaults_read(home: &Path, store: &Store) -> Option<Command> {
     Some(base_command(home, "/usr/bin/defaults").args(args))
 }
 
+/// A store as it is on this Machine: the Catalog says `<home>` where a value holds the home folder.
+pub fn with_home(home: &Path, store: &Store) -> Store {
+    let mut store = store.clone();
+    if let Store::Defaults {
+        encode: Some(encode),
+        ..
+    } = &mut store
+    {
+        for stored in encode.values_mut() {
+            if let Value::String(text) = stored {
+                *text = text.replace("<home>", &home_string(home));
+            }
+        }
+    }
+    store
+}
+
+/// What's written for a yes-or-no value. `encode` can invert it, as "show" stored as "hidden" does.
+pub(crate) fn stored_bool(
+    value: &SettingValue,
+    encode: &Option<std::collections::BTreeMap<String, Value>>,
+) -> bool {
+    let SettingValue::Bool(flag) = value else {
+        return false;
+    };
+    encode
+        .as_ref()
+        .and_then(|map| map.get(&flag.to_string()))
+        .and_then(Value::as_bool)
+        .unwrap_or(*flag)
+}
+
 pub fn defaults_write(home: &Path, store: &Store, value: &SettingValue) -> Option<Command> {
+    let store = &with_home(home, store);
     let Store::Defaults {
         domain,
         key,
@@ -613,7 +672,14 @@ pub fn defaults_write(home: &Path, store: &Store, value: &SettingValue) -> Optio
     match stored_type {
         StoredType::Bool => {
             args.push("-bool".into());
-            args.push(bool_word(value).into());
+            args.push(
+                if stored_bool(value, encode) {
+                    "true"
+                } else {
+                    "false"
+                }
+                .into(),
+            );
         }
         StoredType::Int => {
             args.push("-int".into());
@@ -652,13 +718,6 @@ pub fn defaults_write(home: &Path, store: &Store, value: &SettingValue) -> Optio
         }
     }
     Some(base_command(home, "/usr/bin/defaults").args(args))
-}
-
-fn bool_word(value: &SettingValue) -> &'static str {
-    match value {
-        SettingValue::Bool(true) => "true",
-        _ => "false",
-    }
 }
 
 /// The text `defaults` stores for an int or float, including a boolean's encoded number.
@@ -727,16 +786,25 @@ pub fn dock_list(home: &Path) -> Command {
     base_command(home, "/opt/homebrew/bin/dockutil").args(["--list"])
 }
 
-pub fn dock_write(home: &Path, apps: &[String]) -> Vec<Command> {
-    let mut commands = vec![base_command(home, "/opt/homebrew/bin/dockutil").args([
-        "--remove",
-        "all",
-        "--no-restart",
-    ])];
+/// Takes the app tiles out one by one and adds the wanted ones in order. `--remove all` would
+/// also empty the folders beside them, which a Config can't name and no Run puts back.
+pub fn dock_write(home: &Path, tiles: &[String], apps: &[String]) -> Vec<Command> {
+    let mut commands: Vec<Command> = tiles
+        .iter()
+        .map(|tile| {
+            base_command(home, "/opt/homebrew/bin/dockutil").args([
+                "--remove",
+                tile,
+                "--no-restart",
+            ])
+        })
+        .collect();
     for app in apps {
+        // No shell reads this, so nothing else would expand a `~`.
+        let app = expand_home(home, app).to_string_lossy().into_owned();
         commands.push(base_command(home, "/opt/homebrew/bin/dockutil").args([
             "--add",
-            app,
+            &app,
             "--no-restart",
         ]));
     }

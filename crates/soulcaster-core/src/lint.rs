@@ -70,6 +70,18 @@ pub struct Finding {
 }
 
 impl Finding {
+    /// Something a save refuses, because it must not leave this Mac.
+    pub fn must_stay_on_this_mac(&self) -> bool {
+        matches!(
+            self.kind,
+            FindingKind::SecretValue
+                | FindingKind::SecretKey
+                | FindingKind::EmailValue
+                | FindingKind::HomePathValue
+                | FindingKind::MachineValue
+        )
+    }
+
     fn new(kind: FindingKind, at: &str, message: String) -> Self {
         Self {
             kind,
