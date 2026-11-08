@@ -522,6 +522,12 @@ impl<'a> Engine<'a> {
     }
 
     fn skip_reason(&self, entry: &PlanEntry) -> Option<SkipReason> {
+        // "Leave this Mac as it is": a Run doesn't quietly undo that answer.
+        if self.record.unavailable.get(&entry.id).map(String::as_str)
+            == Some(reason_label(SkipReason::MarkedByPerson))
+        {
+            return Some(SkipReason::MarkedByPerson);
+        }
         if let Recipe::Setting(setting) = &entry.recipe
             && setting.is_broken()
         {
@@ -2397,6 +2403,11 @@ impl<'a> Engine<'a> {
             self.record
                 .unavailable
                 .insert(id.to_string(), reason_label(*reason).to_string());
+        } else if self.record.unavailable.get(id).map(String::as_str)
+            != Some(reason_label(SkipReason::MarkedByPerson))
+        {
+            // The Machine changed, so what it couldn't do no longer hides the entry from Drift.
+            self.record.unavailable.remove(id);
         }
         if let ItemState::Satisfied { assurance } = state {
             self.remember_applied(id, *assurance);
@@ -2859,6 +2870,21 @@ fn scope_of(scope: &RunScope, plan: &Plan) -> BTreeSet<String> {
     let ids: BTreeSet<String> = plan.entries.iter().map(|entry| entry.id.clone()).collect();
     match scope {
         RunScope::Full => ids,
+        // An Apply changes what was chosen and what that needs. What depends on it is left alone,
+        // because each of those is its own row.
+        RunScope::Only { items } => {
+            let mut out: BTreeSet<String> = items
+                .iter()
+                .filter(|id| ids.contains(*id))
+                .cloned()
+                .collect();
+            let seeds: Vec<String> = out.iter().cloned().collect();
+            for id in seeds {
+                add_requirements(plan, &id, &mut out);
+            }
+            out.retain(|id| ids.contains(id));
+            out
+        }
         RunScope::Items { items } => {
             let mut out = BTreeSet::new();
             let mut todo = items.clone();
@@ -2926,14 +2952,14 @@ fn assurance_of(setting: &SettingRecipe, macos: Option<&str>) -> Assurance {
     }
 }
 
-enum ReadBack {
+pub(crate) enum ReadBack {
     Match,
     Differ,
     Unset,
     Unknown,
 }
 
-fn compare_defaults(store: &Store, desired: &SettingValue, stdout: &str) -> ReadBack {
+pub(crate) fn compare_defaults(store: &Store, desired: &SettingValue, stdout: &str) -> ReadBack {
     let Store::Defaults {
         stored_type,
         encode,
@@ -3020,7 +3046,7 @@ fn encoded_lookup(text: &str, encode: &Option<BTreeMap<String, Value>>) -> Strin
         .to_string()
 }
 
-fn parse_array(text: &str) -> Vec<String> {
+pub(crate) fn parse_array(text: &str) -> Vec<String> {
     text.lines()
         .map(|line| {
             line.trim()
@@ -3049,7 +3075,7 @@ fn parse_defaults(store: &Store, stdout: &str) -> Option<Value> {
     }
 }
 
-fn rendered_git(value: &SettingValue) -> String {
+pub(crate) fn rendered_git(value: &SettingValue) -> String {
     match value {
         SettingValue::String(text) => text.clone(),
         SettingValue::Bool(value) => value.to_string(),
@@ -3060,7 +3086,7 @@ fn rendered_git(value: &SettingValue) -> String {
 
 /// Whether `relative`, from `home`, passes through a symlink, `home` itself included. Above `home`
 /// is the system's business: `/var` is a link on every Mac.
-fn link_on_the_way(home: &Path, relative: &Path) -> bool {
+pub(crate) fn link_on_the_way(home: &Path, relative: &Path) -> bool {
     let is_link =
         |path: &Path| fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
     if is_link(home) {
@@ -3095,7 +3121,7 @@ fn outcome_of(
     }
 }
 
-fn dock_path(path: &str) -> String {
+pub(crate) fn dock_path(path: &str) -> String {
     let path = path.trim();
     let path = path.strip_prefix("file://").unwrap_or(path);
     percent_decode(path.trim_end_matches('/'))
@@ -3143,7 +3169,7 @@ fn private_append(path: &Path) -> std::io::Result<File> {
         .open(path)
 }
 
-fn dock_paths(stdout: &str) -> Vec<String> {
+pub(crate) fn dock_paths(stdout: &str) -> Vec<String> {
     stdout
         .lines()
         .filter_map(|line| {
@@ -3157,7 +3183,7 @@ fn dock_paths(stdout: &str) -> Vec<String> {
         .collect()
 }
 
-fn git_key(key: &soulcaster_core::recipe::GitKey) -> &'static str {
+pub(crate) fn git_key(key: &soulcaster_core::recipe::GitKey) -> &'static str {
     match key {
         soulcaster_core::recipe::GitKey::UserName => "user.name",
         soulcaster_core::recipe::GitKey::UserEmail => "user.email",
@@ -3199,7 +3225,7 @@ fn kind_name(kind: FailureKind) -> &'static str {
     }
 }
 
-fn reason_label(reason: SkipReason) -> &'static str {
+pub(crate) fn reason_label(reason: SkipReason) -> &'static str {
     match reason {
         SkipReason::UnknownId => "unknown-id",
         SkipReason::Retired => "retired",

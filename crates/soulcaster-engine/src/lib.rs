@@ -11,6 +11,7 @@ mod admin;
 mod approvals;
 mod awake;
 mod dotfiles;
+mod inspect;
 mod process;
 mod record;
 mod run;
@@ -22,6 +23,10 @@ pub use admin::{
 pub use approvals::RecordApprovals;
 pub use awake::KeepAwake;
 pub use dotfiles::{DotfilesHook, DotfilesResult};
+pub use inspect::{
+    Removal, RemovalConfirmed, check_drift, keep_here, leave_here, record_saved, remove_from_mac,
+    set_waiting_saves, waiting_saves,
+};
 pub use process::ProcessRunner;
 pub use record::{
     InProgress, ItemOutcome, LastApplied, MachineRecord, QueueItem, SCHEMA_VERSION,

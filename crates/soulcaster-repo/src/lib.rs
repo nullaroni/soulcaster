@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod address;
+pub mod adopt;
 pub mod copies;
 pub mod dotfiles;
 pub mod fake;

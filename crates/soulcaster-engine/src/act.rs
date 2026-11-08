@@ -159,6 +159,30 @@ pub fn brew_command(home: &Path, name: &str, cask: bool, step_is_admin: bool) ->
     command
 }
 
+/// A question for Homebrew that changes nothing and doesn't look for updates.
+pub fn brew_read(home: &Path, args: &[&str]) -> Command {
+    base_command(home, BREW)
+        .args(args.iter().copied())
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("HOMEBREW_NO_ANALYTICS", "1")
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .env("HOMEBREW_NO_SUDO", "1")
+}
+
+/// Never privileged: a removal doesn't ask for the password.
+pub fn brew_uninstall(home: &Path, name: &str, cask: bool) -> Command {
+    let mut args = vec!["uninstall".to_string()];
+    if cask {
+        args.push("--cask".to_string());
+    }
+    args.push(name.to_string());
+    base_command(home, BREW)
+        .args(args)
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("HOMEBREW_NO_SUDO", "1")
+        .env("HOMEBREW_NO_INSTALL_CLEANUP", "1")
+}
+
 /// One thing the engine does while performing a step, in order.
 pub enum Beat {
     /// Run through `sudo -A`, with one answer available.

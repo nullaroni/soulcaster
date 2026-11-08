@@ -326,16 +326,36 @@ impl FakeGitHub {
         }
     }
 
+    /// A push that worked: the next checkout sees what was added.
+    fn github_now_has(state: &mut State) {
+        let files: Vec<(String, String)> = state
+            .seen
+            .iter()
+            .filter(|((subcommand, _), _)| subcommand == "add")
+            .map(|((_, path), text)| (path.clone(), text.clone()))
+            .collect();
+        state
+            .effects
+            .push(("checkout".to_string(), Effect::Files(files)));
+    }
+
     fn answer_git(state: &mut State, command: &Command) -> Reply {
         Self::apply_effects(state, command);
         for (word, replies) in &mut state.scripted {
             if command.args.iter().any(|a| a == word) {
-                return match replies.len() {
+                let reply = match replies.len() {
                     0 => Reply::ok(""),
                     1 => replies[0].clone(),
                     _ => replies.pop_front().expect("checked the length"),
                 };
+                if word == "push" && matches!(reply, Reply::Output { code: 0, .. }) {
+                    Self::github_now_has(state);
+                }
+                return reply;
             }
+        }
+        if command.args.iter().any(|a| a == "push") {
+            Self::github_now_has(state);
         }
         if command.args.iter().any(|a| a == "ls-tree") {
             return Self::list_as_on_disk(command);

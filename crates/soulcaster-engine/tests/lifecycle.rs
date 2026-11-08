@@ -1169,6 +1169,82 @@ fn a_scoped_run_does_not_ask_when_it_has_no_admin_work_and_it_reaches_what_the_i
 }
 
 #[test]
+fn an_apply_reaches_what_the_item_needs_and_leaves_what_depends_on_it() {
+    let harness = Harness::new();
+    absent_then_present(&harness, "Cellar/tool");
+    harness.runner.on(
+        |command| file_name(command) == "test" && args_contain(command, "Cellar/lib"),
+        [Reply::ok("")],
+    );
+    absent_then_present(&harness, "Cellar/app");
+    let mut plan = plan(vec![
+        formula("lib", &[]),
+        formula("tool", &["lib"]),
+        formula("app", &["tool"]),
+    ]);
+    let (report, _) = harness
+        .run_scoped(
+            &mut plan,
+            RunScope::Only {
+                items: vec!["tool".into()],
+            },
+        )
+        .unwrap();
+    assert!(matches!(state(&report, "lib"), ItemState::Satisfied { .. }));
+    assert!(matches!(
+        state(&report, "tool"),
+        ItemState::Satisfied { .. }
+    ));
+    assert_eq!(
+        install_count(&harness.runner, "app"),
+        0,
+        "app is its own row"
+    );
+    assert!(!report.states.contains_key("app"));
+}
+
+#[test]
+fn a_full_run_leaves_alone_what_the_person_said_to_leave() {
+    let harness = Harness::new();
+    harness.runner.on(
+        |command| file_name(command) == "test" && args_contain(command, "Cellar/tool"),
+        [Reply::fails(1, "missing")],
+    );
+    soulcaster_engine::leave_here(harness.home.path(), "tool").unwrap();
+    let mut plan = plan(vec![formula("tool", &[])]);
+    let (report, _) = harness.run(&mut plan);
+    assert_eq!(
+        state(&report, "tool"),
+        &ItemState::Skipped {
+            reason: SkipReason::MarkedByPerson
+        }
+    );
+    assert_eq!(install_count(&harness.runner, "tool"), 0);
+    assert_eq!(harness.record().unavailable["tool"], "marked-by-person");
+}
+
+#[test]
+fn something_the_machine_could_not_do_stops_hiding_once_it_can() {
+    let harness = Harness::new();
+    let mut record = MachineRecord::load(harness.home.path()).unwrap();
+    record
+        .unavailable
+        .insert("tool".into(), "macos-too-old".into());
+    record.save(harness.home.path()).unwrap();
+    harness.runner.on(
+        |command| file_name(command) == "test" && args_contain(command, "Cellar/tool"),
+        [Reply::ok("")],
+    );
+    let mut plan = plan(vec![formula("tool", &[])]);
+    let (report, _) = harness.run(&mut plan);
+    assert!(matches!(
+        state(&report, "tool"),
+        ItemState::Satisfied { .. }
+    ));
+    assert!(!harness.record().unavailable.contains_key("tool"));
+}
+
+#[test]
 fn a_missing_tap_approval_queues_the_item_instead_of_installing_it() {
     let harness = Harness::new();
     harness.runner.on(
