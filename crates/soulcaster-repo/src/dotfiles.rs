@@ -341,10 +341,14 @@ fn files_on_disk(clone: &Path) -> Option<Vec<PathBuf>> {
             let entry = entry.ok()?;
             let path = entry.path();
             let relative = path.strip_prefix(root).ok()?.to_path_buf();
-            if relative == Path::new(".git") || entry.file_name() == ".DS_Store" {
+            if relative == Path::new(".git") {
                 continue;
             }
             let meta = fs::symlink_metadata(&path).ok()?;
+            // Finder only ever makes a plain file by that name. Anything else is checked.
+            if meta.is_file() && entry.file_name() == ".DS_Store" {
+                continue;
+            }
             if meta.is_dir() {
                 walk(root, &path, out)?;
             } else {
@@ -779,10 +783,11 @@ impl DotfilesStep<'_> {
         if script.ran {
             return ScriptOutcome::AlreadyRan;
         }
-        // The check of the clone skips Finder's `.DS_Store` files, so the script can't be one.
+        // The check of the clone skips Finder's `.DS_Store` files, so the script can't be one,
+        // or sit inside anything by that name.
         let is_ds_store = Path::new(path)
-            .file_name()
-            .is_some_and(|name| fold(&name.to_string_lossy()) == ".ds_store");
+            .components()
+            .any(|part| fold(&part.as_os_str().to_string_lossy()) == ".ds_store");
         if path.starts_with('-') || safe_parts(path).is_none() || is_ds_store {
             return ScriptOutcome::NotApproved;
         }

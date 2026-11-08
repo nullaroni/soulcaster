@@ -357,12 +357,15 @@ impl FakeGitHub {
             for entry in entries.flatten() {
                 let path = entry.path();
                 let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
-                if relative == Path::new(".git") || entry.file_name() == ".DS_Store" {
+                if relative == Path::new(".git") {
                     continue;
                 }
                 let Ok(meta) = std::fs::symlink_metadata(&path) else {
                     continue;
                 };
+                if meta.is_file() && entry.file_name() == ".DS_Store" {
+                    continue;
+                }
                 let (mode, bytes) = if meta.is_dir() {
                     walk(root, &path, out);
                     continue;
