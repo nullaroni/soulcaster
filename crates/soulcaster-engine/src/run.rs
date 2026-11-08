@@ -1443,11 +1443,11 @@ impl<'a> Engine<'a> {
         }
         // git could write the key into a file named here, and a helper set there isn't visible
         // to the read below. Read as text, so this works before git does.
+        // Anywhere in the text, not only at a line's start: a byte-order mark or other leading
+        // bytes would otherwise hide it, and git still follows it.
         let has_include = configs.iter().any(|config| {
-            fs::read_to_string(self.home.join(config)).is_ok_and(|text| {
-                text.lines()
-                    .any(|line| line.trim_start().to_lowercase().starts_with("[include"))
-            })
+            fs::read_to_string(self.home.join(config))
+                .is_ok_and(|text| text.to_lowercase().contains("include"))
         });
         if has_include {
             self.emit(EventKind::RunWarning {
