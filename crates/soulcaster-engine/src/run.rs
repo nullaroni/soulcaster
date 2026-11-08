@@ -1445,30 +1445,22 @@ impl<'a> Engine<'a> {
         // to the read below. Read as text, so this works before git does.
         // Anywhere in the text, not only at a line's start: a byte-order mark or other leading
         // bytes would otherwise hide it, and git still follows it.
-        let has_include = configs.iter().any(|config| {
-            fs::read_to_string(self.home.join(config))
-                .is_ok_and(|text| text.to_lowercase().contains("include"))
-        });
-        if has_include {
+        // Git's config syntax has too many spellings to tell from text whether another helper
+        // serves GitHub: includes, encodings, comments and escapes each fooled a reader. So
+        // `setup-git` only runs where there is no git config at all, as on a bare Mac. Anywhere
+        // else it's left for the person, and nothing of theirs can be replaced.
+        let any_config = configs
+            .iter()
+            .any(|config| has_git_config(&self.home.join(config)));
+        if any_config {
             self.emit(EventKind::RunWarning {
-                text: "~/.gitconfig includes other files, so git's GitHub sign-in was left for you to set up.".into(),
+                text: "Git already has settings here, so its GitHub sign-in was left for you. Run `gh auth setup-git` if you want it.".into(),
             });
             return Ok(None);
         }
         // `gh auth setup-git` calls git, which is Apple's stub until these exist.
         if !self.command_line_tools_present()? {
             return Ok(Some(FailureKind::NotFound));
-        }
-        // Read as text, like the include check: it's the same two files, and git may not run yet.
-        let other_helper = configs.iter().any(|config| {
-            fs::read_to_string(self.home.join(config))
-                .is_ok_and(|text| has_other_github_helper(&text))
-        });
-        if other_helper {
-            self.emit(EventKind::RunWarning {
-                text: "Git already has another sign-in for GitHub, so it was left as it is.".into(),
-            });
-            return Ok(None);
         }
         let setup = act::gh_setup_git(self.home);
         Ok(match self.run_command(&setup, "gh", true)? {
@@ -3059,9 +3051,13 @@ fn link_on_the_way(home: &Path, relative: &Path) -> bool {
 /// spellings for a reader to tell one helper from another (a key on the section line, a comment,
 /// an escaped subsection), so any mention leaves the file alone. `gh`'s own helper being there
 /// already means there's nothing to set up.
-fn has_other_github_helper(text: &str) -> bool {
-    let folded: String = text.to_lowercase().chars().filter(|c| *c != '\\').collect();
-    folded.contains("credential") && folded.contains("github")
+/// Whether a git config file is there with anything in it. One that can't be read could hold
+/// anything, so it counts.
+fn has_git_config(path: &Path) -> bool {
+    match fs::read(path) {
+        Ok(bytes) => !bytes.iter().all(u8::is_ascii_whitespace),
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
 }
 
 fn outcome_of(
@@ -3252,28 +3248,27 @@ mod lock_tests {
 }
 
 #[cfg(test)]
-mod helper_tests {
-    use super::has_other_github_helper;
+mod git_config_tests {
+    use super::has_git_config;
 
     #[test]
-    fn any_github_credential_leaves_the_file_alone() {
-        for text in [
-            "[credential \"https://github.com\"]\n\thelper = !/usr/local/bin/other\n",
-            "[Credential \"https://GitHub.com\"]\n  HELPER=osxkeychain\n",
-            "[credential \"https://github.com\"] helper = osxkeychain\n",
-            "[credential \"https://git\\hub.com\"]\n\thelper = osxkeychain\n",
-            "[credential \"https://github.com\"]\n\thelper = osxkeychain # gh auth git-credential\n",
-            // gh's own: already set up, so there's nothing to do.
-            "[credential \"https://github.com\"]\n\thelper = !/opt/homebrew/bin/gh auth git-credential\n",
-        ] {
-            assert!(has_other_github_helper(text), "{text}");
-        }
-        // A helper for everything, or for another host, doesn't stop gh adding its own.
-        assert!(!has_other_github_helper(
-            "[credential]\n\thelper = osxkeychain\n"
-        ));
-        assert!(!has_other_github_helper(
-            "[credential \"https://gitlab.com\"]\n\thelper = x\n"
-        ));
+    fn only_a_missing_or_blank_file_counts_as_no_config() {
+        let dir = std::env::temp_dir().join(format!("soulcaster-gitcfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("config");
+        assert!(!has_git_config(&file));
+        std::fs::write(&file, " \n\t\n").unwrap();
+        assert!(!has_git_config(&file));
+        std::fs::write(&file, [0xef, 0xbb, 0xbf]).unwrap();
+        assert!(
+            has_git_config(&file),
+            "a byte-order mark alone is something"
+        );
+        std::fs::write(&file, [b'[', 0xe9, b']']).unwrap();
+        assert!(has_git_config(&file));
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        assert!(has_git_config(&file), "unreadable counts");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
