@@ -78,9 +78,8 @@ pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
                     if on { "Allowed" } else { "Allow" },
                     on,
                     move |app: &mut App, _| {
-                        if !app.answers.taps.remove(&t) {
-                            app.answers.taps.insert(t.clone());
-                        }
+                        let on = !app.answers.taps.contains(&t);
+                        app.answer_tap(&t, on);
                     },
                 )),
         ));

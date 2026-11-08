@@ -136,7 +136,8 @@ pub struct App {
     /// The Dotfiles Repo from an imported Config, for the Run to apply.
     pub dotfiles: Option<soulcaster_core::config::Dotfiles>,
     imported_selection: Option<String>,
-    /// Taps an Import's packages come from. They show as answered, and approve nothing here.
+    /// Taps an Import's packages come from. They show as answered, and approve nothing unless the
+    /// person ticks one themselves.
     pub imported_taps: std::collections::BTreeSet<String>,
     pub scoped_wrong: bool,
 
@@ -560,6 +561,17 @@ impl App {
         self.engine.submit_password(Password::new(typed));
     }
 
+    /// A person answering a tap's row on Review. Once they've ticked it, it's their approval, even
+    /// if an Import's packages came from that tap too.
+    pub fn answer_tap(&mut self, tap: &str, on: bool) {
+        if on {
+            self.answers.taps.insert(tap.to_string());
+            self.imported_taps.remove(tap);
+        } else {
+            self.answers.taps.remove(tap);
+        }
+    }
+
     pub fn start_github(&mut self) {
         let code = self.engine.start_github_sign_in();
         self.github = GithubState::Waiting { code };
@@ -581,11 +593,9 @@ impl App {
         let mut answers = self.answers.clone();
         // And an Import approves its packages one by one, which `record_start` has stored. A tap
         // approval would cover everything else from that tap too.
-        // Once the selection has changed, a tap ticked here is the person's own answer.
-        let imported = self.is_imported_selection();
-        answers.taps.retain(|tap| {
-            plan.taps.contains_key(tap) && !(imported && self.imported_taps.contains(tap))
-        });
+        answers
+            .taps
+            .retain(|tap| plan.taps.contains_key(tap) && !self.imported_taps.contains(tap));
         self.engine.start_run(&plan, &answers);
         self.screen = Screen::Run;
         self.pump();

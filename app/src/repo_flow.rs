@@ -802,8 +802,9 @@ mod tests {
         app.settings.clear();
         app.packages
             .insert("mobile-dev-inc/tap/other-tool".to_string());
+        // Changed from setting the field directly: a person's tick goes through `answer_tap`.
         app.answers.taps.clear();
-        app.answers.taps.insert("mobile-dev-inc/tap".to_string());
+        app.answer_tap("mobile-dev-inc/tap", true);
         assert!(
             app.plan().taps.contains_key("mobile-dev-inc/tap"),
             "the later plan should show the tap the person ticked"
