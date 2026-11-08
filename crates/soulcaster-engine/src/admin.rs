@@ -480,4 +480,25 @@ mod helper_path_tests {
         );
         fs::remove_dir_all(&root).unwrap();
     }
+
+    #[test]
+    fn a_helper_planted_beside_the_window_does_not_beat_the_bundle() {
+        let root =
+            std::env::temp_dir().join(format!("soulcaster-helper-planted-{}", std::process::id()));
+        let helpers = root.join("Contents/Helpers");
+        let macos = root.join("Contents/MacOS");
+        fs::create_dir_all(&helpers).unwrap();
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(helpers.join("soulcaster-askpass"), "bundle").unwrap();
+        fs::write(macos.join("soulcaster-askpass"), "planted").unwrap();
+        let chosen = fs::canonicalize(helper_for(&macos.join("Soulcaster"))).unwrap();
+        let bundled = fs::canonicalize(helpers.join("soulcaster-askpass")).unwrap();
+        let planted = fs::canonicalize(macos.join("soulcaster-askpass")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_ne!(
+            chosen, planted,
+            "a soulcaster-askpass planted beside the window binary was chosen"
+        );
+        assert_eq!(chosen, bundled);
+    }
 }

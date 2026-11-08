@@ -653,6 +653,33 @@ mod tests {
     }
 
     #[test]
+    fn an_imported_dotfiles_repo_does_not_follow_a_later_catalog_plan() {
+        let mut app = app();
+        app.read_sample("example-stranger/setup");
+        app.review_tick(&Tick::Repo);
+        app.start_from_review();
+        let imported = app
+            .dotfiles
+            .as_ref()
+            .map(|dotfiles| dotfiles.repo.clone())
+            .expect("starting from that import should keep its Dotfiles Repo for the Run");
+        assert!(imported.contains("example-stranger/dotfiles"), "{imported}");
+        app.screen = Screen::Catalog;
+        app.selected.clear();
+        app.packages.clear();
+        app.settings.clear();
+        app.selected.insert("jq".to_string());
+        let plan = app.plan();
+        assert_eq!(
+            plan.dotfiles
+                .as_ref()
+                .map(|dotfiles| dotfiles.repo.as_str()),
+            None,
+            "a Catalog plan that has nothing to do with the import still carries {imported}"
+        );
+    }
+
+    #[test]
     fn saving_never_gets_in_the_way_of_a_run() {
         // With nothing saved yet and no network, a Run still starts from the same selection.
         let mut app = app();

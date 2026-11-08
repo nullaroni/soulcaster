@@ -343,4 +343,35 @@ mod tests {
         assert!(matches!(kinds[0], EventKind::RunWarning { .. }));
         assert!(matches!(kinds[1], EventKind::RunFinished { .. }));
     }
+
+    #[test]
+    fn closing_the_window_while_the_password_is_open_unblocks_the_run() {
+        let waiting = Arc::new(Waiting::default());
+        let asks = WindowAsks(Arc::clone(&waiting));
+        let mut engine = RealEngine::new(PathBuf::from("/nonexistent"));
+        engine.waiting = Arc::clone(&waiting);
+        let (done, finished) = mpsc::channel();
+        let _thread = thread::spawn(move || {
+            let declined = asks
+                .password(&PasswordRequest {
+                    why: "for a test".to_string(),
+                    last_was_wrong: false,
+                })
+                .is_none();
+            let _ = done.send(declined);
+        });
+        let started = Instant::now();
+        while engine.password_request().is_none() {
+            assert!(started.elapsed() < Duration::from_secs(2), "never asked");
+            thread::sleep(Duration::from_millis(5));
+        }
+        // The window going away drops the engine. The Run has to read that as declining.
+        drop(engine);
+        let declined = finished
+            .recv_timeout(Duration::from_millis(400))
+            .unwrap_or_else(|_| {
+                panic!("dropping the window left the Run blocked in Asks::password");
+            });
+        assert!(declined, "closing the window should decline the password");
+    }
 }

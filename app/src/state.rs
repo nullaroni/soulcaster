@@ -810,13 +810,22 @@ mod tests {
             asking: Mutex<Option<PasswordRequest>>,
             got: Mutex<Option<String>>,
             scoped: Mutex<u32>,
+            /// Taps `start_run` handed over that the plan itself doesn't list.
+            outside_taps: Mutex<Vec<String>>,
         }
 
         /// Behaves like the real engine to the window, and runs nothing.
         struct Stand(Arc<Shared>);
 
         impl Engine for Stand {
-            fn start_run(&mut self, _: &Plan, _: &Answers) {}
+            fn start_run(&mut self, plan: &Plan, answers: &Answers) {
+                *self.0.outside_taps.lock().unwrap() = answers
+                    .taps
+                    .iter()
+                    .filter(|tap| !plan.taps.contains_key(tap.as_str()))
+                    .cloned()
+                    .collect();
+            }
 
             fn start_scoped(&mut self, _: &str, _: &[String], _: Option<&str>) {
                 *self.0.scoped.lock().unwrap() += 1;
@@ -910,6 +919,57 @@ mod tests {
             app.finish_queue_entry("x:y");
             assert!(app.scoped_password_for.is_none());
             assert_eq!(*shared.scoped.lock().unwrap(), 1);
+        }
+
+        #[test]
+        fn a_password_from_a_finished_question_is_not_waiting_for_the_next_one() {
+            let (mut app, shared) = app();
+            *shared.asking.lock().unwrap() = Some(PasswordRequest {
+                why: "the admin steps".to_string(),
+                last_was_wrong: false,
+            });
+            assert!(app.tick(1.0));
+            app.run_password.replace_text("secret");
+            // Later, or the question ending any other way, drops the request.
+            *shared.asking.lock().unwrap() = None;
+            app.tick(2.0);
+            *shared.asking.lock().unwrap() = Some(PasswordRequest {
+                why: "a later admin step".to_string(),
+                last_was_wrong: false,
+            });
+            app.tick(3.0);
+            app.submit_run_password();
+            assert!(
+                shared.got.lock().unwrap().is_none(),
+                "the password typed for a question that already ended was sent to the next one"
+            );
+            assert!(
+                app.run_password.text.is_empty(),
+                "the field still holds the password after the question ended"
+            );
+        }
+
+        #[test]
+        fn a_tap_from_an_earlier_review_is_not_approved_with_a_plan_that_doesnt_show_it() {
+            let (mut app, shared) = app();
+            app.selected.insert("aerospace".to_string());
+            app.answers.taps.insert("nikitabobko/tap".to_string());
+            assert!(
+                app.plan().taps.contains_key("nikitabobko/tap"),
+                "aerospace should be the catalog item that asks for this tap"
+            );
+            app.screen = Screen::Catalog;
+            app.selected.remove("aerospace");
+            app.packages.clear();
+            app.settings.clear();
+            app.selected.insert("jq".to_string());
+            assert!(!app.plan().taps.contains_key("nikitabobko/tap"));
+            app.start_run();
+            assert!(
+                shared.outside_taps.lock().unwrap().is_empty(),
+                "start handed the engine a tap this plan doesn't show: {:?}",
+                shared.outside_taps.lock().unwrap()
+            );
         }
     }
 
