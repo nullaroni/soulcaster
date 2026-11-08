@@ -101,7 +101,9 @@ impl AdminGate for QuietGate {
         Ok(Box::new(MarkerWindow))
     }
 
-    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) {}
+    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) -> bool {
+        true
+    }
 }
 
 struct Harness {
@@ -300,9 +302,15 @@ fn a_failed_sudo_clear_still_accepts_the_password() {
     let gate = stand_in_gate(h.home.path());
     let mut planned = plan(vec![admin_xcode("xc")]);
     let calls = h.perform(&mut planned, &gate);
+    // Changed from requiring `sudo -v` to run: the fix refuses at the failed clear, before `-v`,
+    // so a stale timestamp is never taken as a check. The finding's assertion below is unchanged.
     assert!(
-        calls.iter().any(is_validate),
-        "sudo -v never ran, so this did not reach a stale timestamp: {calls:#?}"
+        calls.iter().any(is_clear),
+        "sudo -k never ran, so this did not reach the failed clear: {calls:#?}"
+    );
+    assert!(
+        !calls.iter().any(is_validate),
+        "sudo -v ran after a failed clear: {calls:#?}"
     );
     assert!(
         !calls

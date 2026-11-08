@@ -92,8 +92,9 @@ impl AdminGate for CountingGate {
         Ok(Box::new(MarkerWindow))
     }
 
-    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) {
+    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) -> bool {
         self.forgotten.fetch_add(1, Ordering::SeqCst);
+        true
     }
 }
 
@@ -151,7 +152,9 @@ impl AdminGate for HeldGate {
         }))
     }
 
-    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) {}
+    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) -> bool {
+        true
+    }
 }
 
 struct Harness {

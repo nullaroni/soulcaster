@@ -64,7 +64,9 @@ impl soulcaster_engine::AdminGate for OpenGate {
         Ok(Box::new(OpenWindow))
     }
 
-    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) {}
+    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) -> bool {
+        true
+    }
 }
 
 struct Sandbox(PathBuf);
@@ -2726,6 +2728,8 @@ mod admin_stage {
         budgets: Mutex<Vec<Budget>>,
         forgotten: AtomicUsize,
         refuse_open: AtomicBool,
+        /// `forget`'s answers in order. Empty means it works.
+        forget_results: Mutex<Vec<bool>>,
     }
 
     impl soulcaster_engine::AdminGate for WatchedGate {
@@ -2755,8 +2759,14 @@ mod admin_stage {
             Ok(Box::new(OpenWindow))
         }
 
-        fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) {
+        fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) -> bool {
             self.forgotten.fetch_add(1, Ordering::Relaxed);
+            let mut results = self.forget_results.lock().unwrap();
+            if results.is_empty() {
+                true
+            } else {
+                results.remove(0)
+            }
         }
     }
 
@@ -2907,6 +2917,30 @@ mod admin_stage {
         let mut p = plan(vec![admin_item("xc")]);
         perform_with(&h, &mut p, &gate, &asks);
         assert_eq!(gate.forgotten.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn a_timestamp_that_wont_end_after_a_step_stops_the_admin_work() {
+        let h = Harness::new();
+        h.runner.on(
+            |c| file_name(c) == "test",
+            [Reply::fails(1, ""), Reply::fails(1, ""), Reply::ok("")],
+        );
+        let gate = WatchedGate::default();
+        // After checking it works, after the first step it doesn't.
+        gate.forget_results.lock().unwrap().extend([true, false]);
+        let asks = AsksInOrder::default();
+        let mut p = plan(vec![admin_item("first"), admin_item("second")]);
+        let (report, events) = perform_with(&h, &mut p, &gate, &asks);
+        assert!(matches!(
+            state(&report, "second"),
+            ItemState::NeedsYou { .. }
+        ));
+        assert_eq!(gate.budgets.lock().unwrap().len(), 1);
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            EventKind::AdminDiscarded { why } if why.contains("couldn't be ended")
+        )));
     }
 
     #[test]

@@ -197,6 +197,8 @@ impl Drop for RunLock {
 
 struct Engine<'a> {
     admin: &'a dyn AdminGate,
+    /// `sudo -k` couldn't be confirmed, so root may still be reachable without asking.
+    sudo_may_be_live: bool,
     plan: &'a mut Plan,
     runner: &'a dyn CommandRunner,
     home: &'a Path,
@@ -281,6 +283,7 @@ impl<'a> Engine<'a> {
             plan: input.plan,
             runner: input.runner,
             admin: input.admin,
+            sudo_may_be_live: false,
             home: input.home,
             events: input.events,
             asks: input.asks,
@@ -1078,8 +1081,17 @@ impl<'a> Engine<'a> {
             match self.admin.validate(self.runner, self.home, &password) {
                 Validation::Accepted => {
                     // Checking it left a timestamp. Nothing should have root while the person
-                    // signs in to GitHub, or between steps.
-                    self.admin.forget(self.runner, self.home);
+                    // signs in to GitHub, or between steps. If that can't be ended, the password
+                    // isn't held at all.
+                    if !self.admin.forget(self.runner, self.home) {
+                        self.sudo_may_be_live = true;
+                        self.emit(EventKind::RunWarning {
+                            text:
+                                "sudo's sign-in couldn't be ended, so the admin work waits for you."
+                                    .into(),
+                        });
+                        break;
+                    }
                     admin::lock_in_memory(password.expose().as_bytes());
                     self.password = Some(password);
                     self.held_since = Some(self.now());
@@ -1263,6 +1275,18 @@ impl<'a> Engine<'a> {
     }
 
     fn sign_in_to_github(&mut self, program: &Path) -> Result<(), EngineError> {
+        // Not a long wait with root possibly reachable. A later Run asks again.
+        if self.sudo_may_be_live {
+            self.asks.github_status(SignInStatus::Failed);
+            return self.open_queue(
+                "gh",
+                "sign-in",
+                QueueKind::Person,
+                "Sign in to GitHub. Run again when you're ready.",
+                None,
+                false,
+            );
+        }
         self.emit(EventKind::AskState {
             ask: AskKind::Github,
             state: AskStatus::Waiting,
@@ -1398,18 +1422,26 @@ impl<'a> Engine<'a> {
         if self.gh_account(&brew_gh)?.is_none() {
             return Ok(None);
         }
-        if link_on_the_way(self.home, Path::new(".gitconfig")) {
+        // `git config --global` writes `~/.config/git/config` when `~/.gitconfig` isn't there, so
+        // both are checked.
+        let configs = [Path::new(".gitconfig"), Path::new(".config/git/config")];
+        if configs
+            .iter()
+            .any(|config| link_on_the_way(self.home, config))
+        {
             self.emit(EventKind::RunWarning {
-                text: "~/.gitconfig is reached through a link, so git's GitHub sign-in was left for you to set up.".into(),
+                text: "~/.gitconfig or ~/.config/git/config is reached through a link, so git's GitHub sign-in was left for you to set up.".into(),
             });
             return Ok(None);
         }
         let config = act::git_file(self.home);
         // git could write the key into a file named here, and a helper set there isn't visible
         // to the read below. Read as text, so this works before git does.
-        let has_include = fs::read_to_string(&config).is_ok_and(|text| {
-            text.lines()
-                .any(|line| line.trim_start().to_lowercase().starts_with("[include"))
+        let has_include = configs.iter().any(|config| {
+            fs::read_to_string(self.home.join(config)).is_ok_and(|text| {
+                text.lines()
+                    .any(|line| line.trim_start().to_lowercase().starts_with("[include"))
+            })
         });
         if has_include {
             self.emit(EventKind::RunWarning {
@@ -1460,7 +1492,13 @@ impl<'a> Engine<'a> {
             // Dropping it zeroes and frees it, so the range has to be released first.
             admin::unlock_memory(password.expose().as_bytes());
             drop(password);
-            self.admin.forget(self.runner, self.home);
+            if !self.admin.forget(self.runner, self.home) {
+                self.sudo_may_be_live = true;
+                self.emit(EventKind::RunWarning {
+                    text: "sudo's sign-in couldn't be ended. It runs out by itself within a few minutes."
+                        .into(),
+                });
+            }
             self.held_since = None;
             self.emit(EventKind::AdminDiscarded {
                 why: why.to_string(),
@@ -2513,7 +2551,11 @@ impl<'a> Engine<'a> {
             };
             let ran = self.run_once(&real, id, true);
             drop(window);
-            self.admin.forget(self.runner, self.home);
+            if !self.admin.forget(self.runner, self.home) {
+                // Root may still be reachable, so no more admin work this Run.
+                self.sudo_may_be_live = true;
+                self.discard("sudo's sign-in couldn't be ended");
+            }
             match outcome_of(ran) {
                 Ok(output) => return Ok(CmdResult::Done(output)),
                 Err(FailureKind::Network) if attempt < 2 => {

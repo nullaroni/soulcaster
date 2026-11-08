@@ -61,7 +61,8 @@ pub trait AdminGate: Send + Sync {
     fn validate(&self, runner: &dyn CommandRunner, home: &Path, password: &Password) -> Validation;
     fn open(&self, password: &Password, budget: Budget) -> Result<Box<dyn AdminWindow>, String>;
     /// Ends `sudo`'s own timestamp. Without this, dropping the password wouldn't end root access.
-    fn forget(&self, runner: &dyn CommandRunner, home: &Path);
+    /// False when that can't be confirmed, and the caller then treats root as still reachable.
+    fn forget(&self, runner: &dyn CommandRunner, home: &Path) -> bool;
 }
 
 /// Who may have an answer. The path always has to match. The signature is what proves it on a
@@ -108,7 +109,12 @@ impl SocketGate {
 
 impl AdminGate for SocketGate {
     fn validate(&self, runner: &dyn CommandRunner, home: &Path, password: &Password) -> Validation {
-        let _ = runner.run(&self.plain(home).args(["-k"]), &mut |_, _| {});
+        // Without this, an earlier timestamp would answer `-v` and nothing would be checked.
+        if !self.forget(runner, home) {
+            return Validation::Unavailable(
+                "sudo's earlier sign-in couldn't be cleared".to_string(),
+            );
+        }
         let window = match self.open(password, Budget::One) {
             Ok(window) => window,
             Err(why) => return Validation::Unavailable(why),
@@ -173,8 +179,10 @@ impl AdminGate for SocketGate {
         }))
     }
 
-    fn forget(&self, runner: &dyn CommandRunner, home: &Path) {
-        let _ = runner.run(&self.plain(home).args(["-k"]), &mut |_, _| {});
+    fn forget(&self, runner: &dyn CommandRunner, home: &Path) -> bool {
+        runner
+            .run(&self.plain(home).args(["-k"]), &mut |_, _| {})
+            .is_ok_and(|output| output.is_success())
     }
 }
 

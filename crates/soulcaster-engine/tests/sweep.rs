@@ -64,7 +64,9 @@ impl soulcaster_engine::AdminGate for OpenGate {
         Ok(Box::new(OpenWindow))
     }
 
-    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) {}
+    fn forget(&self, _runner: &dyn CommandRunner, _home: &Path) -> bool {
+        true
+    }
 }
 
 struct Rng(u64);

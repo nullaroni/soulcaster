@@ -256,9 +256,28 @@ fn the_helper_refuses_a_relative_start_and_prints_nothing() {
 #[test]
 fn forget_ends_sudos_own_timestamp() {
     let sandbox = Sandbox::new("forget");
-    sandbox.gate().forget(&ProcessRunner::new(), sandbox.path());
+    assert!(sandbox.gate().forget(&ProcessRunner::new(), sandbox.path()));
     assert_eq!(
         fs::read_to_string(sandbox.path().join("log")).unwrap(),
         "forgot\n"
     );
+}
+
+#[test]
+fn forget_says_so_when_sudo_wont_clear() {
+    let sandbox = Sandbox::new("forget-fails");
+    let sudo = sandbox.path().join("sudo-that-fails");
+    fs::write(&sudo, "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&sudo, fs::Permissions::from_mode(0o755)).unwrap();
+    let gate = SocketGate::new(PathBuf::from(HELPER), PeerRule::PathOnly).with_sudo(sudo);
+    assert!(!gate.forget(&ProcessRunner::new(), sandbox.path()));
+    // And the password isn't treated as checked.
+    assert!(matches!(
+        gate.validate(
+            &ProcessRunner::new(),
+            sandbox.path(),
+            &Password::new(SECRET.to_string())
+        ),
+        Validation::Unavailable(_)
+    ));
 }
