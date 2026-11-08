@@ -3182,6 +3182,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soulcaster-core",
+ "soulcaster-engine",
  "soulcaster-repo",
  "tempfile",
 ]

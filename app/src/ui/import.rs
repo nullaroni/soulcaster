@@ -143,8 +143,10 @@ fn paste(app: &App, k: &Kit, error: Option<&str>) -> El {
             kit::mandarin(),
         ));
     }
-    body = body.child(group_row("samples", "Simulated repos"));
-    for sample in SAMPLES {
+    if !app.engine.is_real() {
+        body = body.child(group_row("samples", "Simulated repos"));
+    }
+    for sample in SAMPLES.iter().filter(|_| !app.engine.is_real()) {
         let name = (*sample).to_string();
         body = body.child(plain_row(
             format!("sample-{sample}"),

@@ -77,7 +77,9 @@ fn run(rest: &[&str]) -> ExitCode {
     use std::sync::{Arc, Mutex};
 
     use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
-    use soulcaster_engine::{Clock, MachineRecord, ProcessRunner, SystemClock, gate_beside};
+    use soulcaster_engine::{
+        Clock, KeepAwake, MachineRecord, ProcessRunner, SystemClock, gate_beside,
+    };
     use soulcaster_repo::in_run::RunDotfiles;
 
     let (path, json) = match rest {
@@ -125,7 +127,7 @@ fn run(rest: &[&str]) -> ExitCode {
         home: &home,
         json,
     };
-    let _awake = run_command::KeepAwake::start();
+    let _awake = KeepAwake::start();
     let out = Arc::new(Mutex::new(std::io::stdout()));
     ExitCode::from(run_command::run_plan(&mut plan, &setup, out))
 }

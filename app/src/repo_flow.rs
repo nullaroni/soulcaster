@@ -5,7 +5,10 @@
 //! in [`RepoSim`], along with moving these calls off the window's thread.
 
 use rune::TextEdit;
+use std::path::PathBuf;
+
 use soulcaster_core::approval::{ApprovalStore, Approvals, CommitSha, DotfilesApproval};
+use soulcaster_core::command::CommandRunner;
 use soulcaster_core::command::Reply;
 use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
 use soulcaster_core::plan::DotfilesPlan;
@@ -82,11 +85,13 @@ const OWN_NEWER: &str = "88bb123000000000000000000000000000000000";
 /// The outside world, simulated. Everything it writes is under `dir`, a temporary folder removed
 /// when the window closes.
 pub struct RepoSim {
-    /// Held so the folder lasts as long as the window.
-    _dir: tempfile::TempDir,
+    /// Held so the folder lasts as long as the window. A real window has none.
+    _dir: Option<tempfile::TempDir>,
     pub github: FakeGitHub,
+    /// The real programs. Without this, everything goes to `github` above.
+    real: Option<soulcaster_engine::ProcessRunner>,
     pub tools: Tools,
-    pub store: FileApprovals,
+    pub store: Box<dyn ApprovalStore>,
 }
 
 impl RepoSim {
@@ -94,18 +99,36 @@ impl RepoSim {
         let dir = tempfile::tempdir().expect("a temporary folder");
         let home = std::fs::canonicalize(dir.path()).expect("the folder just made");
         let tools = Tools::fixed(home.clone());
-        let store = FileApprovals::new(home.join("approvals-test-double.json"));
+        let store = Box::new(FileApprovals::new(home.join("approvals-test-double.json")));
         Self {
             github: seeded_github(),
+            real: None,
             tools,
             store,
-            _dir: dir,
+            _dir: Some(dir),
+        }
+    }
+
+    fn real(home: PathBuf) -> Self {
+        Self {
+            github: FakeGitHub::new(),
+            real: Some(soulcaster_repo::process::runner()),
+            tools: Tools::for_mac(home.clone()),
+            store: Box::new(soulcaster_engine::RecordApprovals::new(home)),
+            _dir: None,
+        }
+    }
+
+    fn runner(&self) -> &dyn CommandRunner {
+        match &self.real {
+            Some(real) => real,
+            None => &self.github,
         }
     }
 
     fn importer(&self) -> Importer<'_> {
         Importer::connect(
-            &self.github,
+            self.runner(),
             &self.tools,
             view().catalog,
             DEFAULT_CLONE_LOCATION,
@@ -114,9 +137,9 @@ impl RepoSim {
 
     fn step(&self) -> DotfilesStep<'_> {
         DotfilesStep {
-            runner: &self.github,
+            runner: self.runner(),
             tools: &self.tools,
-            store: &self.store,
+            store: self.store.as_ref(),
             clone_location: DEFAULT_CLONE_LOCATION,
             stamp: "simulated-run",
         }
@@ -272,6 +295,14 @@ fn seeded_github() -> FakeGitHub {
 }
 
 impl RepoFlow {
+    /// Import and Save on real GitHub, and approvals in the Machine Record.
+    pub fn real(home: PathBuf) -> Self {
+        Self {
+            sim: RepoSim::real(home),
+            ..Self::simulated()
+        }
+    }
+
     pub fn simulated() -> Self {
         Self {
             sim: RepoSim::new(),
@@ -428,7 +459,10 @@ impl App {
         if page.review.nothing_selected(&page.boxes) {
             return;
         }
-        let Ok(run) = page.review.record_start(&page.boxes, &self.repo.sim.store) else {
+        let Ok(run) = page
+            .review
+            .record_start(&page.boxes, self.repo.sim.store.as_ref())
+        else {
             self.toast = Some("Couldn't record your approvals, so nothing started.".to_string());
             return;
         };
@@ -443,6 +477,7 @@ impl App {
                 .iter()
                 .map(|c| format!("cask:{c}")),
         );
+        self.dotfiles = run.config.dotfiles.clone();
         self.answers.taps = run.taps.iter().cloned().collect();
         self.answers.licenses = run.licenses.clone();
         self.rebuild_rows();
@@ -459,7 +494,7 @@ impl App {
             base: self.repo.last_saved.as_deref(),
         };
         let sim = &self.repo.sim;
-        let outcome = save(&sim.github, &sim.tools, view().catalog, &request);
+        let outcome = save(sim.runner(), &sim.tools, view().catalog, &request);
         self.repo.save = match outcome {
             Ok(outcome) => {
                 if matches!(

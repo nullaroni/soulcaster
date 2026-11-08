@@ -60,7 +60,11 @@ pub fn view(app: &App, cx: &mut Cx<App>) -> El {
                 .min_h(0.0)
                 .child(body),
         )
-        .child(simulated_strip());
+        .child(if app.engine.is_real() {
+            el()
+        } else {
+            simulated_strip()
+        });
     rune_kit::root(base, layer)
 }
 

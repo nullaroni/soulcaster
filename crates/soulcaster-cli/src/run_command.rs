@@ -286,31 +286,6 @@ fn read_without_echo(prompt: &str) -> Option<String> {
     (!line.is_empty()).then_some(line)
 }
 
-/// Keeps the Mac awake for as long as this lives, then lets it sleep again.
-pub struct KeepAwake(Option<std::process::Child>);
-
-impl KeepAwake {
-    pub fn start() -> Self {
-        let child = std::process::Command::new("/usr/bin/caffeinate")
-            .args(["-dimsu", "-w", &std::process::id().to_string()])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .ok();
-        Self(child)
-    }
-}
-
-impl Drop for KeepAwake {
-    fn drop(&mut self) {
-        if let Some(child) = &mut self.0 {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;

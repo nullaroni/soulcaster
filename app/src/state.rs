@@ -131,6 +131,10 @@ pub struct App {
     pub queue: Vec<QueueEntry>,
     pub scoped_password_for: Option<String>,
     pub scoped_password: TextEdit,
+    pub run_password: TextEdit,
+    pub run_asks: (bool, bool),
+    /// The Dotfiles Repo from an imported Config, for the Run to apply.
+    pub dotfiles: Option<soulcaster_core::config::Dotfiles>,
     pub scoped_wrong: bool,
 
     // Drift
@@ -149,6 +153,15 @@ pub struct App {
 }
 
 pub fn init() -> App {
+    // A real Run changes this Mac, so it's opt-in until real-Mac verification has passed.
+    if std::env::args().any(|arg| arg == "--real")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        let home = std::path::PathBuf::from(home);
+        let mut app = with_engine(Box::new(crate::real::RealEngine::new(home.clone())));
+        app.repo = crate::repo_flow::RepoFlow::real(home);
+        return app;
+    }
     with_engine(Box::new(SimEngine::new(Scenario::Both, SimMachine::Bare)))
 }
 
@@ -185,6 +198,9 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         queue: Vec::new(),
         scoped_password_for: None,
         scoped_password: TextEdit::new("").secure(),
+        run_password: TextEdit::new("").secure(),
+        run_asks: (false, false),
+        dotfiles: None,
         scoped_wrong: false,
         drift: crate::drift::sample(),
         confirm_remove: None,
@@ -273,7 +289,7 @@ impl App {
                     .collect(),
             },
             settings: self.settings.clone(),
-            dotfiles: None,
+            dotfiles: self.dotfiles.clone(),
         }
     }
 
@@ -293,7 +309,7 @@ impl App {
     }
 
     pub fn needs_github(&self) -> bool {
-        !self.base_present
+        !self.base_present && !self.engine.is_real()
     }
 
     pub fn fill_typical(&mut self) {
@@ -509,13 +525,26 @@ impl App {
         self.engine.submit_password(Password::new(typed));
     }
 
+    /// The Run is waiting on this. A real engine checks it and may ask again.
+    pub fn submit_run_password(&mut self) {
+        if self.run_password.text.is_empty() {
+            return;
+        }
+        let typed = std::mem::take(&mut self.run_password.text);
+        self.run_password.clear();
+        self.engine.submit_password(Password::new(typed));
+    }
+
     pub fn start_github(&mut self) {
         let code = self.engine.start_github_sign_in();
         self.github = GithubState::Waiting { code };
     }
 
     pub fn ready_to_start(&self, plan: &Plan) -> bool {
-        let password = !plan.needs_admin() || self.password_state == PasswordState::Accepted;
+        // A real Run asks when it knows it needs to.
+        let password = self.engine.is_real()
+            || !plan.needs_admin()
+            || self.password_state == PasswordState::Accepted;
         let github =
             !self.needs_github() || matches!(self.github, GithubState::Done | GithubState::Skipped);
         password && github && plan.conflicts.is_empty()
@@ -565,9 +594,11 @@ impl App {
                 ask: AskKind::Password,
                 state,
             } => {
+                // For a real engine `waiting` only means it's about to ask.
                 self.password_state = match state {
                     AskStatus::Done => PasswordState::Accepted,
                     AskStatus::Skipped => PasswordState::Empty,
+                    AskStatus::Waiting if self.engine.is_real() => PasswordState::Empty,
                     AskStatus::Waiting => PasswordState::Wrong,
                 };
                 if self.scoped_password_for.is_some() {
@@ -669,7 +700,7 @@ impl App {
         let Some(entry) = self.queue.iter().find(|q| q.id == id).cloned() else {
             return;
         };
-        if entry.needs_password {
+        if entry.needs_password && !self.engine.is_real() {
             self.scoped_password_for = Some(id.to_string());
             self.scoped_wrong = false;
             self.scoped_password.focused = true;
@@ -724,6 +755,15 @@ impl App {
             self.apply(event);
             changed = true;
         }
+        // These come from the Run's thread between events, so a change here needs a redraw too.
+        let asks = (
+            self.engine.password_request().is_some(),
+            self.engine.github_code().is_some(),
+        );
+        if asks != self.run_asks {
+            self.run_asks = asks;
+            changed = true;
+        }
         changed
     }
 
@@ -757,6 +797,122 @@ pub const ALWAYS_SECTION: usize = usize::MAX - 1;
 
 #[cfg(test)]
 mod tests {
+    mod real_mode {
+        use std::sync::{Arc, Mutex};
+
+        use soulcaster_core::ask::PasswordRequest;
+
+        use super::*;
+        use crate::answers::Answers;
+
+        #[derive(Default)]
+        struct Shared {
+            asking: Mutex<Option<PasswordRequest>>,
+            got: Mutex<Option<String>>,
+            scoped: Mutex<u32>,
+        }
+
+        /// Behaves like the real engine to the window, and runs nothing.
+        struct Stand(Arc<Shared>);
+
+        impl Engine for Stand {
+            fn start_run(&mut self, _: &Plan, _: &Answers) {}
+
+            fn start_scoped(&mut self, _: &str, _: &[String], _: Option<&str>) {
+                *self.0.scoped.lock().unwrap() += 1;
+            }
+
+            fn submit_password(&mut self, password: Password) {
+                *self.0.got.lock().unwrap() = Some(password.expose().to_string());
+            }
+
+            fn start_github_sign_in(&mut self) -> String {
+                String::new()
+            }
+
+            fn poll(&mut self, _: f64) -> Vec<Event> {
+                Vec::new()
+            }
+
+            fn next_due(&self, _: f64) -> Option<f64> {
+                None
+            }
+
+            fn is_real(&self) -> bool {
+                true
+            }
+
+            fn password_request(&self) -> Option<PasswordRequest> {
+                self.0.asking.lock().unwrap().clone()
+            }
+        }
+
+        fn app() -> (App, Arc<Shared>) {
+            let shared = Arc::new(Shared::default());
+            (with_engine(Box::new(Stand(Arc::clone(&shared)))), shared)
+        }
+
+        #[test]
+        fn review_doesnt_ask_for_what_the_run_will_ask_for() {
+            let (mut app, _) = app();
+            app.selected.insert("ripgrep".to_string());
+            let plan = app.plan();
+            assert!(plan.needs_admin());
+            assert!(!app.needs_github());
+            assert!(app.ready_to_start(&plan));
+        }
+
+        #[test]
+        fn the_engine_about_to_ask_isnt_a_wrong_password() {
+            let (mut app, _) = app();
+            let mut stamper = soulcaster_core::event::Stamper::new();
+            app.apply(stamper.stamp(
+                0,
+                EventKind::AskState {
+                    ask: AskKind::Password,
+                    state: AskStatus::Waiting,
+                },
+            ));
+            assert_eq!(app.password_state, PasswordState::Empty);
+        }
+
+        #[test]
+        fn a_question_from_the_run_redraws_and_the_answer_goes_back() {
+            let (mut app, shared) = app();
+            assert!(!app.tick(1.0));
+            *shared.asking.lock().unwrap() = Some(PasswordRequest {
+                why: "x".to_string(),
+                last_was_wrong: false,
+            });
+            assert!(app.tick(2.0), "the question didn't redraw the window");
+            assert!(!app.tick(3.0), "it should only redraw when it changes");
+            app.run_password.replace_text("secret");
+            app.submit_run_password();
+            assert_eq!(shared.got.lock().unwrap().as_deref(), Some("secret"));
+            assert!(
+                app.run_password.text.is_empty(),
+                "the field kept the password"
+            );
+        }
+
+        #[test]
+        fn finishing_a_queue_entry_doesnt_ask_first_when_the_run_will() {
+            let (mut app, shared) = app();
+            app.queue.push(QueueEntry {
+                id: "x:y".to_string(),
+                item: "x".to_string(),
+                kind: soulcaster_core::event::QueueKind::NeedsAdmin,
+                text: "t".to_string(),
+                detail: None,
+                link: None,
+                needs_password: true,
+            });
+            app.finish_queue_entry("x:y");
+            assert!(app.scoped_password_for.is_none());
+            assert_eq!(*shared.scoped.lock().unwrap(), 1);
+        }
+    }
+
     use soulcaster_core::catalog::Catalog;
     use soulcaster_core::event::{EventKind, Stamper};
 

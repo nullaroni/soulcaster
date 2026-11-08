@@ -16,7 +16,7 @@ pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
         left += 1;
         asks = asks.child(conflict_row(conflict));
     }
-    if plan.needs_admin() {
+    if plan.needs_admin() && !app.engine.is_real() {
         left += usize::from(app.password_state != PasswordState::Accepted);
         asks = asks.child(password_row(app, k));
     }

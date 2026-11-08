@@ -422,14 +422,27 @@ pub(crate) fn disable_core_dumps() {
 /// The identifier the release signs the helper with, from `packaging/sign-app.sh`.
 pub const ASKPASS_IDENTIFIER: &str = "com.nullworks.macflayer.askpass";
 
-/// The gate for this build: the helper beside `executable`, as packaging puts it. A release built
-/// with `SOULCASTER_TEAM_ID` answers only that team's signature. Any other build, a contributor's
-/// own ad-hoc one included, checks the helper's path alone.
+/// Where the helper is for a program at `executable`. In the app bundle the CLI sits beside it in
+/// `Contents/Helpers`, and the window one folder over in `Contents/MacOS`. A plain build has it
+/// beside both.
+fn helper_for(executable: &std::path::Path) -> PathBuf {
+    let Some(folder) = executable.parent() else {
+        return PathBuf::new();
+    };
+    let beside = folder.join("soulcaster-askpass");
+    let bundled = folder.join("../Helpers/soulcaster-askpass");
+    if !beside.exists() && bundled.exists() {
+        bundled
+    } else {
+        beside
+    }
+}
+
+/// The gate for this build: the helper packaging put next to `executable`. A release built with
+/// `SOULCASTER_TEAM_ID` answers only that team's signature. Any other build, a contributor's own
+/// ad-hoc one included, checks the helper's path alone.
 pub fn gate_beside(executable: &std::path::Path) -> SocketGate {
-    let helper = executable
-        .parent()
-        .map(|folder| folder.join("soulcaster-askpass"))
-        .unwrap_or_default();
+    let helper = helper_for(executable);
     let rule = match option_env!("SOULCASTER_TEAM_ID") {
         Some(team) if !team.is_empty() => PeerRule::Signed {
             identifier: ASKPASS_IDENTIFIER.to_string(),
@@ -438,4 +451,33 @@ pub fn gate_beside(executable: &std::path::Path) -> SocketGate {
         _ => PeerRule::PathOnly,
     };
     SocketGate::new(helper, rule)
+}
+
+#[cfg(test)]
+mod helper_path_tests {
+    use super::helper_for;
+    use std::fs;
+
+    #[test]
+    fn the_helper_is_found_from_the_cli_the_window_and_a_plain_build() {
+        let root = std::env::temp_dir().join(format!("soulcaster-helper-{}", std::process::id()));
+        let helpers = root.join("Contents/Helpers");
+        let macos = root.join("Contents/MacOS");
+        fs::create_dir_all(&helpers).unwrap();
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(helpers.join("soulcaster-askpass"), "").unwrap();
+        let from_cli = helper_for(&helpers.join("soulcaster"));
+        assert_eq!(from_cli, helpers.join("soulcaster-askpass"));
+        let from_window = fs::canonicalize(helper_for(&macos.join("Soulcaster"))).unwrap();
+        assert_eq!(
+            from_window,
+            fs::canonicalize(helpers.join("soulcaster-askpass")).unwrap()
+        );
+        let plain = root.join("target/debug");
+        assert_eq!(
+            helper_for(&plain.join("soulcaster")),
+            plain.join("soulcaster-askpass")
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

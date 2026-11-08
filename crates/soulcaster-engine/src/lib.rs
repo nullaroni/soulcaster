@@ -9,6 +9,7 @@
 mod act;
 mod admin;
 mod approvals;
+mod awake;
 mod dotfiles;
 mod process;
 mod record;
@@ -19,6 +20,7 @@ pub use admin::{
     gate_beside,
 };
 pub use approvals::RecordApprovals;
+pub use awake::KeepAwake;
 pub use dotfiles::{DotfilesHook, DotfilesResult};
 pub use process::ProcessRunner;
 pub use record::{
