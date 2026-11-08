@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::catalog::{Catalog, Lookup};
 use crate::config::{Config, SettingValue};
 use crate::lifecycle::SkipReason;
+use crate::lint::{DEFAULT_CLONE_LOCATION, lint};
 use crate::plan::{Plan, Why};
 use crate::recipe::{Recipe, Step};
 
@@ -136,6 +137,26 @@ fn set_listed(list: &mut Vec<String>, name: &str, listed: bool) {
     }
 }
 
+/// The reviewed entries that can't be written onto this Config: it changed there since the
+/// person looked, or the value is one a setting can't hold.
+pub fn moved_since(latest: &Config, reviewed: &[Reviewed]) -> Vec<String> {
+    let unusable = |entry: &Reviewed| {
+        is_setting(&entry.key)
+            && entry
+                .write
+                .as_ref()
+                .is_some_and(|value| serde_json::from_value::<SettingValue>(value.clone()).is_err())
+    };
+    reviewed
+        .iter()
+        .filter(|entry| {
+            let now = value_in(latest, &entry.key);
+            unusable(entry) || (now != entry.seen && now != entry.write)
+        })
+        .map(|entry| entry.id.clone())
+        .collect()
+}
+
 /// Writes the reviewed entries, and nothing else, onto the latest Config. An entry that changed
 /// there since the person looked is not written: it comes back to be chosen again. One already
 /// holding what's being written needs nothing, which is how a save the app died after settles.
@@ -145,21 +166,7 @@ pub fn adopt_onto(
     reviewed: &[Reviewed],
     always_installed: &BTreeSet<&str>,
 ) -> Result<Config, Vec<String>> {
-    let unusable = |entry: &Reviewed| {
-        is_setting(&entry.key)
-            && entry
-                .write
-                .as_ref()
-                .is_some_and(|value| serde_json::from_value::<SettingValue>(value.clone()).is_err())
-    };
-    let moved: Vec<String> = reviewed
-        .iter()
-        .filter(|entry| {
-            let now = value_in(latest, &entry.key);
-            unusable(entry) || (now != entry.seen && now != entry.write)
-        })
-        .map(|entry| entry.id.clone())
-        .collect();
+    let moved = moved_since(latest, reviewed);
     if !moved.is_empty() {
         return Err(moved);
     }
@@ -191,6 +198,10 @@ pub fn adopt_onto(
     config
         .items
         .retain(|item| !always_installed.contains(item.as_str()));
+    config
+        .packages
+        .formulae
+        .retain(|name| !always_installed.contains(name.as_str()));
     Ok(config)
 }
 
@@ -202,12 +213,124 @@ pub enum Uninstall {
     Cask(String),
 }
 
+/// A name Homebrew could have given: one part, or `owner/tap/name`, each starting with a letter
+/// or a digit. A name from the Machine Record or from Homebrew's output is checked against this
+/// before it's used, so it can't be an option or lead anywhere else.
+pub fn plain_package(name: &str) -> bool {
+    let parts: Vec<&str> = name.split('/').collect();
+    name.len() <= 128
+        && matches!(parts.len(), 1 | 3)
+        && !name.contains("..")
+        && !name.ends_with(".rb")
+        && !name.starts_with("homebrew/")
+        && !parts.get(1).is_some_and(|tap| tap.starts_with("homebrew-"))
+        && parts.iter().all(|part| {
+            part.bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+                && part.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'-' | b'_' | b'.' | b'+' | b'@')
+                })
+        })
+}
+
+/// What Homebrew keeps an install under: its kind and its short name. A tap's name and the plain
+/// one are the same keg to `brew uninstall`.
+pub type Keg = (bool, String);
+
+fn keg(cask: bool, name: &str) -> Keg {
+    (cask, name.rsplit('/').next().unwrap_or(name).to_string())
+}
+
+pub fn kegs_of(id: &str, recipe: Option<&Recipe>) -> Vec<Keg> {
+    let mut out = Vec::new();
+    if let Some(name) = id.strip_prefix("formula:") {
+        out.push(keg(false, name));
+    } else if let Some(name) = id.strip_prefix("cask:") {
+        out.push(keg(true, name));
+    }
+    if let Some(Recipe::Install(install)) = recipe {
+        for step in &install.steps {
+            match step {
+                Step::BrewFormula { name, .. } => out.push(keg(false, name)),
+                Step::BrewCask { name, .. } => out.push(keg(true, name)),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// In the file but not being applied, and everything those need. None of it is unwanted.
+pub fn set_aside(plan: &Plan, catalog: &Catalog) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let mut todo: Vec<String> = plan
+        .skipped
+        .iter()
+        .map(|entry| current_id(catalog, &entry.raw))
+        .chain(plan.conflicts.iter().flat_map(|conflict| {
+            [
+                current_id(catalog, &conflict.item),
+                current_id(catalog, &conflict.other),
+            ]
+        }))
+        .collect();
+    while let Some(id) = todo.pop() {
+        if let Some(entry) = catalog.entry(&id) {
+            todo.extend(
+                entry
+                    .recipe
+                    .requires()
+                    .iter()
+                    .filter(|needed| !out.contains(*needed))
+                    .cloned(),
+            );
+        }
+        out.insert(id);
+    }
+    out
+}
+
+/// How to take this off this Mac, if it may be taken off at all. The row and the uninstall both
+/// ask this, so what's offered and what's allowed can't disagree.
+pub fn removal_of(plan: &Plan, catalog: &Catalog, id: &str) -> Option<Uninstall> {
+    if plan.has_unknown_ids() {
+        return None;
+    }
+    let id = current_id(catalog, id);
+    let uninstall = uninstall_of(catalog, &id)?;
+    if catalog.base_items().any(|entry| entry.id() == id) {
+        return None;
+    }
+    let aside = set_aside(plan, catalog);
+    if aside.contains(&id) || plan.entries.iter().any(|entry| entry.id == id) {
+        return None;
+    }
+    let target = match &uninstall {
+        Uninstall::Formula(name) => keg(false, name),
+        Uninstall::Cask(name) => keg(true, name),
+    };
+    let still_wanted = plan
+        .entries
+        .iter()
+        .flat_map(|entry| kegs_of(&entry.id, Some(&entry.recipe)))
+        .chain(
+            aside
+                .iter()
+                .flat_map(|id| kegs_of(id, catalog.entry(id).map(|entry| &entry.recipe))),
+        )
+        .any(|wanted| wanted == target);
+    (!still_wanted).then_some(uninstall)
+}
+
 pub fn uninstall_of(catalog: &Catalog, id: &str) -> Option<Uninstall> {
     if let Some(name) = id.strip_prefix("formula:") {
-        return Some(Uninstall::Formula(name.to_string()));
+        return plain_package(name).then(|| Uninstall::Formula(name.to_string()));
     }
     if let Some(name) = id.strip_prefix("cask:") {
-        return Some(Uninstall::Cask(name.to_string()));
+        return plain_package(name).then(|| Uninstall::Cask(name.to_string()));
     }
     let Recipe::Install(install) = &catalog.entry(id)?.recipe else {
         return None;
@@ -237,8 +360,8 @@ pub fn current_id(catalog: &Catalog, raw: &str) -> String {
     }
 }
 
-/// How the file spells this entry, or the entry itself when the file doesn't have it.
-fn file_key(facts: &Facts<'_>, id: &str) -> String {
+/// How the file spells this entry, if the file has it at all.
+fn file_key(facts: &Facts<'_>, id: &str) -> Option<String> {
     let config = facts.config;
     let spellings = config
         .items
@@ -253,12 +376,9 @@ fn file_key(facts: &Facts<'_>, id: &str) -> String {
                 .map(|f| format!("formula:{f}")),
         )
         .chain(config.packages.casks.iter().map(|c| format!("cask:{c}")));
-    for raw in spellings {
-        if raw == id || current_id(facts.catalog, &raw) == id {
-            return raw;
-        }
-    }
-    id.to_string()
+    spellings
+        .into_iter()
+        .find(|raw| raw == id || current_id(facts.catalog, raw) == id)
 }
 
 /// A person's answer to a row.
@@ -328,12 +448,22 @@ pub struct Row {
     pub is_setting: bool,
     pub removable: bool,
     pub adoptable: bool,
+    /// The file holds an ID this version can't read, and that ID might be this entry.
+    pub waits_for_update: bool,
+    /// Here only because something in the Config needs it, so the file has no line for it.
+    pub only_needed: bool,
 }
 
 impl Row {
     pub fn sentence(&self) -> String {
         let name = &self.name;
+        if self.waits_for_update {
+            return held_sentence(name);
+        }
         match self.kind {
+            RowKind::RemovedHere if self.only_needed => {
+                format!("{name} was removed from this Mac, but something in your Config needs it.")
+            }
             RowKind::ChangedHere => format!("{name} changed on this Mac."),
             RowKind::RemovedHere => {
                 format!("{name} was removed from this Mac, but your Config still lists it.")
@@ -354,12 +484,17 @@ impl Row {
     }
 
     pub fn choices(&self) -> Vec<Choice> {
+        if self.waits_for_update {
+            return Vec::new();
+        }
         let mut out = match self.kind {
-            RowKind::ChangedHere
-            | RowKind::RemovedHere
-            | RowKind::ChangedInConfig
-            | RowKind::Conflict => vec![Choice::Adopt, Choice::Apply, Choice::NotHere],
-            RowKind::NewInConfig => vec![Choice::Apply, Choice::NotHere],
+            RowKind::ChangedHere | RowKind::RemovedHere | RowKind::Conflict => {
+                vec![Choice::Adopt, Choice::Apply, Choice::NotHere]
+            }
+            // Only the Config moved, so saving would put this Mac's older value back over it.
+            RowKind::ChangedInConfig | RowKind::NewInConfig => {
+                vec![Choice::Apply, Choice::NotHere]
+            }
             RowKind::Dropped => vec![Choice::Keep, Choice::AddBack],
             RowKind::Extra => vec![Choice::Adopt, Choice::KeepHere],
         };
@@ -412,6 +547,17 @@ pub fn held_sentence(name: &str) -> String {
     )
 }
 
+fn may_leave_this_mac(facts: &Facts<'_>, key: &str, value: SettingValue) -> bool {
+    let mut only_this = facts.config.clone();
+    only_this.items.clear();
+    only_this.packages = Default::default();
+    only_this.dotfiles = None;
+    only_this.settings = BTreeMap::from([(key.to_string(), value)]);
+    !lint(&only_this, facts.catalog, DEFAULT_CLONE_LOCATION)
+        .iter()
+        .any(|finding| finding.must_stay_on_this_mac() && finding.at == key)
+}
+
 pub fn report(facts: &Facts<'_>) -> Report {
     let catalog = facts.catalog;
     let always: BTreeSet<&str> = catalog.base_items().map(|entry| entry.id()).collect();
@@ -422,14 +568,7 @@ pub fn report(facts: &Facts<'_>) -> Report {
         .filter(|entry| entry.reason == SkipReason::UnknownId)
         .map(|entry| entry.raw.clone())
         .collect();
-    // In the file but not being applied, so it's neither wanted nor dropped.
-    let set_aside: BTreeSet<String> = facts
-        .plan
-        .skipped
-        .iter()
-        .map(|entry| current_id(catalog, &entry.raw))
-        .chain(facts.plan.conflicts.iter().map(|c| c.item.clone()))
-        .collect();
+    let aside = set_aside(facts.plan, catalog);
     let wanted: BTreeMap<&str, Value> = facts
         .plan
         .entries
@@ -465,7 +604,7 @@ pub fn report(facts: &Facts<'_>) -> Report {
         ..Report::default()
     };
     for key in keys {
-        if always.contains(key) || set_aside.contains(key) {
+        if always.contains(key) || aside.contains(key) {
             continue;
         }
         let in_plan = facts.plan.entries.iter().find(|entry| entry.id == key);
@@ -510,19 +649,22 @@ pub fn report(facts: &Facts<'_>) -> Report {
         let removable = kind.may_offer_removal()
             && last_value.is_some()
             && !is_setting
-            && report.held.is_empty()
-            && uninstall_of(catalog, key).is_some();
-        // A value the Config would refuse is never offered.
+            && removal_of(facts.plan, catalog, key).is_some();
+        // A value the Config would refuse, or one that must stay on this Mac, is never offered.
         let value_fits = match (catalog.entry(key).map(|entry| &entry.recipe), &machine) {
             (Some(Recipe::Setting(setting)), Seen::Present(value)) => {
-                serde_json::from_value::<SettingValue>(value.clone())
-                    .is_ok_and(|value| setting.check_value(&value).is_ok())
+                serde_json::from_value::<SettingValue>(value.clone()).is_ok_and(|value| {
+                    setting.check_value(&value).is_ok() && may_leave_this_mac(facts, key, value)
+                })
             }
             _ => true,
         };
+        let spelled = file_key(facts, key);
+        let only_needed = config.is_some() && spelled.is_none();
+        let held_up = !is_setting && !report.held.is_empty();
         report.rows.push(Row {
             id: key.to_string(),
-            file_key: file_key(facts, key),
+            file_key: spelled.unwrap_or_else(|| key.to_string()),
             name,
             kind,
             in_config: config.cloned(),
@@ -532,7 +674,9 @@ pub fn report(facts: &Facts<'_>) -> Report {
             },
             is_setting,
             removable,
-            adoptable: (is_setting || report.held.is_empty()) && value_fits,
+            adoptable: !held_up && value_fits && !only_needed,
+            waits_for_update: held_up && matches!(kind, RowKind::Dropped | RowKind::Extra),
+            only_needed,
         });
     }
     report
@@ -865,7 +1009,7 @@ mod tests {
             .was("keyboard.key-repeat", json!(48));
         let package = world.row("formula:nobody-covers-this").unwrap();
         assert_eq!(package.kind, RowKind::Dropped);
-        assert_eq!(package.choices(), [Choice::Keep]);
+        assert_eq!(package.choices(), []);
         assert_eq!(
             world.row("keyboard.key-repeat").unwrap().choices(),
             [Choice::Adopt, Choice::Apply, Choice::NotHere],
@@ -1048,6 +1192,8 @@ mod tests {
             is_setting: false,
             removable: true,
             adoptable: true,
+            waits_for_update: false,
+            only_needed: false,
         };
         let mut all = vec![
             confirm_remove("Name"),

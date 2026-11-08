@@ -284,12 +284,14 @@ fn a_look_never_runs_apples_stubs_without_the_developer_tools() {
 fn something_homebrew_has_that_the_config_does_not_list_is_extra_once() {
     let sandbox = Sandbox::new();
     let runner = FakeRunner::new();
+    answer(&runner, "CommandLineTools", Reply::ok(""));
     answer(
         &runner,
         "brew leaves",
         Reply::ok("nobody-covers-this\ndockutil\n../../etc/passwd\nBad Name\n"),
     );
     answer(&runner, "brew list", Reply::ok("some-cask\n"));
+    answer(&runner, "Cellar/dockutil", Reply::ok(""));
     absent_by_default(&runner);
     let report = check(
         &runner,
@@ -311,6 +313,7 @@ fn something_homebrew_has_that_the_config_does_not_list_is_extra_once() {
 fn homebrew_being_unreachable_is_not_a_failure_and_makes_nothing_up() {
     let sandbox = Sandbox::new();
     let runner = FakeRunner::new();
+    answer(&runner, "CommandLineTools", Reply::ok(""));
     answer(&runner, "brew leaves", Reply::SpawnFails("no brew".into()));
     absent_by_default(&runner);
     let report = check(
@@ -347,6 +350,8 @@ fn something_recorded_that_the_config_dropped_is_a_dropped_row() {
 fn keeping_it_here_stops_the_asking() {
     let sandbox = Sandbox::new();
     let runner = FakeRunner::new();
+    answer(&runner, "CommandLineTools", Reply::ok(""));
+    answer(&runner, "brew leaves", Reply::ok("nobody-covers-this\n"));
     answer(&runner, "Cellar/nobody-covers-this", Reply::ok(""));
     absent_by_default(&runner);
     remember(
@@ -354,7 +359,6 @@ fn keeping_it_here_stops_the_asking() {
         &[("formula:nobody-covers-this", json!(true))],
     );
     keep_here(sandbox.path(), "formula:nobody-covers-this").unwrap();
-    answer(&runner, "brew leaves", Reply::ok("nobody-covers-this\n"));
     let report = check(
         &runner,
         sandbox.path(),

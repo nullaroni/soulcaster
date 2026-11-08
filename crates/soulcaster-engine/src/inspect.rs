@@ -14,7 +14,8 @@ use soulcaster_core::catalog::{Catalog, Lifecycle};
 use soulcaster_core::command::{Command, CommandEnd, CommandRunner};
 use soulcaster_core::config::{Config, SettingValue};
 use soulcaster_core::drift::{
-    Facts, Report, Reviewed, Seen, Uninstall, current_id, report, uninstall_of,
+    Facts, Keg, Report, Reviewed, Seen, Uninstall, current_id, kegs_of, plain_package, removal_of,
+    report,
 };
 use soulcaster_core::lifecycle::{Assurance, SkipReason};
 use soulcaster_core::plan::Plan;
@@ -108,8 +109,14 @@ impl Look<'_> {
                 Ok(output) if output.is_success() => {}
                 Ok(output) if matches!(output.end, CommandEnd::Exited(_)) => return Some(false),
                 Ok(_) => return None,
-                // A tool that isn't there can't print its version.
-                Err(_) if matches!(probe, Probe::ToolVersion { .. }) => return Some(false),
+                // A tool that isn't there can't print its version. Anything else stopping it
+                // from starting says nothing about whether it's there.
+                Err(error)
+                    if matches!(probe, Probe::ToolVersion { .. })
+                        && error.message.contains("os error 2") =>
+                {
+                    return Some(false);
+                }
                 Err(_) => return None,
             }
         }
@@ -289,8 +296,13 @@ impl Look<'_> {
         }
     }
 
-    /// What Homebrew installed by name. `None` means the question couldn't be asked.
-    fn homebrew_lists(&self) -> Option<Vec<String>> {
+    /// What Homebrew installed by name. `None` means the question couldn't be asked. Homebrew
+    /// starts by looking for git, and with no developer tools it installs one, so it isn't even
+    /// started without them.
+    fn homebrew_lists(&mut self) -> Option<Vec<String>> {
+        if !self.developer_tools_here() {
+            return None;
+        }
         let read = |args: &[&str]| match self.ask(act::brew_read(self.home, args)) {
             Answer::Yes(text) => Some(text),
             _ => None,
@@ -308,19 +320,6 @@ impl Look<'_> {
         out.extend(keys(casks, "cask"));
         Some(out)
     }
-}
-
-fn plain_package(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 200
-        && name.bytes().all(|byte| {
-            byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || matches!(byte, b'-' | b'_' | b'.' | b'+' | b'@' | b'/')
-        })
-        && name
-            .split('/')
-            .all(|part| !part.is_empty() && !part.starts_with('.'))
 }
 
 fn holds(
@@ -475,6 +474,9 @@ fn recipe_for(catalog: &Catalog, plan: &Plan, id: &str) -> Option<Recipe> {
     } else {
         (true, id.strip_prefix("cask:")?)
     };
+    if !plain_package(name) {
+        return None;
+    }
     let probe = if cask {
         Probe::BrewCask {
             name: name.to_string(),
@@ -567,11 +569,23 @@ pub fn check_drift(
             seen.insert(recipe.id().to_string(), Seen::Present(Value::Bool(true)));
         }
     }
+    // Homebrew lists a tap's cask by its short name, so what's known is matched as a keg. The
+    // entry that owns the keg has already been looked at, and speaks for it.
+    let known: BTreeSet<Keg> = catalog
+        .entries()
+        .flat_map(|entry| kegs_of(entry.id(), Some(&entry.recipe)))
+        .chain(
+            plan.entries
+                .iter()
+                .flat_map(|entry| kegs_of(&entry.id, Some(&entry.recipe))),
+        )
+        .chain(recorded.keys().flat_map(|id| kegs_of(id, None)))
+        .collect();
     for key in look.homebrew_lists().unwrap_or_default() {
-        let id = current_id(catalog, &key);
-        if !seen.contains_key(&id) && !always.contains(id.as_str()) {
-            seen.insert(id, Seen::Present(Value::Bool(true)));
+        if kegs_of(&key, None).iter().any(|keg| known.contains(keg)) {
+            continue;
         }
+        seen.insert(key, Seen::Present(Value::Bool(true)));
     }
     Ok(report(&Facts {
         plan,
@@ -624,6 +638,12 @@ pub fn record_saved(
     with_record(home, |record| {
         for entry in saved {
             record.kept_here.remove(&entry.id);
+            // Back in the Config by the person's own choice, so "leave it alone" is over.
+            if record.unavailable.get(&entry.id).map(String::as_str)
+                == Some(reason_label(SkipReason::MarkedByPerson))
+            {
+                record.unavailable.remove(&entry.id);
+            }
             match &entry.write {
                 None => {
                     record.last_applied.remove(&entry.id);
@@ -690,18 +710,6 @@ pub fn remove_from_mac(
 ) -> Result<BTreeMap<String, Removal>, EngineError> {
     let _lock = lock_run(home)?;
     let mut record = MachineRecord::load(home)?;
-    let wanted: BTreeSet<String> = plan
-        .entries
-        .iter()
-        .map(|entry| entry.id.clone())
-        .chain(
-            plan.skipped
-                .iter()
-                .map(|entry| current_id(catalog, &entry.raw)),
-        )
-        .chain(plan.conflicts.iter().map(|conflict| conflict.item.clone()))
-        .collect();
-    let always: BTreeSet<&str> = catalog.base_items().map(|entry| entry.id()).collect();
     let mut look = Look {
         runner,
         home,
@@ -715,7 +723,7 @@ pub fn remove_from_mac(
             .keys()
             .find(|key| current_id(catalog, key) == current)
             .cloned();
-        let uninstall = uninstall_of(catalog, &current);
+        let uninstall = removal_of(plan, catalog, &current);
         let recipe = recipe_for(catalog, plan, &current);
         let (Some(recorded), Some(uninstall), Some(Recipe::Install(install))) =
             (recorded, uninstall, recipe)
@@ -723,8 +731,8 @@ pub fn remove_from_mac(
             out.insert(id.clone(), Removal::Refused);
             continue;
         };
-        if plan.has_unknown_ids() || wanted.contains(&current) || always.contains(current.as_str())
-        {
+        // Homebrew installs git for itself when the developer tools are gone.
+        if !look.developer_tools_here() {
             out.insert(id.clone(), Removal::Refused);
             continue;
         }

@@ -327,7 +327,33 @@ impl<'a> Engine<'a> {
         })
     }
 
+    /// A person's answers last only as long as what they were about. Only a full Run sees the
+    /// whole Config, so only it can tell.
+    fn settle_answers(&mut self) {
+        if !matches!(self.scope_kind, RunScope::Full) {
+            return;
+        }
+        let plan = &*self.plan;
+        let listed = |id: &str| plan.entries.iter().any(|entry| entry.id == id);
+        let in_file = |id: &str| {
+            listed(id)
+                || plan.skipped.iter().any(|entry| entry.raw == id)
+                || plan
+                    .conflicts
+                    .iter()
+                    .any(|conflict| conflict.item == id || conflict.other == id)
+        };
+        // "This keep" ends once the Config lists it again.
+        self.record.kept_here.retain(|id| !listed(id));
+        // "Leave this Mac as it is" ends once the entry has left the Config.
+        let marked = reason_label(SkipReason::MarkedByPerson);
+        self.record
+            .unavailable
+            .retain(|id, reason| reason != marked || in_file(id));
+    }
+
     fn execute(&mut self) -> Result<RunReport, EngineError> {
+        self.settle_answers();
         self.prepare_run_dir();
         self.preflight()?;
         self.reconcile()?;

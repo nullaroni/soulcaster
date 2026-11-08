@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use soulcaster_core::catalog::Catalog;
 use soulcaster_core::command::CommandRunner;
 use soulcaster_core::config::{Config, MAX_BYTES};
-use soulcaster_core::drift::{Reviewed, adopt_onto};
+use soulcaster_core::drift::{Reviewed, adopt_onto, moved_since};
 
 use crate::address::RepoId;
 use crate::copies::{keep_own, slug};
 use crate::github::{FetchError, GitHub, SignIn};
-use crate::save::{SaveError, SaveOutcome, SaveRequest, WaitReason, save};
+use crate::save::{SaveError, SaveOutcome, SaveRequest, WaitReason, savable_text, save};
 use crate::tools::Tools;
 
 const TRIES: usize = 3;
@@ -36,6 +36,14 @@ pub enum AdoptOutcome {
     Saved {
         public: bool,
     },
+    /// Some entries went through and the rest come back as rows. `saved` may be empty when two
+    /// entries came back for different reasons.
+    Partly {
+        public: bool,
+        saved: Vec<String>,
+        changed_elsewhere: Vec<String>,
+        changed_again: Vec<String>,
+    },
     Waiting {
         why: WaitReason,
         local: PathBuf,
@@ -55,7 +63,10 @@ pub enum AdoptOutcome {
 }
 
 enum Latest {
-    Text(String),
+    Text {
+        text: String,
+        public: bool,
+    },
     /// Never sent, so there's nothing there to go on top of.
     Nothing,
 }
@@ -105,7 +116,10 @@ fn read_latest(
     };
     match github.read_file(&facts.repo, &head, path, MAX_BYTES) {
         Ok(bytes) => String::from_utf8(bytes)
-            .map(Latest::Text)
+            .map(|text| Latest::Text {
+                text,
+                public: !facts.private,
+            })
             .map_err(|_| Stop::Unreadable),
         Err(FetchError::NotVisible { signed_in: true }) => gone(),
         Err(FetchError::TooLarge) => Err(Stop::Unreadable),
@@ -156,20 +170,60 @@ fn send(
 }
 
 /// Keeps the change on this Mac when GitHub can't be asked, built on what this Mac last read.
+/// An entry that can't go on that copy is left out of it and is asked about on the next Send.
 fn wait_here(
     tools: &Tools,
     request: &AdoptRequest<'_>,
     always: &BTreeSet<&str>,
     why: WaitReason,
 ) -> Result<AdoptOutcome, SaveError> {
-    let merged = adopt_onto(request.held, request.reviewed, always);
-    let text = merged.as_ref().unwrap_or(request.held).to_canonical_json();
-    let local = keep_own(&tools.home, request.config_name, &text).map_err(SaveError::LocalWrite)?;
+    let moved = moved_since(request.held, request.reviewed);
+    let can_go: Vec<Reviewed> = request
+        .reviewed
+        .iter()
+        .filter(|entry| !moved.contains(&entry.id) && (request.still_true)(entry))
+        .cloned()
+        .collect();
+    let merged = adopt_onto(request.held, &can_go, always).unwrap_or_else(|_| request.held.clone());
+    let local = keep_own(
+        &tools.home,
+        request.config_name,
+        &merged.to_canonical_json(),
+    )
+    .map_err(SaveError::LocalWrite)?;
     Ok(AdoptOutcome::Waiting { why, local })
 }
 
-/// Reads the latest Config, puts the reviewed entries on it, and sends that. A hand-edited file
-/// gets its reformat as a save of its own first, so the entry's change stays readable.
+/// What came of a send, with whatever had to come back.
+fn finished(
+    public: bool,
+    saved: Vec<String>,
+    changed_elsewhere: Vec<String>,
+    changed_again: Vec<String>,
+) -> AdoptOutcome {
+    if changed_elsewhere.is_empty() && changed_again.is_empty() {
+        return AdoptOutcome::Saved { public };
+    }
+    if saved.is_empty() && changed_again.is_empty() {
+        return AdoptOutcome::ChangedElsewhere {
+            ids: changed_elsewhere,
+        };
+    }
+    if saved.is_empty() && changed_elsewhere.is_empty() {
+        return AdoptOutcome::ChangedAgain { ids: changed_again };
+    }
+    AdoptOutcome::Partly {
+        public,
+        saved,
+        changed_elsewhere,
+        changed_again,
+    }
+}
+
+/// Reads the latest Config, puts the reviewed entries that still hold on it, and sends that. An
+/// entry nobody else touched goes through, and one that moved comes back on its own. A
+/// hand-edited file gets its reformat as a save of its own first, but only once there's something
+/// to save and it's allowed to leave this Mac.
 pub fn adopt(
     runner: &dyn CommandRunner,
     tools: &Tools,
@@ -189,26 +243,39 @@ pub fn adopt(
             .filter(|entry| !(request.still_true)(entry))
             .map(|entry| entry.id.clone())
             .collect();
-        if !again.is_empty() {
-            return Ok(AdoptOutcome::ChangedAgain { ids: again });
-        }
         let latest = match read_latest(&github, request, &path) {
             Ok(latest) => latest,
             Err(Stop::Wait(why)) => return wait_here(tools, request, &always, why),
             Err(Stop::Unreadable) => return Ok(AdoptOutcome::Unreadable),
             Err(Stop::Missing(path)) => return Ok(AdoptOutcome::Missing { path }),
         };
-        let (config, text) = match latest {
-            Latest::Nothing => (request.held.clone(), None),
-            Latest::Text(text) => match parse_latest(&text, request.config_name) {
-                Ok(config) => (config, Some(text)),
+        let (config, text, public) = match latest {
+            Latest::Nothing => (request.held.clone(), None, false),
+            Latest::Text { text, public } => match parse_latest(&text, request.config_name) {
+                Ok(config) => (config, Some(text), public),
                 Err(_) => return Ok(AdoptOutcome::Unreadable),
             },
         };
-        let merged = match adopt_onto(&config, request.reviewed, &always) {
+        let elsewhere = moved_since(&config, request.reviewed);
+        let going: Vec<Reviewed> = request
+            .reviewed
+            .iter()
+            .filter(|entry| !again.contains(&entry.id) && !elsewhere.contains(&entry.id))
+            .cloned()
+            .collect();
+        let saved: Vec<String> = going.iter().map(|entry| entry.id.clone()).collect();
+        if going.is_empty() {
+            return Ok(finished(public, saved, elsewhere, again));
+        }
+        let merged = match adopt_onto(&config, &going, &always) {
             Ok(merged) => merged,
             Err(ids) => return Ok(AdoptOutcome::ChangedElsewhere { ids }),
         };
+        // Nothing to say and a file already there: the next Send after a crash writes nothing.
+        if text.is_some() && merged == config {
+            return Ok(finished(public, saved, elsewhere, again));
+        }
+        let merged_text = savable_text(&merged, catalog)?;
         let canonical = config.to_canonical_json();
         let mut base = text.clone();
         if let Some(text) = &text
@@ -217,11 +284,16 @@ pub fn adopt(
             match send(runner, tools, catalog, request, &config, Some(text))? {
                 Sent::Done { .. } => base = Some(canonical),
                 Sent::Moved => continue,
-                Sent::Waiting(why, local) => return Ok(AdoptOutcome::Waiting { why, local }),
+                Sent::Waiting(why, _) => {
+                    // What waits is what the person chose, not the tidied file.
+                    let local = keep_own(&tools.home, request.config_name, &merged_text)
+                        .map_err(SaveError::LocalWrite)?;
+                    return Ok(AdoptOutcome::Waiting { why, local });
+                }
             }
         }
         match send(runner, tools, catalog, request, &merged, base.as_deref())? {
-            Sent::Done { public } => return Ok(AdoptOutcome::Saved { public }),
+            Sent::Done { public } => return Ok(finished(public, saved, elsewhere, again)),
             Sent::Moved => {}
             Sent::Waiting(why, local) => return Ok(AdoptOutcome::Waiting { why, local }),
         }
