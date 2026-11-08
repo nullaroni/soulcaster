@@ -61,7 +61,7 @@ pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
                 "open-drift".to_string(),
                 "Drift",
                 false,
-                |app: &mut App, _| app.screen = Screen::Drift,
+                |app: &mut App, _| app.open_drift(),
             ));
         }
         list = list.child(kit::ruled("nothing-left".to_string(), content));

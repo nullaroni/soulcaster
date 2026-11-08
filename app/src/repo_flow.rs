@@ -503,6 +503,7 @@ impl App {
                     SaveOutcome::Sent { .. } | SaveOutcome::AlreadyThere { .. }
                 ) {
                     self.repo.last_saved = Some(config.to_canonical_json());
+                    self.engine.follow(&config, true);
                 }
                 SavePhase::Done(outcome)
             }

@@ -10,6 +10,7 @@
 mod answers;
 mod catalog_view;
 mod drift;
+mod drift_flow;
 mod engine;
 mod real;
 mod repo_flow;

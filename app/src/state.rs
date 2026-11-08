@@ -13,7 +13,9 @@ use soulcaster_core::recipe::ValueType;
 
 use crate::answers::Answers;
 use crate::catalog_view::{surface_name, view};
-use crate::drift::{Decision, DriftEntry};
+use crate::drift::DriftEntry;
+use crate::drift_flow::Status;
+use crate::engine::DriftNews;
 use crate::engine::Engine;
 use crate::sim::{Scenario, SimEngine, SimMachine};
 
@@ -145,8 +147,13 @@ pub struct App {
     pub drift: Vec<DriftEntry>,
     pub confirm_remove: Option<String>,
     pub remove_understood: bool,
-    pub drift_password_open: bool,
-    pub drift_password: TextEdit,
+    /// Name and reason, shown apart from Drift.
+    pub drift_unavailable: Vec<(String, String)>,
+    pub drift_unknown: Vec<String>,
+    pub drift_held: Vec<String>,
+    pub drift_status: Option<Status>,
+    pub drift_waiting: usize,
+    pub drift_notes: Vec<String>,
     pub drift_applying: bool,
     pub show_untracked: bool,
 
@@ -170,6 +177,8 @@ pub fn init() -> App {
 }
 
 pub fn with_engine(engine: Box<dyn Engine>) -> App {
+    // The samples are for the simulator. A real Mac shows only what was really found.
+    let engine_is_real = engine.is_real();
     let mut app = App {
         engine,
         screen: Screen::Catalog,
@@ -208,11 +217,33 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         imported_selection: None,
         imported_taps: Default::default(),
         scoped_wrong: false,
-        drift: crate::drift::sample(),
+        drift: if engine_is_real {
+            Vec::new()
+        } else {
+            crate::drift::sample()
+        },
         confirm_remove: None,
         remove_understood: false,
-        drift_password_open: false,
-        drift_password: TextEdit::new("").secure(),
+        drift_unavailable: if engine_is_real {
+            Vec::new()
+        } else {
+            crate::drift::SAMPLE_UNAVAILABLE
+                .iter()
+                .map(|(name, why)| ((*name).to_string(), (*why).to_string()))
+                .collect()
+        },
+        drift_unknown: if engine_is_real {
+            Vec::new()
+        } else {
+            crate::drift::SAMPLE_COULD_NOT_CHECK
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect()
+        },
+        drift_held: Vec::new(),
+        drift_status: None,
+        drift_waiting: 0,
+        drift_notes: Vec::new(),
         drift_applying: false,
         show_untracked: false,
         repo: crate::repo_flow::RepoFlow::simulated(),
@@ -596,6 +627,7 @@ impl App {
         answers
             .taps
             .retain(|tap| plan.taps.contains_key(tap) && !self.imported_taps.contains(tap));
+        self.engine.follow(&self.config(), false);
         self.engine.start_run(&plan, &answers);
         self.screen = Screen::Run;
         self.pump();
@@ -613,7 +645,7 @@ impl App {
             EventKind::RunStarted { scope, plan, .. } => {
                 self.run_started = true;
                 self.run_finished = false;
-                if scope == RunScope::Full {
+                if matches!(scope, RunScope::Full | RunScope::Only { .. }) {
                     self.run_items = plan
                         .into_iter()
                         .map(|item| RunItem {
@@ -774,8 +806,73 @@ impl App {
         }
     }
 
+    /// Opens Drift. Under `--real` that's a fresh look at this Mac.
+    pub fn open_drift(&mut self) {
+        self.screen = Screen::Drift;
+        self.check_drift();
+    }
+
+    pub fn check_drift(&mut self) {
+        if self.engine.is_real() {
+            self.drift_applying = true;
+            self.engine.check_drift();
+        }
+    }
+
+    /// Starts on what the rows say. Nothing happens to a row left on Later.
+    pub fn carry_out_drift(&mut self) {
+        self.drift_applying = true;
+        if !self.engine.is_real() {
+            self.after(1.4, Timer::DriftApplied);
+            return;
+        }
+        self.drift_notes.clear();
+        let decisions = self
+            .drift
+            .iter()
+            .filter_map(|entry| entry.choice.map(|choice| (entry.row.clone(), choice)))
+            .collect();
+        self.engine.carry_out_drift(decisions);
+    }
+
+    fn drift_news(&mut self, news: DriftNews) {
+        self.drift_applying = false;
+        match news {
+            DriftNews::Checked(checked, notes) => {
+                self.drift = checked
+                    .report
+                    .rows
+                    .into_iter()
+                    .map(DriftEntry::new)
+                    .collect();
+                self.drift_unavailable = checked
+                    .report
+                    .unavailable
+                    .iter()
+                    .map(|id| (view().name_of(id), "Left as it is on this Mac".to_string()))
+                    .collect();
+                self.drift_unknown = checked
+                    .report
+                    .could_not_check
+                    .iter()
+                    .map(|id| view().name_of(id))
+                    .collect();
+                self.drift_held = checked.report.held;
+                self.drift_status = Some(checked.status);
+                self.drift_waiting = checked.waiting;
+                self.drift_notes = notes;
+            }
+            DriftNews::Applying(notes) => {
+                self.drift_notes = notes;
+                self.drift.clear();
+                self.screen = Screen::Run;
+            }
+            DriftNews::Failed(notes) => self.drift_notes = notes,
+        }
+    }
+
     pub fn close_drift_entries(&mut self) {
-        self.drift.retain(|d| d.decision == Decision::Later);
+        self.drift.retain(|d| d.choice.is_none());
         self.drift_applying = false;
         self.toast = Some("Done".to_string());
         self.after(4.0, Timer::ClearToast);
@@ -797,6 +894,10 @@ impl App {
         }
         for event in self.engine.poll(clock) {
             self.apply(event);
+            changed = true;
+        }
+        if let Some(news) = self.engine.poll_drift() {
+            self.drift_news(news);
             changed = true;
         }
         // These come from the Run's thread between events, so a change here needs a redraw too.
@@ -1062,6 +1163,35 @@ mod tests {
             view().catalog.sections().len(),
             Catalog::shipped().sections().len()
         );
+    }
+
+    #[test]
+    fn an_apply_from_drift_fills_the_run_screen_even_on_a_fresh_launch() {
+        let mut app = init();
+        app.fill_typical();
+        let plan = app.plan();
+        app.apply(event(EventKind::RunStarted {
+            run_id: "x".to_string(),
+            scope: RunScope::Only {
+                items: vec!["homebrew".to_string()],
+            },
+            config: Default::default(),
+            catalog_version: String::new(),
+            engine_version: String::new(),
+            macos_version: None,
+            plan: plan.summary(),
+        }));
+        assert_eq!(app.run_items.len(), plan.entries.len());
+    }
+
+    #[test]
+    fn the_simulator_never_asks_an_engine_to_look_at_this_mac() {
+        let mut app = init();
+        let rows = app.drift.len();
+        app.open_drift();
+        assert_eq!(app.screen, Screen::Drift);
+        assert!(!app.drift_applying, "nothing is running");
+        assert_eq!(app.drift.len(), rows, "the sample stays");
     }
 
     #[test]

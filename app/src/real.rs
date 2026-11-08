@@ -11,6 +11,8 @@ use std::thread;
 use soulcaster_core::approval::ApprovalStore;
 use soulcaster_core::ask::{Asks, Password, PasswordRequest, SignInStatus};
 use soulcaster_core::catalog::Catalog;
+use soulcaster_core::config::Config;
+use soulcaster_core::drift::{Choice, Row};
 use soulcaster_core::event::{ConfigRef, Event, EventKind, EventSink, RunScope, Stamper};
 use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
 use soulcaster_core::plan::Plan;
@@ -22,7 +24,33 @@ use soulcaster_repo::in_run::RunDotfiles;
 use soulcaster_repo::tools::Tools;
 
 use crate::answers::Answers;
-use crate::engine::Engine;
+use crate::drift_flow::{self, Deps};
+use crate::engine::{DriftNews, Engine};
+
+/// What a Drift job on its own thread hands back to the window.
+enum DriftDone {
+    Checked(Box<drift_flow::Checked>, Vec<String>),
+    /// The fresh look is missing only when a Run is about to start instead.
+    Carried(Box<drift_flow::Carried>, Option<Box<drift_flow::Checked>>),
+    Failed(String),
+}
+
+/// Clears the busy flag however the job ends, and a panic still answers the window.
+struct DriftBusy {
+    flag: Arc<AtomicBool>,
+    sender: Sender<DriftDone>,
+}
+
+impl Drop for DriftBusy {
+    fn drop(&mut self) {
+        if thread::panicking() {
+            let _ = self.sender.send(DriftDone::Failed(
+                "Soulcaster couldn't finish that. Check this Mac again.".to_string(),
+            ));
+        }
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
 
 /// What the Run is waiting on from the window.
 #[derive(Default)]
@@ -96,11 +124,15 @@ pub struct RealEngine {
     sender: Sender<Event>,
     events: Receiver<Event>,
     plan: Option<Plan>,
+    drift_busy: Arc<AtomicBool>,
+    drift_sender: Sender<DriftDone>,
+    drift_news: Receiver<DriftDone>,
 }
 
 impl RealEngine {
     pub fn new(home: PathBuf) -> Self {
         let (sender, events) = mpsc::channel();
+        let (drift_sender, drift_news) = mpsc::channel();
         Self {
             home,
             waiting: Arc::default(),
@@ -108,6 +140,9 @@ impl RealEngine {
             sender,
             events,
             plan: None,
+            drift_busy: Arc::default(),
+            drift_sender,
+            drift_news,
         }
     }
 
@@ -169,6 +204,34 @@ impl RealEngine {
             if let Err(error) = result {
                 finish_with(&sender, &format!("The Run stopped: {error}"));
             }
+        });
+    }
+
+    /// Runs a Drift job off the window's thread. Never while a Run has this Mac.
+    fn drift_job(&self, job: impl FnOnce(&Deps<'_>) -> DriftDone + Send + 'static) {
+        if self.is_running() || self.drift_busy.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let busy = DriftBusy {
+            flag: Arc::clone(&self.drift_busy),
+            sender: self.drift_sender.clone(),
+        };
+        let sender = self.drift_sender.clone();
+        let home = self.home.clone();
+        thread::spawn(move || {
+            let _busy = busy;
+            let mac = ProcessRunner::new();
+            let repo = soulcaster_repo::process::runner();
+            let tools = Tools::for_mac(home.clone());
+            let deps = Deps {
+                mac: &mac,
+                repo: &repo,
+                tools: &tools,
+                home: &home,
+                catalog: Catalog::shipped(),
+                clock: &SystemClock,
+            };
+            let _ = sender.send(job(&deps));
         });
     }
 
@@ -303,9 +366,62 @@ impl Engine for RealEngine {
         self.events.try_iter().collect()
     }
 
-    /// Events arrive whenever the thread sends them, so the window checks while a Run is on.
+    /// Events arrive whenever the thread sends them, so the window checks while one is working.
     fn next_due(&self, _now: f64) -> Option<f64> {
-        self.running.load(Ordering::SeqCst).then_some(0.1)
+        (self.running.load(Ordering::SeqCst) || self.drift_busy.load(Ordering::SeqCst))
+            .then_some(0.1)
+    }
+
+    fn follow(&mut self, config: &Config, saved: bool) {
+        drift_flow::follow(&self.home, config, saved, SystemClock.now_ms());
+    }
+
+    fn check_drift(&mut self) {
+        self.drift_job(|deps| DriftDone::Checked(Box::new(drift_flow::check(deps)), Vec::new()));
+    }
+
+    fn carry_out_drift(&mut self, decisions: Vec<(Row, Choice)>) {
+        self.drift_job(move |deps| {
+            let carried = drift_flow::carry_out(deps, &decisions);
+            let checked = carried
+                .apply
+                .is_none()
+                .then(|| Box::new(drift_flow::check(deps)));
+            DriftDone::Carried(Box::new(carried), checked)
+        });
+    }
+
+    fn send_waiting_saves(&mut self) {
+        self.drift_job(|deps| {
+            let notes = drift_flow::send_waiting(deps);
+            DriftDone::Checked(Box::new(drift_flow::check(deps)), notes)
+        });
+    }
+
+    fn discard_waiting_saves(&mut self) {
+        self.drift_job(|deps| {
+            let notes = drift_flow::discard_waiting(deps.home);
+            DriftDone::Checked(Box::new(drift_flow::check(deps)), notes)
+        });
+    }
+
+    fn poll_drift(&mut self) -> Option<DriftNews> {
+        match self.drift_news.try_recv().ok()? {
+            DriftDone::Checked(checked, notes) => Some(DriftNews::Checked(*checked, notes)),
+            DriftDone::Failed(words) => Some(DriftNews::Failed(vec![words])),
+            DriftDone::Carried(carried, Some(checked)) => {
+                Some(DriftNews::Checked(*checked, carried.notes))
+            }
+            DriftDone::Carried(carried, None) => {
+                let carried = *carried;
+                let Some((plan, items)) = carried.apply else {
+                    return Some(DriftNews::Failed(carried.notes));
+                };
+                self.plan = Some(plan.clone());
+                self.start(plan, RunScope::Only { items });
+                Some(DriftNews::Applying(carried.notes))
+            }
+        }
     }
 }
 

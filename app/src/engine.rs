@@ -3,10 +3,21 @@
 //! single line in `state::init` that builds it.
 
 use soulcaster_core::ask::{Password, PasswordRequest};
+use soulcaster_core::config::Config;
+use soulcaster_core::drift::{Choice, Row};
 use soulcaster_core::event::Event;
 use soulcaster_core::plan::Plan;
 
 use crate::answers::Answers;
+use crate::drift_flow::Checked;
+
+/// What came back from Drift's work on the engine's thread.
+pub enum DriftNews {
+    Checked(Checked, Vec<String>),
+    /// A Run began for what the person chose to Apply.
+    Applying(Vec<String>),
+    Failed(Vec<String>),
+}
 
 pub trait Engine {
     /// Starts a full Run of an approved plan.
@@ -33,6 +44,17 @@ pub trait Engine {
     }
     /// The person chose not to give it. Admin work goes to the queue.
     fn decline_password(&mut self) {}
+    /// This Mac now follows this Config, for Drift to compare with.
+    fn follow(&mut self, _config: &Config, _saved: bool) {}
+    /// Looks at this Mac. The answer arrives through `poll_drift`.
+    fn check_drift(&mut self) {}
+    /// Carries out what the person chose. Only the Drift screen's confirmations reach this.
+    fn carry_out_drift(&mut self, _decisions: Vec<(Row, Choice)>) {}
+    fn send_waiting_saves(&mut self) {}
+    fn discard_waiting_saves(&mut self) {}
+    fn poll_drift(&mut self) -> Option<DriftNews> {
+        None
+    }
     /// GitHub's device code and address, while sign-in is waiting on the person.
     fn github_code(&self) -> Option<(String, String)> {
         None
