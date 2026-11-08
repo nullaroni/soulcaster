@@ -108,6 +108,11 @@ pub const SCENES: &[Scene] = &[
         });
     }),
     ("drift", |a| a.screen = Screen::Drift),
+    ("run-real-asks", |a| {
+        a.start_run();
+        a.engine = Box::new(AskingEngine);
+        a.screen = Screen::Run;
+    }),
     ("import", |a| a.screen = Screen::Import),
     ("import-failed", |a| import(a, "example-dev/private-setup")),
     ("import-bad-link", |a| {
@@ -175,3 +180,44 @@ pub const SCENES: &[Scene] = &[
         a.repo.dotfiles = DotfilesPhase::Rewritten;
     }),
 ];
+
+/// For the look of a real Run's questions. It starts nothing.
+struct AskingEngine;
+
+impl crate::engine::Engine for AskingEngine {
+    fn start_run(&mut self, _: &soulcaster_core::plan::Plan, _: &crate::answers::Answers) {}
+
+    fn start_scoped(&mut self, _: &str, _: &[String], _: Option<&str>) {}
+
+    fn submit_password(&mut self, _: soulcaster_core::ask::Password) {}
+
+    fn start_github_sign_in(&mut self) -> String {
+        String::new()
+    }
+
+    fn poll(&mut self, _: f64) -> Vec<soulcaster_core::event::Event> {
+        Vec::new()
+    }
+
+    fn next_due(&self, _: f64) -> Option<f64> {
+        None
+    }
+
+    fn is_real(&self) -> bool {
+        true
+    }
+
+    fn password_request(&self) -> Option<soulcaster_core::ask::PasswordRequest> {
+        Some(soulcaster_core::ask::PasswordRequest {
+            why: "the admin steps".to_string(),
+            last_was_wrong: false,
+        })
+    }
+
+    fn github_code(&self) -> Option<(String, String)> {
+        Some((
+            "WDJB-MJHT".to_string(),
+            "https://github.com/login/device".to_string(),
+        ))
+    }
+}

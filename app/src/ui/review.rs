@@ -16,7 +16,7 @@ pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
         left += 1;
         asks = asks.child(conflict_row(conflict));
     }
-    if plan.needs_admin() {
+    if plan.needs_admin() && !app.engine.is_real() {
         left += usize::from(app.password_state != PasswordState::Accepted);
         asks = asks.child(password_row(app, k));
     }
@@ -78,9 +78,8 @@ pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
                     if on { "Allowed" } else { "Allow" },
                     on,
                     move |app: &mut App, _| {
-                        if !app.answers.taps.remove(&t) {
-                            app.answers.taps.insert(t.clone());
-                        }
+                        let on = !app.answers.taps.contains(&t);
+                        app.answer_tap(&t, on);
                     },
                 )),
         ));

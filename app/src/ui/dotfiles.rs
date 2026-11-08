@@ -102,6 +102,17 @@ fn preview_block(preview: &MovePreview, body: El) -> El {
 }
 
 pub fn screen(app: &App) -> El {
+    if app.engine.is_real() {
+        return col()
+            .key("dotfiles-screen")
+            .w_full()
+            .child(kit::title_pad(kit::title("Dotfiles")))
+            .child(sentence(
+                "in-a-run",
+                "A Dotfiles Repo you approve is applied during the Run.",
+                false,
+            ));
+    }
     let plan = RepoFlow::dotfiles_plan();
     let mut body = col().key("dot-body").w_full().child(kit::ruled(
         "dot-repo".to_string(),

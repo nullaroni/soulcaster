@@ -2,7 +2,7 @@
 //! `poll` returns, so wiring in the real engine means implementing this trait and changing the
 //! single line in `state::init` that builds it.
 
-use soulcaster_core::ask::Password;
+use soulcaster_core::ask::{Password, PasswordRequest};
 use soulcaster_core::event::Event;
 use soulcaster_core::plan::Plan;
 
@@ -22,4 +22,19 @@ pub trait Engine {
     fn poll(&mut self, now: f64) -> Vec<Event>;
     /// Seconds until the next event is expected, for engines that know.
     fn next_due(&self, now: f64) -> Option<f64>;
+    /// Whether a Run here really changes this Mac. A real engine also asks during the Run, when
+    /// it knows what's needed, so Review doesn't ask first.
+    fn is_real(&self) -> bool {
+        false
+    }
+    /// The Run is waiting for the password, and why.
+    fn password_request(&self) -> Option<PasswordRequest> {
+        None
+    }
+    /// The person chose not to give it. Admin work goes to the queue.
+    fn decline_password(&mut self) {}
+    /// GitHub's device code and address, while sign-in is waiting on the person.
+    fn github_code(&self) -> Option<(String, String)> {
+        None
+    }
 }

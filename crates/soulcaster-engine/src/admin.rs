@@ -422,14 +422,42 @@ pub(crate) fn disable_core_dumps() {
 /// The identifier the release signs the helper with, from `packaging/sign-app.sh`.
 pub const ASKPASS_IDENTIFIER: &str = "com.nullworks.macflayer.askpass";
 
-/// The gate for this build: the helper beside `executable`, as packaging puts it. A release built
-/// with `SOULCASTER_TEAM_ID` answers only that team's signature. Any other build, a contributor's
-/// own ad-hoc one included, checks the helper's path alone.
+/// Where the helper is for a program at `executable`. The window of an app bundle is in
+/// `Contents/MacOS` and the helper in `Contents/Helpers`. Anything else, the CLI in the bundle or
+/// a plain build, has it beside the program. The folders decide this rather than whether a file
+/// happens to exist, so nothing dropped nearby can stand in for it, and they're the program's real
+/// folders, so a symlink can't make something look like a bundle.
+fn helper_for(executable: &std::path::Path) -> PathBuf {
+    let real = fs::canonicalize(executable).or_else(|_| {
+        // Not there yet in a test. The folder still has to be real.
+        let folder = executable.parent().ok_or(ErrorKind::NotFound)?;
+        Ok::<_, std::io::Error>(
+            fs::canonicalize(folder)?.join(executable.file_name().unwrap_or_default()),
+        )
+    });
+    let Ok(real) = real else {
+        return PathBuf::new();
+    };
+    let Some(folder) = real.parent() else {
+        return PathBuf::new();
+    };
+    let in_a_bundle = folder.file_name().is_some_and(|name| name == "MacOS")
+        && folder
+            .parent()
+            .and_then(std::path::Path::file_name)
+            .is_some_and(|name| name == "Contents");
+    if in_a_bundle {
+        folder.with_file_name("Helpers").join("soulcaster-askpass")
+    } else {
+        folder.join("soulcaster-askpass")
+    }
+}
+
+/// The gate for this build: the helper packaging put next to `executable`. A release built with
+/// `SOULCASTER_TEAM_ID` answers only that team's signature. Any other build, a contributor's own
+/// ad-hoc one included, checks the helper's path alone.
 pub fn gate_beside(executable: &std::path::Path) -> SocketGate {
-    let helper = executable
-        .parent()
-        .map(|folder| folder.join("soulcaster-askpass"))
-        .unwrap_or_default();
+    let helper = helper_for(executable);
     let rule = match option_env!("SOULCASTER_TEAM_ID") {
         Some(team) if !team.is_empty() => PeerRule::Signed {
             identifier: ASKPASS_IDENTIFIER.to_string(),
@@ -438,4 +466,176 @@ pub fn gate_beside(executable: &std::path::Path) -> SocketGate {
         _ => PeerRule::PathOnly,
     };
     SocketGate::new(helper, rule)
+}
+
+#[cfg(test)]
+mod helper_path_tests {
+    use super::helper_for;
+    use std::fs;
+
+    #[test]
+    fn the_helper_is_found_from_the_cli_the_window_and_a_plain_build() {
+        let root = std::env::temp_dir().join(format!("soulcaster-helper-{}", std::process::id()));
+        let helpers = root.join("Contents/Helpers");
+        let macos = root.join("Contents/MacOS");
+        fs::create_dir_all(&helpers).unwrap();
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(helpers.join("soulcaster-askpass"), "").unwrap();
+        let from_cli = fs::canonicalize(helper_for(&helpers.join("soulcaster"))).unwrap();
+        assert_eq!(
+            from_cli,
+            fs::canonicalize(helpers.join("soulcaster-askpass")).unwrap()
+        );
+        let from_window = fs::canonicalize(helper_for(&macos.join("Soulcaster"))).unwrap();
+        assert_eq!(
+            from_window,
+            fs::canonicalize(helpers.join("soulcaster-askpass")).unwrap()
+        );
+        let plain = root.join("target/debug");
+        fs::create_dir_all(&plain).unwrap();
+        assert_eq!(
+            helper_for(&plain.join("soulcaster")),
+            fs::canonicalize(&plain).unwrap().join("soulcaster-askpass")
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_helper_planted_beside_the_window_does_not_beat_the_bundle() {
+        let root =
+            std::env::temp_dir().join(format!("soulcaster-helper-planted-{}", std::process::id()));
+        let helpers = root.join("Contents/Helpers");
+        let macos = root.join("Contents/MacOS");
+        fs::create_dir_all(&helpers).unwrap();
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(helpers.join("soulcaster-askpass"), "bundle").unwrap();
+        fs::write(macos.join("soulcaster-askpass"), "planted").unwrap();
+        let chosen = fs::canonicalize(helper_for(&macos.join("Soulcaster"))).unwrap();
+        let bundled = fs::canonicalize(helpers.join("soulcaster-askpass")).unwrap();
+        let planted = fs::canonicalize(macos.join("soulcaster-askpass")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_ne!(
+            chosen, planted,
+            "a soulcaster-askpass planted beside the window binary was chosen"
+        );
+        assert_eq!(chosen, bundled);
+    }
+
+    /// A plain build has no bundle. `../Helpers/soulcaster-askpass` is a path above the binary,
+    /// and `exists` follows a symlink there.
+    #[test]
+    fn a_helper_planted_at_dotdot_helpers_does_not_beat_a_plain_build() {
+        let root = std::env::temp_dir().join(format!(
+            "soulcaster-helper-plain-planted-{}",
+            std::process::id()
+        ));
+        let plain = root.join("target/debug");
+        let planted_dir = root.join("target/Helpers");
+        fs::create_dir_all(&plain).unwrap();
+        fs::create_dir_all(&planted_dir).unwrap();
+        fs::write(plain.join("soulcaster-askpass"), "real").unwrap();
+        fs::write(planted_dir.join("soulcaster-askpass"), "planted").unwrap();
+        let chosen_file = fs::canonicalize(helper_for(&plain.join("soulcaster"))).unwrap();
+        let beside = fs::canonicalize(plain.join("soulcaster-askpass")).unwrap();
+        let planted = fs::canonicalize(planted_dir.join("soulcaster-askpass")).unwrap();
+
+        let link_plain = root.join("linked/debug");
+        let link_helpers = root.join("linked/Helpers");
+        fs::create_dir_all(&link_plain).unwrap();
+        fs::create_dir_all(&link_helpers).unwrap();
+        fs::write(link_plain.join("soulcaster-askpass"), "real").unwrap();
+        let evil = root.join("linked/evil-askpass");
+        fs::write(&evil, "evil").unwrap();
+        std::os::unix::fs::symlink(&evil, link_helpers.join("soulcaster-askpass")).unwrap();
+        let chosen_link = fs::canonicalize(helper_for(&link_plain.join("soulcaster"))).unwrap();
+        let beside_link = fs::canonicalize(link_plain.join("soulcaster-askpass")).unwrap();
+        let evil_path = fs::canonicalize(&evil).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        let mut problems = Vec::new();
+        if chosen_file != beside {
+            problems.push(format!(
+                "a file planted at ../Helpers was chosen ({chosen_file:?}) instead of the helper beside the binary ({beside:?}); planted is {planted:?}"
+            ));
+        }
+        if chosen_link != beside_link {
+            problems.push(format!(
+                "a symlink at ../Helpers/soulcaster-askpass was chosen ({chosen_link:?}); it points at {evil_path:?}, not the helper beside the binary ({beside_link:?})"
+            ));
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// `current_exe` keeps a symlink in the path. The folders of that path are not the program's
+    /// folders, so a file planted there must not be the helper.
+    #[test]
+    fn a_symlink_in_the_executable_path_does_not_select_a_planted_helper() {
+        let root =
+            std::env::temp_dir().join(format!("soulcaster-helper-symlink-{}", std::process::id()));
+        let plain = root.join("target/debug");
+        fs::create_dir_all(&plain).unwrap();
+        fs::write(plain.join("soulcaster"), "real").unwrap();
+        fs::write(plain.join("soulcaster-askpass"), "real").unwrap();
+
+        // The executable itself is a symlink whose path says Contents/MacOS.
+        let trap_macos = root.join("trap/Contents/MacOS");
+        let trap_helpers = root.join("trap/Contents/Helpers");
+        fs::create_dir_all(&trap_macos).unwrap();
+        fs::create_dir_all(&trap_helpers).unwrap();
+        std::os::unix::fs::symlink(plain.join("soulcaster"), trap_macos.join("Soulcaster"))
+            .unwrap();
+        fs::write(trap_helpers.join("soulcaster-askpass"), "planted").unwrap();
+        let chosen_file = fs::canonicalize(helper_for(&trap_macos.join("Soulcaster"))).unwrap();
+        let beside = fs::canonicalize(plain.join("soulcaster-askpass")).unwrap();
+        let planted = fs::canonicalize(trap_helpers.join("soulcaster-askpass")).unwrap();
+
+        // Contents and MacOS are not the same tree. MacOS is a symlink to another folder.
+        let unrelated = root.join("unrelated");
+        let contents = root.join("split/Contents");
+        fs::create_dir_all(&unrelated).unwrap();
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(unrelated.join("Soulcaster"), "real").unwrap();
+        fs::write(unrelated.join("soulcaster-askpass"), "real").unwrap();
+        std::os::unix::fs::symlink(&unrelated, contents.join("MacOS")).unwrap();
+        fs::create_dir_all(contents.join("Helpers")).unwrap();
+        fs::write(contents.join("Helpers/soulcaster-askpass"), "planted").unwrap();
+        let exe = contents.join("MacOS/Soulcaster");
+        let chosen_split = fs::canonicalize(helper_for(&exe)).unwrap();
+        let beside_split = fs::canonicalize(unrelated.join("soulcaster-askpass")).unwrap();
+        let planted_split = fs::canonicalize(contents.join("Helpers/soulcaster-askpass")).unwrap();
+
+        // A symlink outside the bundle points at the window binary.
+        let bundle = root.join("Soulcaster.app/Contents");
+        fs::create_dir_all(bundle.join("MacOS")).unwrap();
+        fs::create_dir_all(bundle.join("Helpers")).unwrap();
+        fs::write(bundle.join("MacOS/Soulcaster"), "app").unwrap();
+        fs::write(bundle.join("Helpers/soulcaster-askpass"), "bundle").unwrap();
+        let outside = root.join("bin");
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(bundle.join("MacOS/Soulcaster"), outside.join("Soulcaster"))
+            .unwrap();
+        fs::write(outside.join("soulcaster-askpass"), "planted").unwrap();
+        let chosen_out = fs::canonicalize(helper_for(&outside.join("Soulcaster"))).unwrap();
+        let bundled = fs::canonicalize(bundle.join("Helpers/soulcaster-askpass")).unwrap();
+        let planted_out = fs::canonicalize(outside.join("soulcaster-askpass")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        let mut problems = Vec::new();
+        if chosen_file != beside {
+            problems.push(format!(
+                "a symlink at Contents/MacOS was chosen ({chosen_file:?}); the program is the plain build, whose helper is beside it ({beside:?}), not the planted file ({planted:?})"
+            ));
+        }
+        if chosen_split != beside_split {
+            problems.push(format!(
+                "MacOS is a symlink to an unrelated folder, and a planted helper was chosen ({chosen_split:?}) instead of the one beside the program ({beside_split:?}); planted is {planted_split:?}"
+            ));
+        }
+        if chosen_out != bundled {
+            problems.push(format!(
+                "a symlink to the window binary was chosen ({chosen_out:?}); it points at the planted file beside the symlink ({planted_out:?}), not the bundle helper ({bundled:?})"
+            ));
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
 }

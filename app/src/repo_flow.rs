@@ -5,7 +5,10 @@
 //! in [`RepoSim`], along with moving these calls off the window's thread.
 
 use rune::TextEdit;
+use std::path::PathBuf;
+
 use soulcaster_core::approval::{ApprovalStore, Approvals, CommitSha, DotfilesApproval};
+use soulcaster_core::command::CommandRunner;
 use soulcaster_core::command::Reply;
 use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
 use soulcaster_core::plan::DotfilesPlan;
@@ -82,11 +85,13 @@ const OWN_NEWER: &str = "88bb123000000000000000000000000000000000";
 /// The outside world, simulated. Everything it writes is under `dir`, a temporary folder removed
 /// when the window closes.
 pub struct RepoSim {
-    /// Held so the folder lasts as long as the window.
-    _dir: tempfile::TempDir,
+    /// Held so the folder lasts as long as the window. A real window has none.
+    _dir: Option<tempfile::TempDir>,
     pub github: FakeGitHub,
+    /// The real programs. Without this, everything goes to `github` above.
+    real: Option<soulcaster_engine::ProcessRunner>,
     pub tools: Tools,
-    pub store: FileApprovals,
+    pub store: Box<dyn ApprovalStore>,
 }
 
 impl RepoSim {
@@ -94,18 +99,36 @@ impl RepoSim {
         let dir = tempfile::tempdir().expect("a temporary folder");
         let home = std::fs::canonicalize(dir.path()).expect("the folder just made");
         let tools = Tools::fixed(home.clone());
-        let store = FileApprovals::new(home.join("approvals-test-double.json"));
+        let store = Box::new(FileApprovals::new(home.join("approvals-test-double.json")));
         Self {
             github: seeded_github(),
+            real: None,
             tools,
             store,
-            _dir: dir,
+            _dir: Some(dir),
+        }
+    }
+
+    fn real(home: PathBuf) -> Self {
+        Self {
+            github: FakeGitHub::new(),
+            real: Some(soulcaster_repo::process::runner()),
+            tools: Tools::for_mac(home.clone()),
+            store: Box::new(soulcaster_engine::RecordApprovals::new(home)),
+            _dir: None,
+        }
+    }
+
+    fn runner(&self) -> &dyn CommandRunner {
+        match &self.real {
+            Some(real) => real,
+            None => &self.github,
         }
     }
 
     fn importer(&self) -> Importer<'_> {
         Importer::connect(
-            &self.github,
+            self.runner(),
             &self.tools,
             view().catalog,
             DEFAULT_CLONE_LOCATION,
@@ -114,9 +137,9 @@ impl RepoSim {
 
     fn step(&self) -> DotfilesStep<'_> {
         DotfilesStep {
-            runner: &self.github,
+            runner: self.runner(),
             tools: &self.tools,
-            store: &self.store,
+            store: self.store.as_ref(),
             clone_location: DEFAULT_CLONE_LOCATION,
             stamp: "simulated-run",
         }
@@ -272,6 +295,14 @@ fn seeded_github() -> FakeGitHub {
 }
 
 impl RepoFlow {
+    /// Import and Save on real GitHub, and approvals in the Machine Record.
+    pub fn real(home: PathBuf) -> Self {
+        Self {
+            sim: RepoSim::real(home),
+            ..Self::simulated()
+        }
+    }
+
     pub fn simulated() -> Self {
         Self {
             sim: RepoSim::new(),
@@ -428,7 +459,10 @@ impl App {
         if page.review.nothing_selected(&page.boxes) {
             return;
         }
-        let Ok(run) = page.review.record_start(&page.boxes, &self.repo.sim.store) else {
+        let Ok(run) = page
+            .review
+            .record_start(&page.boxes, self.repo.sim.store.as_ref())
+        else {
             self.toast = Some("Couldn't record your approvals, so nothing started.".to_string());
             return;
         };
@@ -444,7 +478,9 @@ impl App {
                 .map(|c| format!("cask:{c}")),
         );
         self.answers.taps = run.taps.iter().cloned().collect();
+        self.imported_taps = run.taps.iter().cloned().collect();
         self.answers.licenses = run.licenses.clone();
+        self.keep_dotfiles(run.config.dotfiles.clone());
         self.rebuild_rows();
         self.repo.import = ImportPhase::Paste { error: None };
         self.screen = Screen::Review;
@@ -459,7 +495,7 @@ impl App {
             base: self.repo.last_saved.as_deref(),
         };
         let sim = &self.repo.sim;
-        let outcome = save(&sim.github, &sim.tools, view().catalog, &request);
+        let outcome = save(sim.runner(), &sim.tools, view().catalog, &request);
         self.repo.save = match outcome {
             Ok(outcome) => {
                 if matches!(
@@ -530,9 +566,16 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use soulcaster_core::ask::Password;
+    use soulcaster_core::event::Event;
+    use soulcaster_core::plan::Plan;
     use soulcaster_repo::review::Primary;
 
     use super::*;
+    use crate::answers::Answers;
+    use crate::engine::Engine;
     use crate::sim::{Scenario, SimEngine, SimMachine};
     use crate::state::with_engine;
 
@@ -615,6 +658,202 @@ mod tests {
         app.start_from_review();
         assert_eq!(app.screen, Screen::Review);
         assert!(app.repo.sim.store.read().unwrap().dotfiles.is_some());
+    }
+
+    #[test]
+    fn an_imported_dotfiles_repo_does_not_follow_a_later_catalog_plan() {
+        let mut app = app();
+        app.read_sample("example-stranger/setup");
+        app.review_tick(&Tick::Repo);
+        app.start_from_review();
+        let imported = app
+            .dotfiles
+            .as_ref()
+            .map(|dotfiles| dotfiles.repo.clone())
+            .expect("starting from that import should keep its Dotfiles Repo for the Run");
+        assert!(imported.contains("example-stranger/dotfiles"), "{imported}");
+        app.screen = Screen::Catalog;
+        app.selected.clear();
+        app.packages.clear();
+        app.settings.clear();
+        app.selected.insert("jq".to_string());
+        let plan = app.plan();
+        assert_eq!(
+            plan.dotfiles
+                .as_ref()
+                .map(|dotfiles| dotfiles.repo.as_str()),
+            None,
+            "a Catalog plan that has nothing to do with the import still carries {imported}"
+        );
+    }
+
+    /// The review records `owner/tap/name`. A tap approval covers every package from that tap.
+    struct Capture(Arc<Mutex<Vec<String>>>);
+
+    impl Engine for Capture {
+        fn start_run(&mut self, _plan: &Plan, answers: &Answers) {
+            *self.0.lock().unwrap() = answers.taps.iter().cloned().collect();
+        }
+
+        fn start_scoped(&mut self, _: &str, _: &[String], _: Option<&str>) {}
+
+        fn submit_password(&mut self, _: Password) {}
+
+        fn start_github_sign_in(&mut self) -> String {
+            String::new()
+        }
+
+        fn poll(&mut self, _: f64) -> Vec<Event> {
+            Vec::new()
+        }
+
+        fn next_due(&self, _: f64) -> Option<f64> {
+            None
+        }
+    }
+
+    #[test]
+    fn a_package_approval_is_not_widened_to_the_whole_tap() {
+        let mut app = app();
+        app.read_sample("example-dev/one-config");
+        app.review_tick(&Tick::Tap("mobile-dev-inc/tap".to_string()));
+        app.start_from_review();
+        assert!(
+            app.plan().taps.contains_key("mobile-dev-inc/tap"),
+            "the imported package should put its tap on the plan"
+        );
+        let held = app.repo.sim.store.read().unwrap();
+        assert!(
+            held.packages.contains("mobile-dev-inc/tap/maestro"),
+            "the review records the package, not the tap: {:?}",
+            held.packages
+        );
+        assert!(
+            !held.taps.contains("mobile-dev-inc/tap"),
+            "the review approved the whole tap: {:?}",
+            held.taps
+        );
+        let got = Arc::new(Mutex::new(Vec::new()));
+        app.engine = Box::new(Capture(Arc::clone(&got)));
+        app.start_run();
+        let handed = got.lock().unwrap().clone();
+        assert!(
+            !handed.iter().any(|tap| tap == "mobile-dev-inc/tap"),
+            "start handed the engine the tap {handed:?}, which approves every package from it, not only mobile-dev-inc/tap/maestro"
+        );
+    }
+
+    fn imported() -> App {
+        let mut app = app();
+        app.read_sample("example-dev/one-config");
+        app.review_tick(&Tick::Tap("mobile-dev-inc/tap".to_string()));
+        app.start_from_review();
+        app
+    }
+
+    fn taps_handed(app: &mut App) -> Vec<String> {
+        let got = Arc::new(Mutex::new(Vec::new()));
+        app.engine = Box::new(Capture(Arc::clone(&got)));
+        app.start_run();
+        got.lock().unwrap().clone()
+    }
+
+    /// The import stores the package and not the tap. A later Review is a new answer.
+    #[test]
+    fn a_tap_ticked_on_a_later_review_is_not_held_back() {
+        let mut app = imported();
+        let held = app.repo.sim.store.read().unwrap();
+        assert!(
+            held.packages.contains("mobile-dev-inc/tap/maestro"),
+            "the package approval was not stored: {:?}",
+            held.packages
+        );
+        assert!(
+            !held.taps.contains("mobile-dev-inc/tap"),
+            "the import wrote a tap approval: {:?}",
+            held.taps
+        );
+        let brew_names: Vec<String> = app
+            .plan()
+            .entries
+            .iter()
+            .flat_map(|entry| entry.recipe.steps())
+            .filter_map(|step| step.brew_name().map(str::to_string))
+            .collect();
+        assert!(
+            brew_names
+                .iter()
+                .any(|name| name == "mobile-dev-inc/tap/maestro"),
+            "the plan's brew name is not the stored package, so it would not run: {brew_names:?}"
+        );
+
+        app.selected.clear();
+        app.packages.clear();
+        app.settings.clear();
+        app.selected.insert("aerospace".to_string());
+        app.answers.taps.clear();
+        app.answers.taps.insert("nikitabobko/tap".to_string());
+        assert!(app.plan().taps.contains_key("nikitabobko/tap"));
+        let unrelated = taps_handed(&mut app);
+
+        let mut app = imported();
+        app.selected.clear();
+        app.packages.clear();
+        app.settings.clear();
+        app.packages
+            .insert("mobile-dev-inc/tap/other-tool".to_string());
+        // Changed from setting the field directly: a person's tick goes through `answer_tap`.
+        app.answers.taps.clear();
+        app.answer_tap("mobile-dev-inc/tap", true);
+        assert!(
+            app.plan().taps.contains_key("mobile-dev-inc/tap"),
+            "the later plan should show the tap the person ticked"
+        );
+        let later = taps_handed(&mut app);
+
+        let mut problems = Vec::new();
+        if !unrelated.iter().any(|tap| tap == "nikitabobko/tap") {
+            problems.push(format!(
+                "a different tap ticked on a later review was held back: {unrelated:?}"
+            ));
+        }
+        if !later.iter().any(|tap| tap == "mobile-dev-inc/tap") {
+            problems.push(format!(
+                "a tap the person ticked on a later review was held back ({later:?}) because an earlier import used that tap"
+            ));
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// The import copies its tap into the Review answers so that row shows Allowed. That copy
+    /// is how the package shows as answered. It is not a tap approval, and a tap approval
+    /// covers every package from the tap. Editing the selection does not tick the row again.
+    #[test]
+    fn a_selection_edit_does_not_widen_an_imported_package_approval_to_the_tap() {
+        let mut app = imported();
+        assert!(
+            app.answers.taps.contains("mobile-dev-inc/tap"),
+            "the import should show its tap as answered"
+        );
+        assert!(
+            app.plan().taps.contains_key("mobile-dev-inc/tap"),
+            "the imported package should put its tap on the plan"
+        );
+        let answers_before = app.answers.taps.clone();
+        app.selected.insert("ripgrep".to_string());
+        assert_eq!(
+            app.answers.taps, answers_before,
+            "the edit should not tick or clear the tap"
+        );
+        assert!(
+            app.plan().taps.contains_key("mobile-dev-inc/tap"),
+            "the imported package should stay on the plan"
+        );
+        let handed = taps_handed(&mut app);
+        assert!(
+            !handed.iter().any(|tap| tap == "mobile-dev-inc/tap"),
+            "editing the selection handed the engine the tap {handed:?}, which approves every package from it; the import only stored mobile-dev-inc/tap/maestro and the tap was not ticked again"
+        );
     }
 
     #[test]

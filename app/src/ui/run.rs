@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
+use rune_kit::TextInput;
 use soulcaster_core::lifecycle::{ItemState, Stage};
 
 use super::{kit, state_words};
@@ -41,7 +42,67 @@ pub fn screen(app: &App) -> El {
         .w_full()
         .h_full()
         .child(header(app))
+        .child(asks(app))
         .child(body(app))
+}
+
+/// What the Run is waiting on from the person. A real engine asks here, when it knows it needs to.
+fn asks(app: &App) -> El {
+    let mut strip = col().key("run-asks").w_full();
+    if let Some(request) = app.engine.password_request() {
+        let k = kit::theme();
+        let input = TextInput::new(&app.run_password)
+            .secure()
+            .plain()
+            .label("Your Mac password")
+            .invalid(request.last_was_wrong)
+            .on_edit(|app: &mut App| &mut app.run_password)
+            .on_submit(|app: &mut App, _| app.submit_run_password())
+            .build(k)
+            .key("run-password-field");
+        let field = col()
+            .w(160.0)
+            .child(input.h(18.0))
+            .child(el().w_full().h(1.0).fill(if request.last_was_wrong {
+                kit::mandarin()
+            } else {
+                kit::ink()
+            }));
+        let words = if request.last_was_wrong {
+            "That password didn't work"
+        } else {
+            "Your Mac password, for the admin steps"
+        };
+        strip = strip.child(kit::ruled(
+            "run-ask-password".to_string(),
+            row()
+                .gap(8.0)
+                .child(kit::label(words).grow(1.0))
+                .child(field)
+                .child(kit::action(
+                    "run-password-later".to_string(),
+                    "Later",
+                    false,
+                    |app: &mut App, _| app.engine.decline_password(),
+                )),
+        ));
+    }
+    if let Some((code, address)) = app.engine.github_code() {
+        strip = strip.child(kit::ruled(
+            "run-ask-github".to_string(),
+            row()
+                .gap(8.0)
+                .child(kit::label(format!("Sign in at {address}")).grow(1.0))
+                .child(
+                    text(code)
+                        .key("github-code")
+                        .font(kit::bold_style())
+                        .color(kit::ink())
+                        .selectable(true),
+                ),
+        ));
+    }
+    strip
 }
 
 fn header(app: &App) -> El {
