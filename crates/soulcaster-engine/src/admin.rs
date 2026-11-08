@@ -553,4 +553,77 @@ mod helper_path_tests {
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
+
+    /// `current_exe` keeps a symlink in the path. The folders of that path are not the program's
+    /// folders, so a file planted there must not be the helper.
+    #[test]
+    fn a_symlink_in_the_executable_path_does_not_select_a_planted_helper() {
+        let root =
+            std::env::temp_dir().join(format!("soulcaster-helper-symlink-{}", std::process::id()));
+        let plain = root.join("target/debug");
+        fs::create_dir_all(&plain).unwrap();
+        fs::write(plain.join("soulcaster"), "real").unwrap();
+        fs::write(plain.join("soulcaster-askpass"), "real").unwrap();
+
+        // The executable itself is a symlink whose path says Contents/MacOS.
+        let trap_macos = root.join("trap/Contents/MacOS");
+        let trap_helpers = root.join("trap/Contents/Helpers");
+        fs::create_dir_all(&trap_macos).unwrap();
+        fs::create_dir_all(&trap_helpers).unwrap();
+        std::os::unix::fs::symlink(plain.join("soulcaster"), trap_macos.join("Soulcaster"))
+            .unwrap();
+        fs::write(trap_helpers.join("soulcaster-askpass"), "planted").unwrap();
+        let chosen_file = fs::canonicalize(helper_for(&trap_macos.join("Soulcaster"))).unwrap();
+        let beside = fs::canonicalize(plain.join("soulcaster-askpass")).unwrap();
+        let planted = fs::canonicalize(trap_helpers.join("soulcaster-askpass")).unwrap();
+
+        // Contents and MacOS are not the same tree. MacOS is a symlink to another folder.
+        let unrelated = root.join("unrelated");
+        let contents = root.join("split/Contents");
+        fs::create_dir_all(&unrelated).unwrap();
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(unrelated.join("Soulcaster"), "real").unwrap();
+        fs::write(unrelated.join("soulcaster-askpass"), "real").unwrap();
+        std::os::unix::fs::symlink(&unrelated, contents.join("MacOS")).unwrap();
+        fs::create_dir_all(contents.join("Helpers")).unwrap();
+        fs::write(contents.join("Helpers/soulcaster-askpass"), "planted").unwrap();
+        let exe = contents.join("MacOS/Soulcaster");
+        let chosen_split = fs::canonicalize(helper_for(&exe)).unwrap();
+        let beside_split = fs::canonicalize(unrelated.join("soulcaster-askpass")).unwrap();
+        let planted_split = fs::canonicalize(contents.join("Helpers/soulcaster-askpass")).unwrap();
+
+        // A symlink outside the bundle points at the window binary.
+        let bundle = root.join("Soulcaster.app/Contents");
+        fs::create_dir_all(bundle.join("MacOS")).unwrap();
+        fs::create_dir_all(bundle.join("Helpers")).unwrap();
+        fs::write(bundle.join("MacOS/Soulcaster"), "app").unwrap();
+        fs::write(bundle.join("Helpers/soulcaster-askpass"), "bundle").unwrap();
+        let outside = root.join("bin");
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(bundle.join("MacOS/Soulcaster"), outside.join("Soulcaster"))
+            .unwrap();
+        fs::write(outside.join("soulcaster-askpass"), "planted").unwrap();
+        let chosen_out = fs::canonicalize(helper_for(&outside.join("Soulcaster"))).unwrap();
+        let bundled = fs::canonicalize(bundle.join("Helpers/soulcaster-askpass")).unwrap();
+        let planted_out = fs::canonicalize(outside.join("soulcaster-askpass")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        let mut problems = Vec::new();
+        if chosen_file != beside {
+            problems.push(format!(
+                "a symlink at Contents/MacOS was chosen ({chosen_file:?}); the program is the plain build, whose helper is beside it ({beside:?}), not the planted file ({planted:?})"
+            ));
+        }
+        if chosen_split != beside_split {
+            problems.push(format!(
+                "MacOS is a symlink to an unrelated folder, and a planted helper was chosen ({chosen_split:?}) instead of the one beside the program ({beside_split:?}); planted is {planted_split:?}"
+            ));
+        }
+        if chosen_out != bundled {
+            problems.push(format!(
+                "a symlink to the window binary was chosen ({chosen_out:?}); it points at the planted file beside the symlink ({planted_out:?}), not the bundle helper ({bundled:?})"
+            ));
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
 }

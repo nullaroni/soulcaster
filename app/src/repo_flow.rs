@@ -743,6 +743,87 @@ mod tests {
         );
     }
 
+    fn imported() -> App {
+        let mut app = app();
+        app.read_sample("example-dev/one-config");
+        app.review_tick(&Tick::Tap("mobile-dev-inc/tap".to_string()));
+        app.start_from_review();
+        app
+    }
+
+    fn taps_handed(app: &mut App) -> Vec<String> {
+        let got = Arc::new(Mutex::new(Vec::new()));
+        app.engine = Box::new(Capture(Arc::clone(&got)));
+        app.start_run();
+        got.lock().unwrap().clone()
+    }
+
+    /// The import stores the package and not the tap. A later Review is a new answer.
+    #[test]
+    fn a_tap_ticked_on_a_later_review_is_not_held_back() {
+        let mut app = imported();
+        let held = app.repo.sim.store.read().unwrap();
+        assert!(
+            held.packages.contains("mobile-dev-inc/tap/maestro"),
+            "the package approval was not stored: {:?}",
+            held.packages
+        );
+        assert!(
+            !held.taps.contains("mobile-dev-inc/tap"),
+            "the import wrote a tap approval: {:?}",
+            held.taps
+        );
+        let brew_names: Vec<String> = app
+            .plan()
+            .entries
+            .iter()
+            .flat_map(|entry| entry.recipe.steps())
+            .filter_map(|step| step.brew_name().map(str::to_string))
+            .collect();
+        assert!(
+            brew_names
+                .iter()
+                .any(|name| name == "mobile-dev-inc/tap/maestro"),
+            "the plan's brew name is not the stored package, so it would not run: {brew_names:?}"
+        );
+
+        app.selected.clear();
+        app.packages.clear();
+        app.settings.clear();
+        app.selected.insert("aerospace".to_string());
+        app.answers.taps.clear();
+        app.answers.taps.insert("nikitabobko/tap".to_string());
+        assert!(app.plan().taps.contains_key("nikitabobko/tap"));
+        let unrelated = taps_handed(&mut app);
+
+        let mut app = imported();
+        app.selected.clear();
+        app.packages.clear();
+        app.settings.clear();
+        app.packages
+            .insert("mobile-dev-inc/tap/other-tool".to_string());
+        app.answers.taps.clear();
+        app.answers.taps.insert("mobile-dev-inc/tap".to_string());
+        assert!(
+            app.plan().taps.contains_key("mobile-dev-inc/tap"),
+            "the later plan should show the tap the person ticked"
+        );
+        let later = taps_handed(&mut app);
+
+        let mut problems = Vec::new();
+        if !unrelated.iter().any(|tap| tap == "nikitabobko/tap") {
+            problems.push(format!(
+                "a different tap ticked on a later review was held back: {unrelated:?}"
+            ));
+        }
+        if !later.iter().any(|tap| tap == "mobile-dev-inc/tap") {
+            problems.push(format!(
+                "a tap the person ticked on a later review was held back ({later:?}) because an earlier import used that tap"
+            ));
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
     #[test]
     fn saving_never_gets_in_the_way_of_a_run() {
         // With nothing saved yet and no network, a Run still starts from the same selection.
