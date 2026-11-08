@@ -707,3 +707,60 @@ fn a_link_over_a_whole_dangerous_folder_keeps_its_note() {
         assert!(row.note.is_some(), "{target} has no note");
     }
 }
+
+/// Status trusts the index's record of each file's size and time. With `core.trustctime` off and
+/// `core.checkStat=minimal` in the clone's own config, a same-size edit with its old time put back
+/// looks unchanged. The check builds its own index, so every file is hashed.
+#[test]
+fn a_same_size_edit_with_its_old_time_put_back_is_still_seen() {
+    let repo = real_repo(&[("zsh/zshrc", "approved\n"), ("setup.sh", "exit 0\n")]);
+    let links = plan(&[("~/.zshrc", "zsh/zshrc")], Some("setup.sh"));
+    let clone = repo.home.join("Developer/dotfiles");
+    git(&repo.home, &clone, &["config", "core.trustctime", "false"]);
+    git(&repo.home, &clone, &["config", "core.checkStat", "minimal"]);
+    let script = clone.join("setup.sh");
+    let before = fs::metadata(&script).unwrap().modified().unwrap();
+    // Write the index after the file's time, so git doesn't treat the entry as racy and rehash it.
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    git(&repo.home, &clone, &["update-index", "--really-refresh"]);
+    fs::write(&script, "touch p").unwrap();
+    assert_eq!(
+        fs::metadata(&script).unwrap().len(),
+        "exit 0\n".len() as u64
+    );
+    fs::File::options()
+        .write(true)
+        .open(&script)
+        .unwrap()
+        .set_modified(before)
+        .unwrap();
+    assert_eq!(
+        git(&repo.home, &clone, &["status", "--porcelain=v1"]),
+        "",
+        "the setup didn't fool status, so this proves nothing"
+    );
+    repo.store
+        .write(&Approvals {
+            dotfiles: Some(DotfilesApproval {
+                repo: KEY.to_string(),
+                commit: repo.commit.clone(),
+                links: links.links.clone(),
+            }),
+            script: Some(ScriptApproval {
+                repo: KEY.to_string(),
+                commit: repo.commit.clone(),
+                path: "setup.sh".to_string(),
+                ran: false,
+            }),
+            ..Approvals::default()
+        })
+        .unwrap();
+    let runner = soulcaster_repo::process::runner();
+    let outcome = step(&runner, &repo.tools, &repo.store).run_script(
+        &links,
+        UserStage::password_is_gone(),
+        &mut |_, _| {},
+    );
+    assert_eq!(outcome, ScriptOutcome::HeldForReview);
+    assert!(!clone.join("p").exists());
+}

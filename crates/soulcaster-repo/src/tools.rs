@@ -26,6 +26,11 @@ const GIT_HARDENING: &[&str] = &[
     "protocol.allow=never",
     // A replace ref shows a different tree under the approved commit's id. Read the real objects.
     "core.useReplaceRefs=false",
+    // A commit-graph can name another tree for a commit. Read the commit objects themselves.
+    "core.commitGraph=false",
+    "core.untrackedCache=false",
+    "core.sparseCheckout=false",
+    "core.splitIndex=false",
     "protocol.https.allow=always",
     "transfer.fsckObjects=true",
     "http.followRedirects=false",

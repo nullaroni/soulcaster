@@ -356,11 +356,32 @@ impl DotfilesStep<'_> {
         cwd: &Path,
         args: &[&str],
     ) -> Result<CommandOutput, DotfilesError> {
-        let command = self
+        self.git_with(cred, cwd, args, &[])
+    }
+
+    /// With a clone, git is told where its folder and its files are, so `core.worktree` in the
+    /// clone's own config can't send a check somewhere else.
+    fn git_with(
+        &self,
+        cred: GitCred,
+        cwd: &Path,
+        args: &[&str],
+        env: &[(&str, String)],
+    ) -> Result<CommandOutput, DotfilesError> {
+        let mut command = self
             .tools
             .git(cred, Some(cwd))
             .ok_or(DotfilesError::GitMissing)?
             .args(args.iter().copied());
+        let git_dir = cwd.join(".git");
+        if fs::symlink_metadata(&git_dir).is_ok_and(|meta| meta.is_dir()) {
+            command = command
+                .env("GIT_DIR", git_dir.to_string_lossy())
+                .env("GIT_WORK_TREE", cwd.to_string_lossy());
+        }
+        for (key, value) in env {
+            command = command.env(*key, value.clone());
+        }
         self.runner
             .run(&command, &mut |_, _| {})
             .map_err(|_| DotfilesError::GitMissing)
@@ -375,19 +396,61 @@ impl DotfilesStep<'_> {
         CommitSha::parse(output.stdout_text().trim()).ok_or(DotfilesError::LocationBusy)
     }
 
-    /// `status` can't see a file marked `assume-unchanged` or `skip-worktree`, so a different
-    /// install script could sit behind either. `ls-files -v` tags those, and only `H` is plain.
-    fn is_clean(&self, clone: &Path) -> Result<bool, DotfilesError> {
-        let status = self.git(GitCred::None, clone, &["status", "--porcelain=v1"])?;
-        if !status.is_success() || !status.stdout.is_empty() {
+    /// Whether the files on disk are exactly `commit`'s. Nothing the clone holds is trusted for
+    /// this: a fresh index is built from the commit, git hashes every file against it, and only
+    /// then says what differs. So index flags, forged file times, a commit-graph and
+    /// `core.worktree` can't hide a change. `ignored_in` also counts ignored files under those
+    /// paths, because a linked folder carries them along.
+    fn matches_commit(
+        &self,
+        clone: &Path,
+        commit: &CommitSha,
+        ignored_in: &[&str],
+    ) -> Result<bool, DotfilesError> {
+        let git_dir = clone.join(".git");
+        if !fs::symlink_metadata(&git_dir).is_ok_and(|meta| meta.is_dir()) {
             return Ok(false);
         }
-        let flags = self.git(GitCred::None, clone, &["ls-files", "-v"])?;
-        Ok(flags.is_success()
-            && flags
-                .stdout_text()
-                .lines()
-                .all(|line| line.starts_with("H ")))
+        let index = git_dir.join("soulcaster-check-index");
+        let _ = fs::remove_file(&index);
+        let env = [("GIT_INDEX_FILE", index.to_string_lossy().into_owned())];
+        let result = (|| {
+            let built =
+                self.git_with(GitCred::None, clone, &["read-tree", commit.as_str()], &env)?;
+            if !built.is_success() {
+                return Ok(false);
+            }
+            let _ = self.git_with(
+                GitCred::None,
+                clone,
+                &["update-index", "-q", "--refresh"],
+                &env,
+            )?;
+            let status = self.git_with(
+                GitCred::None,
+                clone,
+                &["status", "--porcelain=v1", "--untracked-files=all"],
+                &env,
+            )?;
+            if !status.is_success() || !status.stdout.is_empty() {
+                return Ok(false);
+            }
+            if ignored_in.is_empty() {
+                return Ok(true);
+            }
+            let mut args = vec![
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignored=matching",
+                "--",
+            ];
+            args.extend(ignored_in);
+            let ignored = self.git_with(GitCred::None, clone, &args, &env)?;
+            Ok(ignored.is_success() && ignored.stdout.is_empty())
+        })();
+        let _ = fs::remove_file(&index);
+        result
     }
 
     fn fetch(
@@ -546,7 +609,10 @@ impl DotfilesStep<'_> {
         let held = self.approval(plan).ok_or(DotfilesError::NotApproved)?;
         let root = SafeRoot::open(&self.tools.home).map_err(|_| DotfilesError::LocationBusy)?;
         // The same rule a move uses. A file that was edited here isn't what was approved.
-        let clean = self.is_clean(&clone).unwrap_or(false);
+        let sources: Vec<&str> = plan.links.values().map(String::as_str).collect();
+        let clean = self
+            .matches_commit(&clone, &held.commit, &sources)
+            .unwrap_or(false);
         let clone = fs::canonicalize(&clone).map_err(|_| DotfilesError::LocationBusy)?;
         let refused = refused_links(plan.links.keys().map(String::as_str), self.clone_location);
         let mut rows = Vec::with_capacity(plan.links.len());
@@ -628,7 +694,7 @@ impl DotfilesStep<'_> {
             Err(DotfilesError::PastApproved { .. }) => return ScriptOutcome::HeldForReview,
             Err(_) => return ScriptOutcome::CouldNotRun,
         };
-        match self.is_clean(&clone) {
+        match self.matches_commit(&clone, &held.commit, &[path]) {
             Ok(true) => {}
             Ok(false) => return ScriptOutcome::HeldForReview,
             Err(_) => return ScriptOutcome::CouldNotRun,
@@ -741,7 +807,7 @@ impl DotfilesStep<'_> {
         let source = DotfilesSource::parse(&plan.repo).ok_or(DotfilesError::NotApproved)?;
         let clone = self.existing_clone()?;
         self.check_existing(&clone, &source)?;
-        if !self.is_clean(&clone)? {
+        if !self.matches_commit(&clone, &held.commit, &[])? {
             return Err(DotfilesError::ChangesOnThisMac);
         }
         self.fetch(&source, &clone, &preview.to)?;
