@@ -213,10 +213,13 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+
     use soulcaster_core::catalog::Catalog;
     use soulcaster_core::command::{Command, FakeRunner, Reply};
     use soulcaster_core::config::Config;
-    use soulcaster_engine::{AdminWindow, Budget, Validation};
+    use soulcaster_engine::{AdminWindow, Budget, DotfilesHook, DotfilesResult, Validation};
 
     use super::*;
 
@@ -360,5 +363,224 @@ mod tests {
         let (code, text) = run(&runner, false);
         assert_eq!(code, FAILED, "{text}");
         assert!(text.contains("ripgrep: failed"), "{text}");
+    }
+
+    #[test]
+    fn a_cancelled_run_is_not_a_clean_finish() {
+        let runner = FakeRunner::new();
+        machine(&runner, true);
+        runner.on(
+            |c| file_name(c) == "test" && c.args.iter().any(|a| a.contains("Cellar/ripgrep")),
+            [Reply::fails(1, "")],
+        );
+        let home = tempfile::tempdir().unwrap();
+        let config =
+            Config::parse(br#"{"schemaVersion":1,"name":"Test","items":["ripgrep"]}"#).unwrap();
+        let mut plan = Plan::new(&config, Catalog::shipped());
+        let cancel = AtomicBool::new(true);
+        let setup = Setup {
+            runner: &runner,
+            admin: &NoGate,
+            dotfiles: None,
+            asks: &Declines,
+            clock: &Fixed,
+            cancel: &cancel,
+            home: home.path(),
+            json: false,
+        };
+        let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let code = run_plan(&mut plan, &setup, buffer.clone());
+        let text = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        assert!(
+            !runner
+                .calls()
+                .iter()
+                .any(|c| file_name(c) == "brew" && c.args.iter().any(|a| a == "install")),
+            "cancel was checked too late and an install ran: {text}"
+        );
+        assert_ne!(
+            code, FINISHED,
+            "exit 0 means everything finished, and this Run was cancelled first: {text}"
+        );
+    }
+
+    /// The Dotfiles step revokes one approval, records another, then the record cannot be saved.
+    struct Revokes<'a> {
+        home: &'a Path,
+    }
+
+    impl DotfilesHook for Revokes<'_> {
+        fn apply(
+            &self,
+            _: &soulcaster_core::plan::DotfilesPlan,
+            approvals: &dyn soulcaster_core::approval::ApprovalStore,
+        ) -> DotfilesResult {
+            let mut held = approvals.read().unwrap_or_default();
+            held.taps.insert("added/tap".into());
+            approvals.write(&held).unwrap();
+            let dir = self.home.join("Library/Application Support/Soulcaster");
+            let tmp = dir.join(format!(".machine.json.{}.tmp", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::create_dir(&tmp).unwrap();
+            DotfilesResult::default()
+        }
+    }
+
+    #[test]
+    fn a_save_failure_after_the_run_started_is_not_refused_before_anything_changed() {
+        let runner = FakeRunner::new();
+        machine(&runner, true);
+        let home = tempfile::tempdir().unwrap();
+        let _cleanup = ClearTmp {
+            home: home.path().to_path_buf(),
+        };
+        let config = Config::parse(
+            br#"{"schemaVersion":1,"name":"Test","items":[],"dotfiles":{"repo":"example-you/dotfiles"}}"#,
+        )
+        .unwrap();
+        let mut plan = Plan::new(&config, Catalog::shipped());
+        let cancel = AtomicBool::new(false);
+        let hook = Revokes { home: home.path() };
+        let setup = Setup {
+            runner: &runner,
+            admin: &NoGate,
+            dotfiles: Some(&hook),
+            asks: &Declines,
+            clock: &Fixed,
+            cancel: &cancel,
+            home: home.path(),
+            json: false,
+        };
+        let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let code = run_plan(&mut plan, &setup, buffer.clone());
+        let text = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        assert!(
+            text.contains("Run started."),
+            "the Run had not started, so a refusal would be right: {text}"
+        );
+        assert_ne!(
+            code, REFUSED,
+            "exit 2 is only for a refusal before anything changes: {text}"
+        );
+        assert!(!text.contains("Refused before changing anything"), "{text}");
+    }
+
+    struct ClearTmp {
+        home: std::path::PathBuf,
+    }
+
+    impl Drop for ClearTmp {
+        fn drop(&mut self) {
+            let tmp = self.home.join(format!(
+                "Library/Application Support/Soulcaster/.machine.json.{}.tmp",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(tmp);
+        }
+    }
+
+    #[test]
+    fn echo_is_restored_when_the_password_read_is_interrupted() {
+        if std::env::var_os("SOULCASTER_ECHO_CHILD").is_some() {
+            // This process's controlling terminal is the pty the parent created. It is not the
+            // terminal this test was launched from. The test harness may have wrapped SIGINT;
+            // `soulcaster run` takes the default, which is to die.
+            // SAFETY: `set` is initialized by `sigemptyset`. Both calls affect only this child.
+            unsafe {
+                let mut set = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+                libc::sigemptyset(set.as_mut_ptr());
+                libc::sigaddset(set.as_mut_ptr(), libc::SIGINT);
+                libc::pthread_sigmask(libc::SIG_UNBLOCK, set.as_ptr(), std::ptr::null_mut());
+                libc::signal(libc::SIGINT, libc::SIG_DFL);
+            }
+            let _ = super::read_without_echo("Password: ");
+            std::process::exit(0);
+        }
+
+        let mut primary: libc::c_int = -1;
+        let mut replica: libc::c_int = -1;
+        // SAFETY: both pointers are live `c_int`s. A null window and name ask for defaults.
+        let opened = unsafe {
+            libc::openpty(
+                &mut primary,
+                &mut replica,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(opened, 0, "openpty: {}", std::io::Error::last_os_error());
+        let primary = unsafe { std::os::fd::OwnedFd::from_raw_fd(primary) };
+        let replica = unsafe { std::os::fd::OwnedFd::from_raw_fd(replica) };
+        // Keep a replica open in this process. Closing the last one can reset the pty, which would
+        // hide echo being left off when the child dies.
+        let _replica_kept = replica.try_clone().unwrap();
+
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child
+            .arg("run_command::tests::echo_is_restored_when_the_password_read_is_interrupted")
+            .arg("--exact")
+            .env("SOULCASTER_ECHO_CHILD", "1")
+            .stdin(std::process::Stdio::from(replica))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        // SAFETY: runs in the forked child before exec. `setsid` and `TIOCSCTTY` only affect that
+        // child. File descriptor 0 is the pty replica handed in as stdin.
+        unsafe {
+            child.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::ioctl(0, libc::TIOCSCTTY as libc::c_ulong, 0) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = child.spawn().unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        struct StopChild(Option<i32>);
+        impl Drop for StopChild {
+            fn drop(&mut self) {
+                if let Some(pid) = self.0.take() {
+                    // SAFETY: this is the child spawned above. `SIGKILL` ends it if the test
+                    // unwinds while it is still blocked in the password read.
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                }
+            }
+        }
+        let mut stop = StopChild(Some(pid));
+
+        let echo_on = |fd: std::os::fd::RawFd| -> bool {
+            let mut termios = unsafe { std::mem::zeroed::<libc::termios>() };
+            // SAFETY: `fd` is the open pty primary and `termios` is a live value of that type.
+            let read = unsafe { libc::tcgetattr(fd, &mut termios) };
+            assert_eq!(read, 0, "tcgetattr: {}", std::io::Error::last_os_error());
+            termios.c_lflag & libc::ECHO != 0
+        };
+        let primary_fd = primary.as_raw_fd();
+        assert!(echo_on(primary_fd), "the pty started with echo already off");
+        let started = std::time::Instant::now();
+        while echo_on(primary_fd) && started.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !echo_on(primary_fd),
+            "the password read never turned echo off"
+        );
+        // SAFETY: `pid` is the child this test spawned. `SIGINT` is the interrupt the terminal sends.
+        let sent = unsafe { libc::kill(pid, libc::SIGINT) };
+        assert_eq!(sent, 0, "kill: {}", std::io::Error::last_os_error());
+        let killed = std::time::Instant::now();
+        while !echo_on(primary_fd) && killed.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            echo_on(primary_fd),
+            "echo stayed off after the password read was interrupted"
+        );
+        stop.0 = None;
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }

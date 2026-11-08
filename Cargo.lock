@@ -3190,6 +3190,7 @@ dependencies = [
 name = "soulcaster-cli"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "rustix 1.1.6",
  "serde_json",
  "soulcaster-core",

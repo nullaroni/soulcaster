@@ -17,4 +17,5 @@ serde_json.workspace = true
 rustix = { version = "1", features = ["termios"] }
 
 [dev-dependencies]
+libc = "0.2"
 tempfile = "3"
