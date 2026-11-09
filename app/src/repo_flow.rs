@@ -466,7 +466,7 @@ impl App {
             self.toast = Some("Couldn't record your approvals, so nothing started.".to_string());
             return;
         };
-        self.config_name = run.config.name.clone();
+        self.set_type_name(&run.config.name);
         self.selected = run.config.items.iter().cloned().collect();
         self.settings = run.config.settings.clone();
         self.packages = run.config.packages.formulae.iter().cloned().collect();

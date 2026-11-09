@@ -110,6 +110,7 @@ pub struct App {
     /// How wide the Catalog's content is, which sets its column count.
     pub grid_width: f32,
     pub config_name: String,
+    pub name_edit: TextEdit,
 
     // Review
     pub base_present: bool,
@@ -195,6 +196,7 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         // The default window, less the sidebar. The first layout reports the real width.
         grid_width: 911.0,
         config_name: "My Mac".to_string(),
+        name_edit: TextEdit::new("My Mac"),
         base_present: false,
         answers: Answers::default(),
         password: TextEdit::new("").secure(),
@@ -381,6 +383,21 @@ impl App {
             self.settings.insert(id.to_string(), value);
         }
         self.rebuild_rows();
+    }
+
+    /// Replaces the Machine Type's name, in the field too.
+    pub fn set_type_name(&mut self, name: &str) {
+        self.config_name = name.to_string();
+        self.name_edit.replace_text(name);
+    }
+
+    /// A Machine Type always has a name, so clearing the field keeps the last one until there's
+    /// another.
+    pub fn name_edited(&mut self) {
+        let typed = self.name_edit.text.trim();
+        if !typed.is_empty() {
+            self.config_name = typed.to_string();
+        }
     }
 
     pub fn toggle_item(&mut self, id: &str) {
@@ -1187,6 +1204,22 @@ mod tests {
             view().catalog.sections().len(),
             Catalog::shipped().sections().len()
         );
+    }
+
+    #[test]
+    fn the_name_field_names_what_is_saved() {
+        let mut app = init();
+        app.name_edit.replace_text("  Agent Mini ");
+        app.name_edited();
+        assert_eq!(app.config().name, "Agent Mini");
+    }
+
+    #[test]
+    fn clearing_the_name_field_keeps_the_last_name() {
+        let mut app = init();
+        app.name_edit.replace_text("");
+        app.name_edited();
+        assert_eq!(app.config().name, "My Mac");
     }
 
     fn item_rows(app: &App) -> usize {
