@@ -2,13 +2,13 @@
 
 A boring, rerunnable, inspectable macOS provisioning system for Apple Silicon Macs.
 
-## Soulcaster (in progress)
+## MacFlayer (in progress)
 
 The native Mac app replacing the Bash below. A Rust workspace, Apple Silicon only:
 
 ```text
-crates/soulcaster-core/   Catalog, Config parsing, Plan, Item states, event stream, command-runner seam
-crates/soulcaster-cli/    `soulcaster`: validate a Config and print its plan
+crates/macflayer-core/   Catalog, Config parsing, Plan, Item states, event stream, command-runner seam
+crates/macflayer-cli/    `macflayer`: validate a Config and print its plan
 app/                      The Rune window, with a simulated engine for now
 catalog/catalog.json      The launch Catalog
 schema/                   The Config and Recipe JSON Schemas, with their examples
@@ -16,11 +16,11 @@ schema/                   The Config and Recipe JSON Schemas, with their example
 
 ```sh
 cargo test --workspace
-cargo run -p soulcaster-cli -- validate schema/examples/developer.json
-cargo run -p soulcaster-cli -- plan schema/examples/developer.json
-cargo run -p soulcaster-app                                    # the window
-cargo run -p soulcaster-app -- --list-scenes
-cargo run -p soulcaster-app -- --snap out.png --scene catalog-picked
+cargo run -p macflayer-cli -- validate schema/examples/developer.json
+cargo run -p macflayer-cli -- plan schema/examples/developer.json
+cargo run -p macflayer-app                                    # the window
+cargo run -p macflayer-app -- --list-scenes
+cargo run -p macflayer-app -- --snap out.png --scene catalog-picked
 ```
 
 None of this installs anything yet: the CLI only reads a Config, and the app plays a simulated Run.
@@ -28,13 +28,13 @@ None of this installs anything yet: the CLI only reads a Config, and the app pla
 ### Build the app
 
 ```sh
-packaging/build-app.sh               # target/package/Soulcaster.app, ad-hoc signed and checked
-open target/package/Soulcaster.app
+packaging/build-app.sh               # target/package/MacFlayer.app, ad-hoc signed and checked
+open target/package/MacFlayer.app
 ```
 
 This needs Rust and Command Line Tools. [docs/releasing.md](docs/releasing.md) covers releases, signing and notarization.
 
-## Install Soulcaster
+## Install MacFlayer
 
 On an Apple Silicon Mac with macOS 15 or later:
 
@@ -48,7 +48,7 @@ Once a notarized release exists, the command downloads it, checks its checksum, 
 
 ## Quick Start (the older Bash setup)
 
-The Bash setup below is being replaced by Soulcaster. `install.sh` no longer runs it, so start it from a clone:
+The Bash setup below is being replaced by MacFlayer. `install.sh` no longer runs it, so start it from a clone:
 
 ```bash
 git clone https://github.com/nullaroni/soulcaster.git ~/Developer/macbook-setup
@@ -70,8 +70,8 @@ After the first run, your role and Git identity are saved to `.local.env` (gitig
 
 ```
 macbook-setup/
-├── install.sh            # Installs the Soulcaster app (verified, one command)
-├── packaging/            # Builds and signs Soulcaster.app, and tests install.sh
+├── install.sh            # Installs the MacFlayer app (verified, one command)
+├── packaging/            # Builds and signs MacFlayer.app, and tests install.sh
 ├── bootstrap.sh          # Main entrypoint of the Bash setup
 ├── config/               # Environment presets
 ├── scripts/              # Modular setup scripts

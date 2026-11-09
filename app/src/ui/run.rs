@@ -2,9 +2,9 @@
 
 use std::borrow::Cow;
 
+use macflayer_core::lifecycle::{ItemState, Stage};
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 use rune_kit::TextInput;
-use soulcaster_core::lifecycle::{ItemState, Stage};
 
 use super::{kit, state_words};
 use crate::catalog_view::view;

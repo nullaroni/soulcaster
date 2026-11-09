@@ -1,8 +1,8 @@
 //! The Drift screen's rows. Real ones come from the engine under `--real`, and these samples stand
 //! in for them in the simulator, for tests and for scenes, so both show exactly the same choices.
 
+use macflayer_core::drift::{Choice, Row, RowKind, confirm_adopt_removal, shown};
 use serde_json::{Value, json};
-use soulcaster_core::drift::{Choice, Row, RowKind, confirm_adopt_removal, shown};
 
 #[derive(Clone)]
 pub struct DriftEntry {
@@ -50,7 +50,7 @@ pub fn choice_help(row: &Row, choice: Choice) -> String {
     match (choice, row.is_setting) {
         (Choice::Adopt, _) if row.on_mac.is_none() => {
             format!(
-                "Take {name} out of your Config. {}",
+                "Take {name} out of your Machine Type. {}",
                 confirm_adopt_removal(name)
             )
         }

@@ -1595,6 +1595,70 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
+name = "macflayer-app"
+version = "0.1.0"
+dependencies = [
+ "macflayer-core",
+ "macflayer-engine",
+ "macflayer-repo",
+ "rune",
+ "rune-kit",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "macflayer-cli"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "macflayer-core",
+ "macflayer-engine",
+ "macflayer-repo",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "macflayer-core"
+version = "0.1.0"
+dependencies = [
+ "jsonschema",
+ "regex",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+ "zeroize",
+]
+
+[[package]]
+name = "macflayer-engine"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "macflayer-core",
+ "serde",
+ "serde_json",
+ "zeroize",
+]
+
+[[package]]
+name = "macflayer-repo"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "macflayer-core",
+ "macflayer-engine",
+ "regex",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "sha1_smol",
+ "tempfile",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3171,70 +3235,6 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "soulcaster-app"
-version = "0.1.0"
-dependencies = [
- "rune",
- "rune-kit",
- "serde",
- "serde_json",
- "soulcaster-core",
- "soulcaster-engine",
- "soulcaster-repo",
- "tempfile",
-]
-
-[[package]]
-name = "soulcaster-cli"
-version = "0.1.0"
-dependencies = [
- "libc",
- "serde_json",
- "soulcaster-core",
- "soulcaster-engine",
- "soulcaster-repo",
- "tempfile",
-]
-
-[[package]]
-name = "soulcaster-core"
-version = "0.1.0"
-dependencies = [
- "jsonschema",
- "regex",
- "serde",
- "serde_json",
- "unicode-normalization",
- "zeroize",
-]
-
-[[package]]
-name = "soulcaster-engine"
-version = "0.1.0"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "soulcaster-core",
- "zeroize",
-]
-
-[[package]]
-name = "soulcaster-repo"
-version = "0.1.0"
-dependencies = [
- "base64",
- "regex",
- "rustix 1.1.6",
- "serde",
- "serde_json",
- "sha1_smol",
- "soulcaster-core",
- "soulcaster-engine",
- "tempfile",
 ]
 
 [[package]]

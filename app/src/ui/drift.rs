@@ -1,9 +1,9 @@
 //! Drift: one row per difference between the Config and this Mac. Nothing changes until the footer
 //! button, and every row starts on Later.
 
+use macflayer_core::drift::{Choice, RowKind, confirm_remove, held_sentence};
 use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::{Dialog, Kit};
-use soulcaster_core::drift::{Choice, RowKind, confirm_remove, held_sentence};
 
 use super::kit;
 use crate::drift::{DriftEntry, UNTRACKED, button_word, cell, choice_help};
@@ -12,11 +12,11 @@ use crate::state::App;
 
 const GROUPS: &[(RowKind, &str)] = &[
     (RowKind::ChangedHere, "On this Mac"),
-    (RowKind::ChangedInConfig, "In the Config"),
+    (RowKind::ChangedInConfig, "In the Machine Type"),
     (RowKind::Conflict, "Both"),
     (RowKind::RemovedHere, "Missing here"),
-    (RowKind::NewInConfig, "New in the Config"),
-    (RowKind::Dropped, "No longer in the Config"),
+    (RowKind::NewInConfig, "New in the Machine Type"),
+    (RowKind::Dropped, "No longer in the Machine Type"),
     (RowKind::Extra, "New here"),
 ];
 
@@ -46,7 +46,7 @@ pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
         "drift-head".to_string(),
         columns(
             kit::label(""),
-            kit::label("Config"),
+            kit::label("Machine Type"),
             kit::label("This Mac"),
             kit::label(""),
         ),
@@ -59,9 +59,9 @@ pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
     }
     if app.drift.is_empty() && !app.drift_applying {
         let words = if app.drift_status == Some(Status::NoConfig) {
-            "Run or save a Config, and this Mac can be compared with it"
+            "Run or save a Machine Type, and this Mac can be compared with it"
         } else {
-            "Up to date with your Config."
+            "Up to date with your Machine Type."
         };
         body = body.child(kit::ruled(
             "drift-empty".to_string(),
@@ -311,11 +311,11 @@ fn status_words(app: &App) -> String {
         Some(Status::Unreadable) => unreadable(),
         Some(Status::Missing { path }) => missing(path),
         Some(Status::Offline { .. }) => {
-            "Can't reach GitHub right now. Showing your Config as of the last time it was read."
+            "Can't reach GitHub right now. Showing your Machine Type as of the last time it was read."
                 .to_string()
         }
         Some(Status::NoConfig) => String::new(),
-        _ if rows == 0 => "Up to date with your Config.".to_string(),
+        _ if rows == 0 => "Up to date with your Machine Type.".to_string(),
         _ => format!("{rows} differences to review."),
     }
 }

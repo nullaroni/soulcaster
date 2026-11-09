@@ -3,13 +3,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use macflayer_core::ask::Password;
+use macflayer_core::config::{Config, Packages, SettingValue};
+use macflayer_core::event::{AskKind, AskStatus, Event, EventKind, QueueEntry, RunScope};
+use macflayer_core::lifecycle::{ItemState, Stage};
+use macflayer_core::plan::{Plan, Why};
+use macflayer_core::recipe::ValueType;
 use rune::TextEdit;
-use soulcaster_core::ask::Password;
-use soulcaster_core::config::{Config, Packages, SettingValue};
-use soulcaster_core::event::{AskKind, AskStatus, Event, EventKind, QueueEntry, RunScope};
-use soulcaster_core::lifecycle::{ItemState, Stage};
-use soulcaster_core::plan::{Plan, Why};
-use soulcaster_core::recipe::ValueType;
 
 use crate::answers::Answers;
 use crate::catalog_view::{surface_name, view};
@@ -29,6 +29,7 @@ pub enum Screen {
     Import,
     Save,
     Dotfiles,
+    Fleet,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -110,6 +111,9 @@ pub struct App {
     /// How wide the Catalog's content is, which sets its column count.
     pub grid_width: f32,
     pub config_name: String,
+    pub name_edit: TextEdit,
+    /// The Dotfiles Repo a Machine Type opened from your own repo already names.
+    pub own_dotfiles: Option<macflayer_core::config::Dotfiles>,
 
     // Review
     pub base_present: bool,
@@ -137,7 +141,7 @@ pub struct App {
     pub run_password: TextEdit,
     pub run_asks: (bool, bool),
     /// The Dotfiles Repo from an imported Config, for the Run to apply.
-    pub dotfiles: Option<soulcaster_core::config::Dotfiles>,
+    pub dotfiles: Option<macflayer_core::config::Dotfiles>,
     imported_selection: Option<String>,
     /// Taps an Import's packages come from. They show as answered, and approve nothing unless the
     /// person ticks one themselves.
@@ -161,6 +165,8 @@ pub struct App {
     // Save, Import and the Dotfiles Repo
     pub repo: crate::repo_flow::RepoFlow,
 
+    pub fleet: crate::fleet_flow::FleetView,
+
     pub toast: Option<String>,
 }
 
@@ -170,11 +176,15 @@ pub fn init() -> App {
         && let Some(home) = std::env::var_os("HOME")
     {
         let home = std::path::PathBuf::from(home);
+        macflayer_engine::adopt_old_support(&home);
         let mut app = with_engine(Box::new(crate::real::RealEngine::new(home.clone())));
         app.repo = crate::repo_flow::RepoFlow::real(home);
+        app.open_fleet();
         return app;
     }
-    with_engine(Box::new(SimEngine::new(Scenario::Both, SimMachine::Bare)))
+    let mut app = with_engine(Box::new(SimEngine::new(Scenario::Both, SimMachine::Bare)));
+    app.open_fleet();
+    app
 }
 
 pub fn with_engine(engine: Box<dyn Engine>) -> App {
@@ -195,6 +205,8 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         // The default window, less the sidebar. The first layout reports the real width.
         grid_width: 911.0,
         config_name: "My Mac".to_string(),
+        name_edit: TextEdit::new("My Mac"),
+        own_dotfiles: None,
         base_present: false,
         answers: Answers::default(),
         password: TextEdit::new("").secure(),
@@ -249,6 +261,7 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         drift_applying: false,
         show_untracked: false,
         repo: crate::repo_flow::RepoFlow::simulated(),
+        fleet: crate::fleet_flow::FleetView::default(),
         toast: None,
     };
     app.rebuild_rows();
@@ -321,13 +334,23 @@ impl App {
         config
     }
 
+    /// What Save sends. Only this keeps the Dotfiles Repo a Machine Type from your own repo already
+    /// names, because changing the rest of it shouldn't drop that. A Run still needs its approval.
+    pub fn config_to_save(&self) -> Config {
+        let mut config = self.config();
+        if config.dotfiles.is_none() {
+            config.dotfiles = self.kept_dotfiles();
+        }
+        config
+    }
+
     /// Whether the selection is still exactly what an Import's review showed.
     fn is_imported_selection(&self) -> bool {
         self.imported_selection.as_deref() == Some(self.selection().to_canonical_json().as_str())
     }
 
     /// Records what an Import was reviewed with, for what's only true of that selection.
-    pub fn keep_dotfiles(&mut self, dotfiles: Option<soulcaster_core::config::Dotfiles>) {
+    pub fn keep_dotfiles(&mut self, dotfiles: Option<macflayer_core::config::Dotfiles>) {
         self.imported_selection = Some(self.selection().to_canonical_json());
         self.dotfiles = dotfiles;
     }
@@ -337,7 +360,7 @@ impl App {
             self.packages.iter().partition(|p| p.starts_with("cask:"));
         Config {
             schema: None,
-            schema_version: soulcaster_core::config::SCHEMA_VERSION,
+            schema_version: macflayer_core::config::SCHEMA_VERSION,
             name: self.config_name.clone(),
             items: self.selected.iter().cloned().collect(),
             packages: Packages {
@@ -381,6 +404,21 @@ impl App {
             self.settings.insert(id.to_string(), value);
         }
         self.rebuild_rows();
+    }
+
+    /// Replaces the Machine Type's name, in the field too.
+    pub fn set_type_name(&mut self, name: &str) {
+        self.config_name = name.to_string();
+        self.name_edit.replace_text(name);
+    }
+
+    /// A Machine Type always has a name, so clearing the field keeps the last one until there's
+    /// another.
+    pub fn name_edited(&mut self) {
+        let typed = self.name_edit.text.trim();
+        if !typed.is_empty() {
+            self.config_name = typed.to_string();
+        }
     }
 
     pub fn toggle_item(&mut self, id: &str) {
@@ -738,6 +776,7 @@ impl App {
             EventKind::RunWarning { .. } => {}
             EventKind::RunFinished { .. } => {
                 self.run_finished = true;
+                self.engine.publish_self(None);
                 if self.screen == Screen::Run {
                     // Whoever walked away comes back to what's left, not to a finished log.
                     self.after(1.2, Timer::GoToFinish);
@@ -853,6 +892,10 @@ impl App {
         self.drift_applying = false;
         match news {
             DriftNews::Checked(checked, notes) => {
+                if checked.status != Status::NoConfig {
+                    self.engine
+                        .publish_self(Some(checked.report.rows.len() as u32));
+                }
                 self.drift = checked
                     .report
                     .rows
@@ -914,6 +957,10 @@ impl App {
             self.drift_news(news);
             changed = true;
         }
+        if let Some(news) = self.engine.poll_fleet() {
+            self.fleet_news(news);
+            changed = true;
+        }
         // These come from the Run's thread between events, so a change here needs a redraw too.
         let asks = (
             self.engine.password_request().is_some(),
@@ -968,7 +1015,7 @@ mod tests {
     mod real_mode {
         use std::sync::{Arc, Mutex};
 
-        use soulcaster_core::ask::PasswordRequest;
+        use macflayer_core::ask::PasswordRequest;
 
         use super::*;
         use crate::answers::Answers;
@@ -1042,7 +1089,7 @@ mod tests {
         #[test]
         fn the_engine_about_to_ask_isnt_a_wrong_password() {
             let (mut app, _) = app();
-            let mut stamper = soulcaster_core::event::Stamper::new();
+            let mut stamper = macflayer_core::event::Stamper::new();
             app.apply(stamper.stamp(
                 0,
                 EventKind::AskState {
@@ -1078,7 +1125,7 @@ mod tests {
             app.queue.push(QueueEntry {
                 id: "x:y".to_string(),
                 item: "x".to_string(),
-                kind: soulcaster_core::event::QueueKind::NeedsAdmin,
+                kind: macflayer_core::event::QueueKind::NeedsAdmin,
                 text: "t".to_string(),
                 detail: None,
                 link: None,
@@ -1141,8 +1188,8 @@ mod tests {
         }
     }
 
-    use soulcaster_core::catalog::Catalog;
-    use soulcaster_core::event::{EventKind, Stamper};
+    use macflayer_core::catalog::Catalog;
+    use macflayer_core::event::{EventKind, Stamper};
 
     use super::*;
 
@@ -1187,6 +1234,22 @@ mod tests {
             view().catalog.sections().len(),
             Catalog::shipped().sections().len()
         );
+    }
+
+    #[test]
+    fn the_name_field_names_what_is_saved() {
+        let mut app = init();
+        app.name_edit.replace_text("  Agent Mini ");
+        app.name_edited();
+        assert_eq!(app.config().name, "Agent Mini");
+    }
+
+    #[test]
+    fn clearing_the_name_field_keeps_the_last_name() {
+        let mut app = init();
+        app.name_edit.replace_text("");
+        app.name_edited();
+        assert_eq!(app.config().name, "My Mac");
     }
 
     fn item_rows(app: &App) -> usize {

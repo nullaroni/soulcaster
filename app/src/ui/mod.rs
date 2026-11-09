@@ -5,15 +5,16 @@ mod catalog;
 mod dotfiles;
 mod drift;
 mod finish;
+mod fleet;
 mod import;
 pub mod kit;
 mod review;
 mod run;
 mod save;
 
+use macflayer_core::lifecycle::ItemState;
 use rune::{Cx, El, col, el, icon, row, text};
 use rune_kit::Toast;
-use soulcaster_core::lifecycle::ItemState;
 
 use crate::catalog_view::view as catalog_view;
 use crate::state::{App, RunItem, Screen};
@@ -33,6 +34,7 @@ pub fn view(app: &App, cx: &mut Cx<App>) -> El {
         Screen::Import => import::screen(app, k),
         Screen::Save => save::screen(app),
         Screen::Dotfiles => dotfiles::screen(app),
+        Screen::Fleet => fleet::screen(app),
     };
     if let Some(message) = &app.toast {
         layer.push(
@@ -85,7 +87,7 @@ fn titlebar(app: &App, leading: f32) -> El {
         Screen::Review => Some(1),
         Screen::Run => Some(2),
         Screen::Finish => Some(3),
-        Screen::Drift | Screen::Import | Screen::Save | Screen::Dotfiles => None,
+        Screen::Drift | Screen::Import | Screen::Save | Screen::Dotfiles | Screen::Fleet => None,
     };
     let mut path = row()
         .key("path")
@@ -162,8 +164,14 @@ fn titlebar(app: &App, leading: f32) -> El {
                         .center_y()
                         .min_w(132.0)
                         .child(icon(&kit::MARK, 16.0).color(kit::forest()))
-                        .child(text("Soulcaster").font(kit::bold_style()).color(kit::ink())),
+                        .child(text("MacFlayer").font(kit::bold_style()).color(kit::ink())),
                 )
+                .child(kit::action(
+                    "nav-fleet".to_string(),
+                    "Fleet",
+                    app.screen == Screen::Fleet,
+                    |app: &mut App, _| app.open_fleet(),
+                ))
                 .child(path)
                 .child(el().grow(1.0))
                 .child(nav_action(app, Screen::Import, "Import", running))

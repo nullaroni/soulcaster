@@ -1,7 +1,7 @@
 #!/bin/bash
-# Signs a built Soulcaster.app with Developer ID and the hardened runtime, notarizes it and staples
+# Signs a built MacFlayer.app with Developer ID and the hardened runtime, notarizes it and staples
 # the ticket. Runs in the release workflow only. docs/releasing.md lists the secrets.
-# Usage: packaging/notarize-app.sh <Soulcaster.app>
+# Usage: packaging/notarize-app.sh <MacFlayer.app>
 set -euo pipefail
 
 app="$1"

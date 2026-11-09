@@ -1,10 +1,10 @@
 //! Catalog: checkboxes over the shipped Catalog, a search and a running count.
 
+use macflayer_core::config::SettingValue;
+use macflayer_core::recipe::{EvidenceGroup, ValueType};
 use rune::color::hex;
 use rune::{El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{IconButton, IconButtonVariant, Kit, Select, TextInput};
-use soulcaster_core::config::SettingValue;
-use soulcaster_core::recipe::{EvidenceGroup, ValueType};
 
 use super::kit;
 use crate::brand_icons::{self, Brand};
@@ -160,15 +160,28 @@ fn search_bar(app: &App, k: &Kit) -> El {
         .on_change(|app: &mut App, _| app.rebuild_rows())
         .build(k)
         .key("search");
+    let name = TextInput::new(&app.name_edit)
+        .plain()
+        .placeholder("Name it")
+        .label("Machine Type name")
+        .on_edit(|app: &mut App| &mut app.name_edit)
+        .on_change(|app: &mut App, _| app.name_edited())
+        .build(k)
+        .key("type-name");
     col()
         .key("search-bar")
         .w_full()
         .child(
             row()
                 .w_full()
-                .px(6.0)
+                .pl(PAD)
+                .pr(6.0)
                 .py(4.0)
+                .gap(8.0)
                 .center_y()
+                .child(kit::group("Machine Type"))
+                .child(name.w(190.0))
+                .child(el().w(1.0).h(18.0).fill(kit::ink().alpha(0.22)))
                 .child(input.grow(1.0)),
         )
         .child(kit::hairline())
@@ -436,7 +449,7 @@ fn brand_tile(brand: &Brand, size: f32, glyph: f32) -> El {
 }
 
 /// An Item's logo, or its first letter when it has no logo of its own.
-fn tile(id: &str, name: &str) -> El {
+pub(super) fn tile(id: &str, name: &str) -> El {
     if let Some(brand) = brand_icons::for_item(id) {
         return brand_tile(brand, TILE, TILE_GLYPH);
     }
@@ -622,7 +635,7 @@ fn value_control(app: &App, x: usize, k: &'static Kit) -> El {
                 })
                 .trigger(k)
         }
-        _ => kit::label("In your Config"),
+        _ => kit::label("In your Machine Type"),
     }
 }
 
@@ -740,13 +753,24 @@ fn footer(app: &App) -> El {
         app.only_selected,
         |app: &mut App, tx| app.set_filter_selected(!app.only_selected, tx),
     );
-    kit::foot(
-        "catalog-footer",
-        left,
-        kit::primary("go-review", "Continue", true, |app: &mut App, _| {
-            app.screen = Screen::Review
-        }),
-    )
+    // What's being built is something to keep. Setting up this Mac once, with nothing saved, stays
+    // available but isn't what the screen leads with.
+    let right = row()
+        .gap(14.0)
+        .center_y()
+        .child(kit::action(
+            "go-review".to_string(),
+            "Set up this Mac now",
+            false,
+            |app: &mut App, _| app.screen = Screen::Review,
+        ))
+        .child(kit::primary(
+            "go-save",
+            "Save Machine Type",
+            true,
+            |app: &mut App, _| app.screen = Screen::Save,
+        ));
+    kit::foot("catalog-footer", left, right)
 }
 
 #[cfg(test)]

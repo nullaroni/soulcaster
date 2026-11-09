@@ -2,9 +2,9 @@
 //! shown before anything moves. In a real Run the links happen during the Run, with no button: the
 //! one here drives the same step on a temporary folder, until the wiring ticket connects it.
 
+use macflayer_core::plan::DotfilesPlan;
+use macflayer_repo::dotfiles::{LinkOutcome, LinkReport, MovePreview};
 use rune::{El, ScrollSpec, col, el, row, text};
-use soulcaster_core::plan::DotfilesPlan;
-use soulcaster_repo::dotfiles::{LinkOutcome, LinkReport, MovePreview};
 
 use super::kit;
 use crate::repo_flow::{DotfilesPhase, RepoFlow};
@@ -18,8 +18,8 @@ fn link_row(target: &str, source: &str, status: &str, failed: bool) -> El {
             .child(
                 text(format!(
                     "{}  \u{2190}  {}",
-                    soulcaster_repo::text::escaped(target),
-                    soulcaster_repo::text::escaped(source)
+                    macflayer_repo::text::escaped(target),
+                    macflayer_repo::text::escaped(source)
                 ))
                 .font(kit::log_style())
                 .color(kit::ink())
@@ -158,7 +158,7 @@ pub fn screen(app: &App) -> El {
         DotfilesPhase::Rewritten => {
             body = body.child(sentence(
                 "rewritten",
-                "Someone replaced the history, so Soulcaster can't show what changed. Treat this as a repo you've never seen.",
+                "Someone replaced the history, so MacFlayer can't show what changed. Treat this as a repo you've never seen.",
                 true,
             ));
             kit::primary(

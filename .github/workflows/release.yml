@@ -52,7 +52,7 @@ jobs:
       - name: Build the app, ad-hoc signed
         run: |
           team=$(sed -n 's/^  local team_id="\(.*\)"$/\1/p' install.sh)
-          SOULCASTER_TEAM_ID="$team" packaging/build-app.sh
+          MACFLAYER_TEAM_ID="$team" packaging/build-app.sh
 
       # Yields only true or false. All or none: half a set of secrets is a mistake, not a choice.
       - name: Check for the Apple secrets
@@ -79,10 +79,10 @@ jobs:
           APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-        run: packaging/notarize-app.sh target/package/Soulcaster.app
+        run: packaging/notarize-app.sh target/package/MacFlayer.app
 
       - name: Make the archive and checksum
-        run: packaging/archive-app.sh target/package/Soulcaster.app target/package/dist
+        run: packaging/archive-app.sh target/package/MacFlayer.app target/package/dist
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -114,7 +114,7 @@ jobs:
         run: |
           if [ "$NOTARIZED" = "true" ]; then
             kind=(--latest)
-            title="Soulcaster $TAG"
+            title="MacFlayer $TAG"
             notes="Signed with Developer ID and notarized by Apple. Install it with:
 
           \`\`\`sh
@@ -122,8 +122,8 @@ jobs:
           \`\`\`"
           else
             kind=(--prerelease)
-            title="Soulcaster $TAG (not notarized)"
-            notes="**Not notarized and not signed with Developer ID.** This build is ad-hoc signed because the release ran without the Apple secrets. The installer refuses it and macOS will block it when downloaded in a browser. It exists for testing. To run Soulcaster, build it from source: see the README."
+            title="MacFlayer $TAG (not notarized)"
+            notes="**Not notarized and not signed with Developer ID.** This build is ad-hoc signed because the release ran without the Apple secrets. The installer refuses it and macOS will block it when downloaded in a browser. It exists for testing. To run MacFlayer, build it from source: see the README."
           fi
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "$title" --notes "$notes" "${kind[@]}"
