@@ -1,9 +1,9 @@
 //! Save: the selection as a Config, on the person's own GitHub repo. It works with nothing saved
 //! yet, and a Run never waits on it. No Git words reach this screen.
 
+use macflayer_repo::copies::slug;
+use macflayer_repo::save::{CONFIG_REPO_NAME, SaveOutcome};
 use rune::{El, ScrollSpec, col, el, row, text};
-use soulcaster_repo::copies::slug;
-use soulcaster_repo::save::{CONFIG_REPO_NAME, SaveOutcome};
 
 use super::kit;
 use crate::repo_flow::SavePhase;

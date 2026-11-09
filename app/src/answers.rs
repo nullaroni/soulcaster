@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use soulcaster_core::plan::{NeedKind, PlanEntry};
+use macflayer_core::plan::{NeedKind, PlanEntry};
 
 #[derive(Default, Clone, Debug)]
 pub struct Answers {

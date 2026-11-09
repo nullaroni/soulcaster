@@ -1,6 +1,6 @@
-# Soulcaster
+# MacFlayer
 
-A desktop app that sets up a Mac from scratch for developers and keeps that Mac matched to a shareable description stored on GitHub.
+A light MDM for your own Macs. It keeps each one matched to a Machine Type stored in your private GitHub repo, and notices when one changes.
 
 ## Language
 

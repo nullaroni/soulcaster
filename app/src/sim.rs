@@ -5,14 +5,14 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
-use soulcaster_core::ask::Password;
-use soulcaster_core::event::{
+use macflayer_core::ask::Password;
+use macflayer_core::event::{
     AskKind, AskStatus, ConfigRef, Event, EventKind, LogStream, QueueEntry, QueueKind, RunScope,
     Stamper,
 };
-use soulcaster_core::lifecycle::{Assurance, FailureKind, ItemState, Stage};
-use soulcaster_core::plan::{Plan, PlanEntry, Why};
-use soulcaster_core::recipe::{Recipe, Step};
+use macflayer_core::lifecycle::{Assurance, FailureKind, ItemState, Stage};
+use macflayer_core::plan::{Plan, PlanEntry, Why};
+use macflayer_core::recipe::{Recipe, Step};
 
 use crate::answers::{Answers, Waits, waits_for};
 use crate::engine::Engine;
@@ -330,7 +330,7 @@ fn run_surprise(s: &mut Script, entry: &PlanEntry) {
         &entry.id,
         QueueKind::NeedsAdmin,
         format!(
-            "{} asked for your password after Soulcaster had discarded it.",
+            "{} asked for your password after MacFlayer had discarded it.",
             entry.name
         ),
         None,
@@ -382,7 +382,7 @@ fn schedule(
             name: plan.config_name.clone(),
             ..ConfigRef::default()
         },
-        catalog_version: soulcaster_core::catalog::Catalog::shipped()
+        catalog_version: macflayer_core::catalog::Catalog::shipped()
             .version()
             .to_string(),
         engine_version: "simulated".to_string(),
@@ -589,9 +589,9 @@ impl Engine for SimEngine {
 mod tests {
     use std::collections::BTreeMap;
 
+    use macflayer_core::catalog::Catalog;
+    use macflayer_core::config::Config;
     use serde_json::json;
-    use soulcaster_core::catalog::Catalog;
-    use soulcaster_core::config::Config;
 
     use super::*;
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/nullaroni/soulcaster/prototype/item-lifecycle/docs/prototypes/item-lifecycle/recipe.schema.json",
-  "title": "Soulcaster Catalog recipes (prototype)",
+  "title": "MacFlayer Catalog recipes (prototype)",
   "description": "A recipe is data that selects from a closed set of operations built into the signed engine. Nothing here can name a program to run, pass arguments, or set environment variables. Patterns avoid lookahead so that the Rust regex crate can use them.",
   "type": "object",
   "additionalProperties": false,

@@ -8,7 +8,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 installer="$root/install.sh"
-built_app="$root/target/package/Soulcaster.app"
+built_app="$root/target/package/MacFlayer.app"
 
 sandbox=$(mktemp -d)
 trap 'chmod -R u+w "$sandbox"; rm -rf "$sandbox"' EXIT
@@ -68,8 +68,8 @@ if [ "$1" = "-x" ]; then
   case "${STUB_UNPACK:-app}" in
     fail) exit 1 ;;
     empty) /bin/mkdir -p "$4" ;;
-    symlink) /bin/mkdir -p "$4"; /bin/ln -s /Applications/Safari.app "$4/Soulcaster.app" ;;
-    app) /bin/mkdir -p "$4/Soulcaster.app/Contents"; echo fake >"$4/Soulcaster.app/Contents/Info.plist" ;;
+    symlink) /bin/mkdir -p "$4"; /bin/ln -s /Applications/Safari.app "$4/MacFlayer.app" ;;
+    app) /bin/mkdir -p "$4/MacFlayer.app/Contents"; echo fake >"$4/MacFlayer.app/Contents/Info.plist" ;;
   esac
 else
   /bin/mkdir -p "$2"
@@ -132,16 +132,16 @@ done
 
 # --- Harness ---------------------------------------------------------------------------------------
 
-if [ "$(tail -n 1 "$installer")" != "soulcaster_main" ]; then
-  echo "install.sh must end with the line soulcaster_main" >&2
+if [ "$(tail -n 1 "$installer")" != "macflayer_main" ]; then
+  echo "install.sh must end with the line macflayer_main" >&2
   exit 1
 fi
 lib="$sandbox/install-lib.sh"
 sed '$d' "$installer" >"$lib"
 
 publish_release() {
-  printf 'fake archive' >"$case_dir/release/Soulcaster-macos-arm64.zip"
-  (cd "$case_dir/release" && /usr/bin/shasum -a 256 Soulcaster-macos-arm64.zip >Soulcaster-macos-arm64.zip.sha256)
+  printf 'fake archive' >"$case_dir/release/MacFlayer-macos-arm64.zip"
+  (cd "$case_dir/release" && /usr/bin/shasum -a 256 MacFlayer-macos-arm64.zip >MacFlayer-macos-arm64.zip.sha256)
 }
 
 # Runs the installer's real function against the sandbox. Arguments are STUB_* settings.
@@ -150,7 +150,7 @@ run_installer() {
   # shellcheck disable=SC2016
   output=$(/usr/bin/env -i PATH="$bin" HOME="$case_dir/home" TMPDIR="$case_dir/tmp" \
     STUB_LOG="$log" STUB_RELEASE="$case_dir/release" "$@" \
-    /bin/bash -c 'source "$1"; soulcaster_install "$2" "$3"' _ "$lib" "$dest" "$team" 2>&1) || status=$?
+    /bin/bash -c 'source "$1"; macflayer_install "$2" "$3"' _ "$lib" "$dest" "$team" 2>&1) || status=$?
 }
 
 expect_status() {
@@ -170,12 +170,12 @@ expect_no_call() {
 
 expect_clean() {
   if [ -n "$(find "$case_dir/tmp" -mindepth 1 -maxdepth 1)" ]; then not_ok "temp directory left behind"; fi
-  if [ -n "$(find "$dest" -mindepth 1 -maxdepth 1 -name '.Soulcaster*')" ]; then not_ok "staged copy left behind"; fi
+  if [ -n "$(find "$dest" -mindepth 1 -maxdepth 1 -name '.MacFlayer*')" ]; then not_ok "staged copy left behind"; fi
 }
 
 expect_nothing_installed() {
   expect_clean
-  if [ -e "$dest/Soulcaster.app" ]; then not_ok "app was installed"; fi
+  if [ -e "$dest/MacFlayer.app" ]; then not_ok "app was installed"; fi
   expect_no_call open
 }
 
@@ -200,13 +200,13 @@ finish_case() {
 begin "installs a verified release, in the right order"
 run_installer
 expect_status 0
-if [ ! -f "$dest/Soulcaster.app/Contents/Info.plist" ]; then not_ok "app not in the destination"; fi
+if [ ! -f "$dest/MacFlayer.app/Contents/Info.plist" ]; then not_ok "app not in the destination"; fi
 order=$(sed -nE 's/^(curl|ditto|codesign|spctl|open) .*/\1/p' "$log" | tr '\n' ' ')
 if [ "$order" != "curl curl ditto codesign spctl ditto open " ]; then not_ok "order was: $order"; fi
-/usr/bin/grep -q "^open $dest/Soulcaster.app\$" "$log" || not_ok "didn't open the installed app"
-/usr/bin/grep -q "^curl --proto =https --tlsv1.2 .*https://github.com/nullaroni/soulcaster/releases/latest/download/Soulcaster-macos-arm64.zip\$" "$log" ||
+/usr/bin/grep -q "^open $dest/MacFlayer.app\$" "$log" || not_ok "didn't open the installed app"
+/usr/bin/grep -q "^curl --proto =https --tlsv1.2 .*https://github.com/nullaroni/soulcaster/releases/latest/download/MacFlayer-macos-arm64.zip\$" "$log" ||
   not_ok "wrong download command"
-/usr/bin/grep -q -- "--output $case_dir/tmp/tmp\.[^/]*/Soulcaster-macos-arm64.zip" "$log" ||
+/usr/bin/grep -q -- "--output $case_dir/tmp/tmp\.[^/]*/MacFlayer-macos-arm64.zip" "$log" ||
   not_ok "didn't download into a fresh temporary directory"
 expect_clean
 finish_case
@@ -263,7 +263,7 @@ begin "with no team set, stops before the network and points to the source build
 team=""
 run_installer
 expect_refused_before_download
-expect_output "No notarized release of Soulcaster exists yet"
+expect_output "No notarized release of MacFlayer exists yet"
 expect_output "packaging/build-app.sh"
 finish_case
 
@@ -295,7 +295,7 @@ finish_case
 # --- Refusing the download -------------------------------------------------------------------------
 
 begin "refuses a checksum mismatch before unpacking"
-printf '%064d  Soulcaster-macos-arm64.zip\n' 0 >"$case_dir/release/Soulcaster-macos-arm64.zip.sha256"
+printf '%064d  MacFlayer-macos-arm64.zip\n' 0 >"$case_dir/release/MacFlayer-macos-arm64.zip.sha256"
 run_installer
 expect_status 1
 expect_nothing_installed
@@ -304,7 +304,7 @@ expect_output "doesn't match"
 finish_case
 
 begin "refuses a malformed checksum file"
-echo '<html>not a checksum</html>' >"$case_dir/release/Soulcaster-macos-arm64.zip.sha256"
+echo '<html>not a checksum</html>' >"$case_dir/release/MacFlayer-macos-arm64.zip.sha256"
 run_installer
 expect_status 1
 expect_nothing_installed
@@ -312,7 +312,7 @@ expect_no_call ditto
 finish_case
 
 begin "refuses an empty checksum file"
-: >"$case_dir/release/Soulcaster-macos-arm64.zip.sha256"
+: >"$case_dir/release/MacFlayer-macos-arm64.zip.sha256"
 run_installer
 expect_status 1
 expect_nothing_installed
@@ -388,29 +388,29 @@ finish_case
 # --- Reruns ----------------------------------------------------------------------------------------
 
 begin "a rerun opens a verified app and downloads nothing"
-mkdir "$dest/Soulcaster.app"
-echo original >"$dest/Soulcaster.app/marker"
+mkdir "$dest/MacFlayer.app"
+echo original >"$dest/MacFlayer.app/marker"
 run_installer
 expect_status 0
 expect_no_call curl
-/usr/bin/grep -q "^open $dest/Soulcaster.app\$" "$log" || not_ok "didn't open it"
-[ "$(cat "$dest/Soulcaster.app/marker")" = original ] || not_ok "changed the existing app"
+/usr/bin/grep -q "^open $dest/MacFlayer.app\$" "$log" || not_ok "didn't open it"
+[ "$(cat "$dest/MacFlayer.app/marker")" = original ] || not_ok "changed the existing app"
 finish_case
 
 begin "a rerun refuses an existing app that doesn't verify, and leaves it alone"
-mkdir "$dest/Soulcaster.app"
-echo original >"$dest/Soulcaster.app/marker"
+mkdir "$dest/MacFlayer.app"
+echo original >"$dest/MacFlayer.app/marker"
 run_installer STUB_CODESIGN=broken
 expect_status 1
 expect_no_call 'curl|open'
-[ "$(cat "$dest/Soulcaster.app/marker")" = original ] || not_ok "changed the existing app"
+[ "$(cat "$dest/MacFlayer.app/marker")" = original ] || not_ok "changed the existing app"
 finish_case
 
 # --- The script as shipped -------------------------------------------------------------------------
 
 begin "a truncated script does nothing, however it's run"
 size=$(wc -c <"$installer" | tr -d ' ')
-# The last line is "soulcaster_main\n". Stop before it is complete, so the real entry point never runs.
+# The last line is "macflayer_main\n". Stop before it is complete, so the real entry point never runs.
 last=$((size - 2))
 offsets=""
 for ((n = 1; n <= last; n += 173)); do offsets="$offsets $n"; done
@@ -434,8 +434,8 @@ finish_case
 
 begin "the real entry point installs to /Applications and takes no arguments"
 # shellcheck disable=SC2016
-/usr/bin/grep -q '^  soulcaster_install /Applications "\$team_id"$' <<<"$code" ||
-  not_ok "soulcaster_main doesn't name /Applications"
+/usr/bin/grep -q '^  macflayer_install /Applications "\$team_id"$' <<<"$code" ||
+  not_ok "macflayer_main doesn't name /Applications"
 finish_case
 
 begin "the installer's minimum macOS matches the app's"
@@ -463,7 +463,7 @@ finish_case
 if [ -d "$built_app" ]; then
   begin "the real codesign and spctl refuse a local ad-hoc build"
   # shellcheck disable=SC2016
-  if /bin/bash -c 'source "$1"; soulcaster_verify_app "$2" TESTTEAM01' _ "$lib" "$built_app" 2>/dev/null; then
+  if /bin/bash -c 'source "$1"; macflayer_verify_app "$2" TESTTEAM01' _ "$lib" "$built_app" 2>/dev/null; then
     not_ok "an ad-hoc build verified"
   fi
   finish_case

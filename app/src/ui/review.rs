@@ -1,8 +1,8 @@
 //! Review: everything the selection needs from a person, once, then walk away.
 
+use macflayer_core::plan::{NeedKind, Plan, PlanConflict};
 use rune::{El, ScrollSpec, col, el, row, text};
 use rune_kit::{Dialog, Kit, TextInput};
-use soulcaster_core::plan::{NeedKind, Plan, PlanConflict};
 
 use super::kit;
 use crate::catalog_view::view;

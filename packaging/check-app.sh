@@ -1,12 +1,12 @@
 #!/bin/bash
-# Checks a built Soulcaster.app: structure, Info.plist, architecture, linked libraries and
-# signature. Reads only. Usage: packaging/check-app.sh <Soulcaster.app>
+# Checks a built MacFlayer.app: structure, Info.plist, architecture, linked libraries and
+# signature. Reads only. Usage: packaging/check-app.sh <MacFlayer.app>
 set -euo pipefail
 
 app="$1"
 root=$(cd "$(dirname "$0")/.." && pwd)
 contents="$app/Contents"
-binaries=("$contents/MacOS/Soulcaster" "$contents/Helpers/soulcaster" "$contents/Helpers/soulcaster-askpass")
+binaries=("$contents/MacOS/MacFlayer" "$contents/Helpers/macflayer" "$contents/Helpers/macflayer-askpass")
 failed=0
 
 check() {
@@ -23,7 +23,7 @@ plist_value() {
 }
 
 for path in "$contents/Info.plist" "$contents/PkgInfo" "${binaries[@]}" \
-  "$contents/Resources/Soulcaster.icns" \
+  "$contents/Resources/MacFlayer.icns" \
   "$contents/Resources/licenses/IBMPlexMono-OFL.txt" \
   "$contents/Resources/licenses/PlayfairDisplay-OFL.txt" \
   "$contents/Resources/licenses/SimpleIcons-LICENSE.md" \
@@ -40,7 +40,7 @@ if [ "$failed" -ne 0 ]; then
 fi
 
 plutil -lint "$contents/Info.plist"
-check CFBundleExecutable "$(plist_value CFBundleExecutable)" Soulcaster
+check CFBundleExecutable "$(plist_value CFBundleExecutable)" MacFlayer
 check CFBundleIdentifier "$(plist_value CFBundleIdentifier)" \
   "$(plutil -extract CFBundleIdentifier raw "$root/packaging/Info.plist")"
 check CFBundleShortVersionString "$(plist_value CFBundleShortVersionString)" \
@@ -58,12 +58,12 @@ for binary in "${binaries[@]}"; do
   check "$name libraries outside the system" "$outside" ""
 done
 
-check "soulcaster validate" \
-  "$("$contents/Helpers/soulcaster" validate "$root/schema/examples/developer.json" >/dev/null && echo runs)" runs
+check "macflayer validate" \
+  "$("$contents/Helpers/macflayer" validate "$root/schema/examples/developer.json" >/dev/null && echo runs)" runs
 
 # PeerRule::Signed answers only this identifier, so a wrong one means no Run can use the password.
 check "password helper identifier" \
-  "$(codesign -dv "$contents/Helpers/soulcaster-askpass" 2>&1 | sed -n 's/^Identifier=//p')" \
+  "$(codesign -dv "$contents/Helpers/macflayer-askpass" 2>&1 | sed -n 's/^Identifier=//p')" \
   "com.nullworks.macflayer.askpass"
 
 if codesign --verify --deep --strict --verbose=2 "$app"; then

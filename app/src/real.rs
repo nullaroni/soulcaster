@@ -8,24 +8,24 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use soulcaster_core::approval::ApprovalStore;
-use soulcaster_core::ask::{Asks, Password, PasswordRequest, SignInStatus};
-use soulcaster_core::catalog::Catalog;
-use soulcaster_core::command::CommandRunner;
-use soulcaster_core::config::Config;
-use soulcaster_core::drift::{Choice, Row};
-use soulcaster_core::event::{ConfigRef, Event, EventKind, EventSink, RunScope, Stamper};
-use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
-use soulcaster_core::plan::Plan;
-use soulcaster_engine::survey;
-use soulcaster_engine::{
+use macflayer_core::approval::ApprovalStore;
+use macflayer_core::ask::{Asks, Password, PasswordRequest, SignInStatus};
+use macflayer_core::catalog::Catalog;
+use macflayer_core::command::CommandRunner;
+use macflayer_core::config::Config;
+use macflayer_core::drift::{Choice, Row};
+use macflayer_core::event::{ConfigRef, Event, EventKind, EventSink, RunScope, Stamper};
+use macflayer_core::lint::DEFAULT_CLONE_LOCATION;
+use macflayer_core::plan::Plan;
+use macflayer_engine::survey;
+use macflayer_engine::{
     Clock, KeepAwake, MachineRecord, ProcessRunner, RecordApprovals, RunInput, SystemClock,
     gate_beside, perform,
 };
-use soulcaster_repo::fleet::{MachineEntry, computer_name, machine_id, publish, read};
-use soulcaster_repo::in_run::RunDotfiles;
-use soulcaster_repo::save::CONFIG_REPO_NAME;
-use soulcaster_repo::tools::Tools;
+use macflayer_repo::fleet::{MachineEntry, computer_name, machine_id, publish, read};
+use macflayer_repo::in_run::RunDotfiles;
+use macflayer_repo::save::CONFIG_REPO_NAME;
+use macflayer_repo::tools::Tools;
 
 use crate::answers::Answers;
 use crate::drift_flow::{self, Deps};
@@ -50,7 +50,7 @@ impl Drop for DriftBusy {
     fn drop(&mut self) {
         if thread::panicking() {
             let _ = self.sender.send(DriftDone::Failed(
-                "Soulcaster couldn't finish that. Check this Mac again.".to_string(),
+                "MacFlayer couldn't finish that. Check this Mac again.".to_string(),
             ));
         }
         self.flag.store(false, Ordering::SeqCst);
@@ -171,12 +171,12 @@ impl RealEngine {
             let _running = running;
             let _awake = KeepAwake::start();
             let Ok(executable) = std::env::current_exe() else {
-                finish_with(&sender, "Soulcaster couldn't find its password helper.");
+                finish_with(&sender, "MacFlayer couldn't find its password helper.");
                 return;
             };
             let gate = gate_beside(&executable);
             let runner = ProcessRunner::new();
-            let repo_runner = soulcaster_repo::process::runner();
+            let repo_runner = macflayer_repo::process::runner();
             let tools = Tools::for_mac(home.clone());
             let clone_location = MachineRecord::load(&home)
                 .ok()
@@ -228,7 +228,7 @@ impl RealEngine {
         let sender = self.fleet_sender.clone();
         let home = self.home.clone();
         thread::spawn(move || {
-            let repo = soulcaster_repo::process::runner();
+            let repo = macflayer_repo::process::runner();
             let tools = Tools::for_mac(home.clone());
             if let Some(news) = job(&repo, &tools, &home) {
                 let _ = sender.send(news);
@@ -250,7 +250,7 @@ impl RealEngine {
         thread::spawn(move || {
             let _busy = busy;
             let mac = ProcessRunner::new();
-            let repo = soulcaster_repo::process::runner();
+            let repo = macflayer_repo::process::runner();
             let tools = Tools::for_mac(home.clone());
             let deps = Deps {
                 mac: &mac,

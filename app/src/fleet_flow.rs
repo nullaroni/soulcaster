@@ -4,12 +4,12 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use soulcaster_core::config::{Config, Dotfiles};
-use soulcaster_engine::Found;
-use soulcaster_repo::copies::slug;
-use soulcaster_repo::fake::{FakeGitHub, RepoShape};
-use soulcaster_repo::fleet::{Fleet, FleetRead, MachineEntry, TypeEntry, read};
-use soulcaster_repo::save::{CONFIG_REPO_NAME, WaitReason};
+use macflayer_core::config::{Config, Dotfiles};
+use macflayer_engine::Found;
+use macflayer_repo::copies::slug;
+use macflayer_repo::fake::{FakeGitHub, RepoShape};
+use macflayer_repo::fleet::{Fleet, FleetRead, MachineEntry, TypeEntry, read};
+use macflayer_repo::save::{CONFIG_REPO_NAME, WaitReason};
 
 use crate::catalog_view::view;
 use crate::state::{App, Screen, TYPICAL, typical_settings};
@@ -140,7 +140,7 @@ pub fn waiting_words(why: WaitReason) -> &'static str {
 fn sample_config(name: &str, take: usize, settings: usize) -> Config {
     Config {
         schema: None,
-        schema_version: soulcaster_core::config::SCHEMA_VERSION,
+        schema_version: macflayer_core::config::SCHEMA_VERSION,
         name: name.to_string(),
         items: TYPICAL
             .iter()

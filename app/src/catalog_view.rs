@@ -2,9 +2,9 @@
 
 use std::sync::OnceLock;
 
+use macflayer_core::catalog::{Catalog, Entry};
+use macflayer_core::recipe::{Recipe, SettingRecipe};
 use serde::Deserialize;
-use soulcaster_core::catalog::{Catalog, Entry};
-use soulcaster_core::recipe::{Recipe, SettingRecipe};
 
 #[derive(Deserialize, Clone)]
 pub struct Choice {

@@ -7644,7 +7644,7 @@
           "label": "Signed in",
           "probe": {
             "type": "unknowable",
-            "reason": "Agent CLIs are install-only, so Soulcaster doesn't run them to check."
+            "reason": "Agent CLIs are install-only, so MacFlayer doesn't run them to check."
           }
         }
       ],
@@ -7689,7 +7689,7 @@
           "label": "Signed in",
           "probe": {
             "type": "unknowable",
-            "reason": "Agent CLIs are install-only, so Soulcaster doesn't run them to check."
+            "reason": "Agent CLIs are install-only, so MacFlayer doesn't run them to check."
           }
         }
       ],
@@ -8670,7 +8670,7 @@
         }
       ],
       "notes": [
-        "Installed under Soulcaster's tools folder, no longer inside /opt/homebrew."
+        "Installed under MacFlayer's tools folder, no longer inside /opt/homebrew."
       ]
     },
     {
@@ -8808,7 +8808,7 @@
           "label": "Signed in",
           "probe": {
             "type": "unknowable",
-            "reason": "Agent CLIs are install-only, so Soulcaster doesn't run them to check."
+            "reason": "Agent CLIs are install-only, so MacFlayer doesn't run them to check."
           }
         }
       ],

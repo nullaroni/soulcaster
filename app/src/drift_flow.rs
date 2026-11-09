@@ -5,21 +5,21 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-use soulcaster_core::catalog::Catalog;
-use soulcaster_core::command::CommandRunner;
-use soulcaster_core::config::Config;
-use soulcaster_core::drift::{
+use macflayer_core::catalog::Catalog;
+use macflayer_core::command::CommandRunner;
+use macflayer_core::config::Config;
+use macflayer_core::drift::{
     Choice, Report, Reviewed, Row, changed_again, changed_elsewhere, not_adoptable, value_in,
 };
-use soulcaster_core::plan::Plan;
-use soulcaster_engine::{
+use macflayer_core::plan::Plan;
+use macflayer_engine::{
     Clock, MachineRecord, Removal, RemovalConfirmed, check_drift, keep_here, leave_here,
     record_saved, remove_from_mac, set_followed, set_waiting_saves, waiting_saves,
 };
-use soulcaster_repo::adopt::{AdoptOutcome, AdoptRequest, Followed, adopt, read_followed};
-use soulcaster_repo::save::{CONFIG_REPO_NAME, SaveError};
-use soulcaster_repo::tools::Tools;
+use macflayer_repo::adopt::{AdoptOutcome, AdoptRequest, Followed, adopt, read_followed};
+use macflayer_repo::save::{CONFIG_REPO_NAME, SaveError};
+use macflayer_repo::tools::Tools;
+use serde::{Deserialize, Serialize};
 
 pub struct Deps<'a> {
     pub mac: &'a dyn CommandRunner,
@@ -383,7 +383,7 @@ pub fn carry_out(deps: &Deps<'_>, decisions: &[(Row, Choice)]) -> Carried {
                     match result {
                         Removal::Removed => {}
                         Removal::Refused => carried.notes.push(format!(
-                            "{name} wasn't removed. Soulcaster can't safely take it off this Mac."
+                            "{name} wasn't removed. MacFlayer can't safely take it off this Mac."
                         )),
                         Removal::Failed => carried.notes.push(format!(
                             "Homebrew couldn't remove {name}. It's still on this Mac."
@@ -451,10 +451,10 @@ pub fn discard_waiting(home: &Path) -> Vec<String> {
 mod tests {
     use std::time::Duration;
 
+    use macflayer_core::command::{FakeRunner, Reply};
+    use macflayer_core::drift::RowKind;
+    use macflayer_repo::fake::{FakeGitHub, RepoShape};
     use serde_json::json;
-    use soulcaster_core::command::{FakeRunner, Reply};
-    use soulcaster_core::drift::RowKind;
-    use soulcaster_repo::fake::{FakeGitHub, RepoShape};
 
     use super::*;
 
@@ -481,7 +481,7 @@ mod tests {
         gh: FakeGitHub,
     }
 
-    fn line(command: &soulcaster_core::command::Command) -> String {
+    fn line(command: &macflayer_core::command::Command) -> String {
         let mut out = vec![command.program.to_string_lossy().into_owned()];
         out.extend(command.args.iter().cloned());
         out.join(" ")
@@ -552,13 +552,13 @@ mod tests {
             let mut record = MachineRecord::load(self.dir.path()).unwrap();
             record.last_applied.insert(
                 id.to_string(),
-                soulcaster_engine::LastApplied {
+                macflayer_engine::LastApplied {
                     value,
                     applied_at: 1,
                     run_id: "run".into(),
                     catalog_version: "1".into(),
                     macos_version: None,
-                    assurance: soulcaster_core::lifecycle::Assurance::Stored,
+                    assurance: macflayer_core::lifecycle::Assurance::Stored,
                     prior_value: None,
                 },
             );

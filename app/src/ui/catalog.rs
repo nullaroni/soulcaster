@@ -1,10 +1,10 @@
 //! Catalog: checkboxes over the shipped Catalog, a search and a running count.
 
+use macflayer_core::config::SettingValue;
+use macflayer_core::recipe::{EvidenceGroup, ValueType};
 use rune::color::hex;
 use rune::{El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{IconButton, IconButtonVariant, Kit, Select, TextInput};
-use soulcaster_core::config::SettingValue;
-use soulcaster_core::recipe::{EvidenceGroup, ValueType};
 
 use super::kit;
 use crate::brand_icons::{self, Brand};

@@ -1,10 +1,10 @@
 //! Named starting points for headless screenshots of states a Run reaches slowly, and for
 //! `--scene` when looking at one screen. Scenes go through the same event path as a real Run.
 
-use soulcaster_core::config::SettingValue;
-use soulcaster_core::lifecycle::ItemState;
-use soulcaster_repo::address::ConfigPath;
-use soulcaster_repo::review::Tick;
+use macflayer_core::config::SettingValue;
+use macflayer_core::lifecycle::ItemState;
+use macflayer_repo::address::ConfigPath;
+use macflayer_repo::review::Tick;
 
 use crate::fleet_flow::{FleetSample, seeded_fleet};
 use crate::repo_flow::DotfilesPhase;
@@ -181,7 +181,7 @@ pub const SCENES: &[Scene] = &[
     }),
     ("import-review-own", |a| import(a, "example-you/setup")),
     ("import-review-hostile", |a| {
-        import(a, "s0ulcaster-official/verified-configs")
+        import(a, "macf1ayer-official/verified-configs")
     }),
     ("import-refused", |a| import(a, "example-dev/odd-config")),
     ("import-kept", |a| {
@@ -230,17 +230,17 @@ pub const SCENES: &[Scene] = &[
 struct AskingEngine;
 
 impl crate::engine::Engine for AskingEngine {
-    fn start_run(&mut self, _: &soulcaster_core::plan::Plan, _: &crate::answers::Answers) {}
+    fn start_run(&mut self, _: &macflayer_core::plan::Plan, _: &crate::answers::Answers) {}
 
     fn start_scoped(&mut self, _: &str, _: &[String], _: Option<&str>) {}
 
-    fn submit_password(&mut self, _: soulcaster_core::ask::Password) {}
+    fn submit_password(&mut self, _: macflayer_core::ask::Password) {}
 
     fn start_github_sign_in(&mut self) -> String {
         String::new()
     }
 
-    fn poll(&mut self, _: f64) -> Vec<soulcaster_core::event::Event> {
+    fn poll(&mut self, _: f64) -> Vec<macflayer_core::event::Event> {
         Vec::new()
     }
 
@@ -252,8 +252,8 @@ impl crate::engine::Engine for AskingEngine {
         true
     }
 
-    fn password_request(&self) -> Option<soulcaster_core::ask::PasswordRequest> {
-        Some(soulcaster_core::ask::PasswordRequest {
+    fn password_request(&self) -> Option<macflayer_core::ask::PasswordRequest> {
+        Some(macflayer_core::ask::PasswordRequest {
             why: "the admin steps".to_string(),
             last_was_wrong: false,
         })

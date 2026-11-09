@@ -1,9 +1,9 @@
 //! Drift: one row per difference between the Config and this Mac. Nothing changes until the footer
 //! button, and every row starts on Later.
 
+use macflayer_core::drift::{Choice, RowKind, confirm_remove, held_sentence};
 use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::{Dialog, Kit};
-use soulcaster_core::drift::{Choice, RowKind, confirm_remove, held_sentence};
 
 use super::kit;
 use crate::drift::{DriftEntry, UNTRACKED, button_word, cell, choice_help};

@@ -13,7 +13,7 @@ on:
       - Cargo.lock
       - app/Cargo.toml
       - app/assets/**
-      - crates/soulcaster-cli/Cargo.toml
+      - crates/macflayer-cli/Cargo.toml
 
 permissions:
   contents: read
@@ -65,7 +65,7 @@ jobs:
         run: packaging/build-app.sh
 
       - name: Make the archive and verify it round trips
-        run: packaging/archive-app.sh target/package/Soulcaster.app target/package/dist
+        run: packaging/archive-app.sh target/package/MacFlayer.app target/package/dist
 
       - name: Test the installer in a sandbox
         run: /bin/bash packaging/test-install.sh

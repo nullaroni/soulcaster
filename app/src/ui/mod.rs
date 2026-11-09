@@ -12,9 +12,9 @@ mod review;
 mod run;
 mod save;
 
+use macflayer_core::lifecycle::ItemState;
 use rune::{Cx, El, col, el, icon, row, text};
 use rune_kit::Toast;
-use soulcaster_core::lifecycle::ItemState;
 
 use crate::catalog_view::view as catalog_view;
 use crate::state::{App, RunItem, Screen};
@@ -164,7 +164,7 @@ fn titlebar(app: &App, leading: f32) -> El {
                         .center_y()
                         .min_w(132.0)
                         .child(icon(&kit::MARK, 16.0).color(kit::forest()))
-                        .child(text("Soulcaster").font(kit::bold_style()).color(kit::ink())),
+                        .child(text("MacFlayer").font(kit::bold_style()).color(kit::ink())),
                 )
                 .child(kit::action(
                     "nav-fleet".to_string(),

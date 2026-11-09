@@ -1,4 +1,4 @@
-//! Save, Import and the Dotfiles Repo in the window. The rules are the real `soulcaster-repo`: paste
+//! Save, Import and the Dotfiles Repo in the window. The rules are the real `macflayer-repo`: paste
 //! parsing, the strict parser, the review, the link safety and the saving all run. What's simulated
 //! is the outside world: GitHub and git are a fake, and every file goes in a temporary folder.
 //! Wiring a real runner, the real home and the Machine Record is the wiring ticket's one change here,
@@ -7,19 +7,19 @@
 use rune::TextEdit;
 use std::path::PathBuf;
 
-use soulcaster_core::approval::{ApprovalStore, Approvals, CommitSha, DotfilesApproval};
-use soulcaster_core::command::CommandRunner;
-use soulcaster_core::command::Reply;
-use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
-use soulcaster_core::plan::DotfilesPlan;
-use soulcaster_repo::address::ConfigPath;
-use soulcaster_repo::copies::keep_import;
-use soulcaster_repo::dotfiles::{DotfilesStep, LinkReport, MovePreview, UserStage};
-use soulcaster_repo::fake::{FakeGitHub, FileApprovals, RepoShape};
-use soulcaster_repo::import::{ImportError, Importer, Opened, Picker, Refusal};
-use soulcaster_repo::review::{Boxes, Review, Tick};
-use soulcaster_repo::save::{CONFIG_REPO_NAME, SaveOutcome, SaveRequest, save};
-use soulcaster_repo::tools::Tools;
+use macflayer_core::approval::{ApprovalStore, Approvals, CommitSha, DotfilesApproval};
+use macflayer_core::command::CommandRunner;
+use macflayer_core::command::Reply;
+use macflayer_core::lint::DEFAULT_CLONE_LOCATION;
+use macflayer_core::plan::DotfilesPlan;
+use macflayer_repo::address::ConfigPath;
+use macflayer_repo::copies::keep_import;
+use macflayer_repo::dotfiles::{DotfilesStep, LinkReport, MovePreview, UserStage};
+use macflayer_repo::fake::{FakeGitHub, FileApprovals, RepoShape};
+use macflayer_repo::import::{ImportError, Importer, Opened, Picker, Refusal};
+use macflayer_repo::review::{Boxes, Review, Tick};
+use macflayer_repo::save::{CONFIG_REPO_NAME, SaveOutcome, SaveRequest, save};
+use macflayer_repo::tools::Tools;
 
 use crate::catalog_view::view;
 use crate::fleet_flow::{FleetSample, seeded_fleet};
@@ -70,7 +70,7 @@ pub const SAMPLES: &[&str] = &[
     "example-dev/one-config",
     "example-stranger/setup",
     "example-you/setup",
-    "s0ulcaster-official/verified-configs",
+    "macf1ayer-official/verified-configs",
     "example-dev/odd-config",
     "evil-tools/preapproved",
     "evil-tools/two-answers",
@@ -92,7 +92,7 @@ pub struct RepoSim {
     /// The Fleet the window shows, kept apart from the samples above.
     pub fleet: FakeGitHub,
     /// The real programs. Without this, everything goes to `github` above.
-    real: Option<soulcaster_engine::ProcessRunner>,
+    real: Option<macflayer_engine::ProcessRunner>,
     pub tools: Tools,
     pub store: Box<dyn ApprovalStore>,
 }
@@ -117,9 +117,9 @@ impl RepoSim {
         Self {
             github: FakeGitHub::new(),
             fleet: FakeGitHub::new(),
-            real: Some(soulcaster_repo::process::runner()),
+            real: Some(macflayer_repo::process::runner()),
             tools: Tools::for_mac(home.clone()),
-            store: Box::new(soulcaster_engine::RecordApprovals::new(home)),
+            store: Box::new(macflayer_engine::RecordApprovals::new(home)),
             _dir: None,
         }
     }
@@ -191,7 +191,7 @@ fn seeded_github() -> FakeGitHub {
     macro_rules! sample {
         ($name:literal) => {
             include_bytes!(concat!(
-                "../../crates/soulcaster-repo/tests/fixtures/import/",
+                "../../crates/macflayer-repo/tests/fixtures/import/",
                 $name
             ))
         };
@@ -260,9 +260,9 @@ fn seeded_github() -> FakeGitHub {
         "install.sh",
         b"#!/bin/sh\n# install.sh\nmkdir -p ~/Developer\n",
     );
-    repo("s0ulcaster-official", "verified-configs");
+    repo("macf1ayer-official", "verified-configs");
     file(
-        "s0ulcaster-official",
+        "macf1ayer-official",
         "verified-configs",
         "configs/recommended.json",
         sample!("hostile.json"),
@@ -377,7 +377,7 @@ impl App {
         };
     }
 
-    fn review_page(&self, fetched: &soulcaster_repo::import::Fetched) -> ImportPhase {
+    fn review_page(&self, fetched: &macflayer_repo::import::Fetched) -> ImportPhase {
         let review = self.repo.sim.importer().review(fetched);
         let approvals = self.repo.sim.store.read().unwrap_or_default();
         let boxes = review.starting_boxes(&approvals);
@@ -436,7 +436,7 @@ impl App {
         let ImportPhase::Review(page) = &self.repo.import else {
             return;
         };
-        let fetched = soulcaster_repo::import::Fetched {
+        let fetched = macflayer_repo::import::Fetched {
             source: page.review.source.clone(),
             config: page.review.fetched_config().clone(),
         };
@@ -576,10 +576,10 @@ impl App {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use soulcaster_core::ask::Password;
-    use soulcaster_core::event::Event;
-    use soulcaster_core::plan::Plan;
-    use soulcaster_repo::review::Primary;
+    use macflayer_core::ask::Password;
+    use macflayer_core::event::Event;
+    use macflayer_core::plan::Plan;
+    use macflayer_repo::review::Primary;
 
     use super::*;
     use crate::answers::Answers;
@@ -607,7 +607,7 @@ mod tests {
         app.read_sample("example-dev/mac-setup");
         assert!(matches!(app.repo.import, ImportPhase::Pick(_)));
 
-        app.read_sample("s0ulcaster-official/verified-configs");
+        app.read_sample("macf1ayer-official/verified-configs");
         let hostile = page(&app);
         assert_eq!(hostile.review.primary(&hostile.boxes), Primary::Close);
         assert!(hostile.review.nothing_selected(&hostile.boxes));

@@ -1,8 +1,8 @@
 //! Fleet: your Machine Types and your Macs, and whether each is in step. It opens here.
 
+use macflayer_repo::fleet::{MachineEntry, TypeEntry};
+use macflayer_repo::save::WaitReason;
 use rune::{El, ScrollSpec, col, el, row, text};
-use soulcaster_repo::fleet::{MachineEntry, TypeEntry};
-use soulcaster_repo::save::WaitReason;
 
 use super::catalog::tile;
 use super::kit;

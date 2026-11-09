@@ -1,4 +1,4 @@
-# Releasing Soulcaster
+# Releasing MacFlayer
 
 The version is set in one place: `[workspace.package]` in `Cargo.toml`. A release is a `v*` tag that matches it, such as `v0.1.0`. Pushing the tag runs `.github/workflows/release.yml`.
 
@@ -6,7 +6,7 @@ The version is set in one place: `[workspace.package]` in `Cargo.toml`. A releas
 
 1. Builds, tests and packages the app, ad-hoc signed.
 2. If all the Apple secrets are set, signs it with Developer ID and the hardened runtime, notarizes it and staples the ticket. It stops if some of the secrets are set and others aren't.
-3. Publishes a GitHub release with `Soulcaster-macos-arm64.zip` and `Soulcaster-macos-arm64.zip.sha256`.
+3. Publishes a GitHub release with `MacFlayer-macos-arm64.zip` and `MacFlayer-macos-arm64.zip.sha256`.
 
 | Apple secrets | What gets published | Can the installer get it? |
 | --- | --- | --- |
@@ -19,9 +19,9 @@ The version is set in one place: `[workspace.package]` in `Cargo.toml`. A releas
 
 ```sh
 git clone https://github.com/nullaroni/soulcaster.git
-cd soulcaster
+cd macflayer
 packaging/build-app.sh
-open target/package/Soulcaster.app
+open target/package/MacFlayer.app
 ```
 
 The build needs Rust and Command Line Tools. It installs nothing, and it leaves an ad-hoc signed app in `target/package/`.
@@ -44,7 +44,7 @@ Only the owner can do these steps.
    | `APPLE_NOTARY_KEY_ID` | The Key ID from step 4 |
    | `APPLE_NOTARY_ISSUER_ID` | The Issuer ID from step 4 |
 
-6. **Set the Team ID in `install.sh`.** In `soulcaster_main`, set `local team_id=""` to your 10-character Apple Team ID, which is on the Membership page of your account. The release stops if the signing certificate's team doesn't match this value.
+6. **Set the Team ID in `install.sh`.** In `macflayer_main`, set `local team_id=""` to your 10-character Apple Team ID, which is on the Membership page of your account. The release stops if the signing certificate's team doesn't match this value.
 7. **Review `CFBundleIdentifier` in `packaging/Info.plist`** before the first public release. It is `com.nullworks.macflayer`, chosen by the owner, and changing it later makes macOS treat the app as a different one.
 8. **Tag it:**
 

@@ -1,10 +1,10 @@
 //! Needs you: where a finished Run drops you. What only a person can finish, what failed, and what
 //! is waiting on what failed.
 
+use macflayer_core::event::{QueueEntry, QueueKind};
+use macflayer_core::lifecycle::ItemState;
 use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::{Dialog, Kit, TextInput};
-use soulcaster_core::event::{QueueEntry, QueueKind};
-use soulcaster_core::lifecycle::ItemState;
 
 use super::{kit, state_words};
 use crate::catalog_view::view;

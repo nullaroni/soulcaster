@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/nullaroni/soulcaster/main/schema/config-1.schema.json",
-  "title": "Soulcaster Config, schema version 1",
+  "title": "MacFlayer Config, schema version 1",
   "description": "PROTOTYPE. A Config lists what a Machine should have. Every object is closed: a field this schema doesn't name is an error, which is what keeps shell commands, trust grants, removal flags and includes out. Once published, this version is frozen: tightening a rule later would break files that are valid today, so it needs a new schemaVersion. Rules that can change between releases aren't here. Whether an ID exists, whether a value suits its Item, secret checks and link safety run after this schema passes, entry by entry. Patterns are plain ECMA-262 with no lookaround, so Rust's regex crate compiles them.",
   "type": "object",
   "additionalProperties": false,

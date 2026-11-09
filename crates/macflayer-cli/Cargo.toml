@@ -1,0 +1,20 @@
+[package]
+name = "macflayer-cli"
+description = "The plain MacFlayer CLI, on the same engine as the app. It can validate a Config, print its plan, run it, Import one for review and Save one to GitHub."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "macflayer"
+path = "src/main.rs"
+
+[dependencies]
+macflayer-core.workspace = true
+macflayer-repo.workspace = true
+macflayer-engine.workspace = true
+serde_json.workspace = true
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

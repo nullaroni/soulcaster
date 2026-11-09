@@ -1,10 +1,10 @@
 //! Import: paste, pick one Config, and the one review page. Everything can be seen before anything
 //! happens, and the things that run someone else's code each get their own box.
 
+use macflayer_repo::import::{PickRow, Picker, Refusal};
+use macflayer_repo::review::{DotfilesCard, LinkRow, Primary, TapCard, Tick};
 use rune::{Color, El, ScrollSpec, Tx, col, el, row, text};
 use rune_kit::{Kit, TextInput};
-use soulcaster_repo::import::{PickRow, Picker, Refusal};
-use soulcaster_repo::review::{DotfilesCard, LinkRow, Primary, TapCard, Tick};
 
 use super::kit;
 use crate::repo_flow::{ImportPhase, ReviewPage, SAMPLES};
@@ -14,7 +14,7 @@ const TAP_STAKES: &str = "Homebrew runs code written by this account on this Mac
 const REPO_STAKES: &str = "These files replace yours at the locations below, and some run by themselves when you use your Mac. This covers this version and this list of links, nothing newer. Existing files are backed up before they're replaced. Leave it off and the repo isn't downloaded.";
 const SCRIPT_STAKES: &str = "This one file runs once, as you, after your password is gone. It can run other files in the repo and do anything you can. A newer version needs a new approval.";
 const OWN_WORDS: &str = "Yours, and so is this Machine Type, so it starts on";
-const FAKE_NOTE: &str = "Soulcaster doesn't verify or endorse any Machine Type";
+const FAKE_NOTE: &str = "MacFlayer doesn't verify or endorse any Machine Type";
 
 pub fn screen(app: &App, k: &'static Kit) -> El {
     match &app.repo.import {
@@ -249,7 +249,7 @@ fn refused(from: &str, refusal: &Refusal) -> El {
         .child(plain_row(
             "refused-from".to_string(),
             "From",
-            kit::label(soulcaster_repo::text::escaped(from)),
+            kit::label(macflayer_repo::text::escaped(from)),
         ))
         .child(paint_row(
             "refused-why".to_string(),
@@ -380,7 +380,7 @@ fn tap_rows(page_data: &ReviewPage, k: &Kit, tap: &TapCard) -> Vec<El> {
                     format!("blocked-{}", package.name),
                     row()
                         .help(format!(
-                            "This isn't the {} Soulcaster installs on every Mac. {} wrote it and gave it the same name, so you can't approve it here. It stays in your copy and never installs.",
+                            "This isn't the {} MacFlayer installs on every Mac. {} wrote it and gave it the same name, so you can't approve it here. It stays in your copy and never installs.",
                             package.short, tap.owner
                         ))
                         .child(kit::label(package.name.clone()).grow(1.0).shrink().truncate())
@@ -474,7 +474,7 @@ fn dotfiles_rows(page_data: &ReviewPage, k: &Kit, card: &DotfilesCard, list: &mu
         "approve-repo".to_string(),
         format!(
             "Link {live} files from {} at {at}",
-            soulcaster_repo::text::escaped(&card.repo)
+            macflayer_repo::text::escaped(&card.repo)
         ),
         page_data.boxes.repo,
         card.commit.is_some(),
@@ -737,7 +737,7 @@ fn review(page_data: &ReviewPage, k: &Kit) -> El {
             boxes.settings,
             true,
             false,
-            "Soulcaster only writes settings it knows.",
+            "MacFlayer only writes settings it knows.",
             Tick::Settings,
         ));
         for setting in &review.settings {

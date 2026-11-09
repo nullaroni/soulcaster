@@ -3,13 +3,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use macflayer_core::ask::Password;
+use macflayer_core::config::{Config, Packages, SettingValue};
+use macflayer_core::event::{AskKind, AskStatus, Event, EventKind, QueueEntry, RunScope};
+use macflayer_core::lifecycle::{ItemState, Stage};
+use macflayer_core::plan::{Plan, Why};
+use macflayer_core::recipe::ValueType;
 use rune::TextEdit;
-use soulcaster_core::ask::Password;
-use soulcaster_core::config::{Config, Packages, SettingValue};
-use soulcaster_core::event::{AskKind, AskStatus, Event, EventKind, QueueEntry, RunScope};
-use soulcaster_core::lifecycle::{ItemState, Stage};
-use soulcaster_core::plan::{Plan, Why};
-use soulcaster_core::recipe::ValueType;
 
 use crate::answers::Answers;
 use crate::catalog_view::{surface_name, view};
@@ -113,7 +113,7 @@ pub struct App {
     pub config_name: String,
     pub name_edit: TextEdit,
     /// The Dotfiles Repo a Machine Type opened from your own repo already names.
-    pub own_dotfiles: Option<soulcaster_core::config::Dotfiles>,
+    pub own_dotfiles: Option<macflayer_core::config::Dotfiles>,
 
     // Review
     pub base_present: bool,
@@ -141,7 +141,7 @@ pub struct App {
     pub run_password: TextEdit,
     pub run_asks: (bool, bool),
     /// The Dotfiles Repo from an imported Config, for the Run to apply.
-    pub dotfiles: Option<soulcaster_core::config::Dotfiles>,
+    pub dotfiles: Option<macflayer_core::config::Dotfiles>,
     imported_selection: Option<String>,
     /// Taps an Import's packages come from. They show as answered, and approve nothing unless the
     /// person ticks one themselves.
@@ -176,6 +176,7 @@ pub fn init() -> App {
         && let Some(home) = std::env::var_os("HOME")
     {
         let home = std::path::PathBuf::from(home);
+        macflayer_engine::adopt_old_support(&home);
         let mut app = with_engine(Box::new(crate::real::RealEngine::new(home.clone())));
         app.repo = crate::repo_flow::RepoFlow::real(home);
         app.open_fleet();
@@ -349,7 +350,7 @@ impl App {
     }
 
     /// Records what an Import was reviewed with, for what's only true of that selection.
-    pub fn keep_dotfiles(&mut self, dotfiles: Option<soulcaster_core::config::Dotfiles>) {
+    pub fn keep_dotfiles(&mut self, dotfiles: Option<macflayer_core::config::Dotfiles>) {
         self.imported_selection = Some(self.selection().to_canonical_json());
         self.dotfiles = dotfiles;
     }
@@ -359,7 +360,7 @@ impl App {
             self.packages.iter().partition(|p| p.starts_with("cask:"));
         Config {
             schema: None,
-            schema_version: soulcaster_core::config::SCHEMA_VERSION,
+            schema_version: macflayer_core::config::SCHEMA_VERSION,
             name: self.config_name.clone(),
             items: self.selected.iter().cloned().collect(),
             packages: Packages {
@@ -1014,7 +1015,7 @@ mod tests {
     mod real_mode {
         use std::sync::{Arc, Mutex};
 
-        use soulcaster_core::ask::PasswordRequest;
+        use macflayer_core::ask::PasswordRequest;
 
         use super::*;
         use crate::answers::Answers;
@@ -1088,7 +1089,7 @@ mod tests {
         #[test]
         fn the_engine_about_to_ask_isnt_a_wrong_password() {
             let (mut app, _) = app();
-            let mut stamper = soulcaster_core::event::Stamper::new();
+            let mut stamper = macflayer_core::event::Stamper::new();
             app.apply(stamper.stamp(
                 0,
                 EventKind::AskState {
@@ -1124,7 +1125,7 @@ mod tests {
             app.queue.push(QueueEntry {
                 id: "x:y".to_string(),
                 item: "x".to_string(),
-                kind: soulcaster_core::event::QueueKind::NeedsAdmin,
+                kind: macflayer_core::event::QueueKind::NeedsAdmin,
                 text: "t".to_string(),
                 detail: None,
                 link: None,
@@ -1187,8 +1188,8 @@ mod tests {
         }
     }
 
-    use soulcaster_core::catalog::Catalog;
-    use soulcaster_core::event::{EventKind, Stamper};
+    use macflayer_core::catalog::Catalog;
+    use macflayer_core::event::{EventKind, Stamper};
 
     use super::*;
 

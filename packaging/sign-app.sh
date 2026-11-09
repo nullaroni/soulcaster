@@ -1,6 +1,6 @@
 #!/bin/bash
-# Signs a built Soulcaster.app from the inside out, without --deep, as Apple asks.
-# Usage: packaging/sign-app.sh <identity> <Soulcaster.app>
+# Signs a built MacFlayer.app from the inside out, without --deep, as Apple asks.
+# Usage: packaging/sign-app.sh <identity> <MacFlayer.app>
 # An identity of "-" is ad-hoc: fine for a contributor's own build, never for a release.
 set -euo pipefail
 
@@ -16,7 +16,7 @@ fi
 bundle_id=$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")
 
 codesign --force --sign "$identity" "${flags[@]}" --identifier "$bundle_id.cli" \
-  "$app/Contents/Helpers/soulcaster"
+  "$app/Contents/Helpers/macflayer"
 codesign --force --sign "$identity" "${flags[@]}" --identifier "$bundle_id.askpass" \
-  "$app/Contents/Helpers/soulcaster-askpass"
+  "$app/Contents/Helpers/macflayer-askpass"
 codesign --force --sign "$identity" "${flags[@]}" "$app"

@@ -2,11 +2,11 @@
 //! `poll` returns, so wiring in the real engine means implementing this trait and changing the
 //! single line in `state::init` that builds it.
 
-use soulcaster_core::ask::{Password, PasswordRequest};
-use soulcaster_core::config::Config;
-use soulcaster_core::drift::{Choice, Row};
-use soulcaster_core::event::Event;
-use soulcaster_core::plan::Plan;
+use macflayer_core::ask::{Password, PasswordRequest};
+use macflayer_core::config::Config;
+use macflayer_core::drift::{Choice, Row};
+use macflayer_core::event::Event;
+use macflayer_core::plan::Plan;
 
 use crate::answers::Answers;
 use crate::drift_flow::Checked;

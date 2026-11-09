@@ -1,10 +1,10 @@
-//! The Soulcaster window. The engine behind it is simulated for now, so nothing here installs,
+//! The MacFlayer window. The engine behind it is simulated for now, so nothing here installs,
 //! runs `sudo`, changes a setting or provisions over the network.
 //!
 //! ```sh
-//! cargo run -p soulcaster-app                                      # a real window
-//! cargo run -p soulcaster-app -- --snap out.png --scene catalog    # one screen, headless
-//! cargo run -p soulcaster-app -- --list-scenes
+//! cargo run -p macflayer-app                                      # a real window
+//! cargo run -p macflayer-app -- --snap out.png --scene catalog    # one screen, headless
+//! cargo run -p macflayer-app -- --list-scenes
 //! ```
 
 mod answers;
@@ -63,7 +63,7 @@ fn main() {
         on_key: Some(on_key),
         fonts: FONTS,
         families: ("IBM Plex Mono", "IBM Plex Mono"),
-        ..AppSpec::new("Soulcaster", (1100.0, 720.0), state::init, ui::view)
+        ..AppSpec::new("MacFlayer", (1100.0, 720.0), state::init, ui::view)
     })
     .titlebar(Titlebar::new(ui::TITLEBAR))
     .standard_menus()
