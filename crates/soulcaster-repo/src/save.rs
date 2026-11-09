@@ -40,6 +40,8 @@ pub enum WaitReason {
     SignIn,
     Denied,
     Busy,
+    /// A Machine Entry describes someone's computers, so it isn't sent to a public repo.
+    Public,
 }
 
 impl WaitReason {
@@ -57,6 +59,9 @@ impl WaitReason {
             }
             Self::Busy => {
                 "Your Machine Type keeps changing on GitHub, so this wasn't sent. Nothing is lost. Try again in a moment."
+            }
+            Self::Public => {
+                "Your Machine Types are in a public repo, so this Mac isn't listed there. Everything else still works."
             }
         }
     }
@@ -140,38 +145,66 @@ pub fn save(
     let config = request.config;
     let text = savable_text(config, catalog)?;
     let local = keep_own(&tools.home, &config.name, &text).map_err(SaveError::LocalWrite)?;
+    Ok(send(
+        runner,
+        tools,
+        &Outgoing {
+            repo_name: request.repo_name,
+            path: format!("configs/{}.json", slug(&config.name)),
+            text: &text,
+            base: request.base,
+            own_entry: false,
+            local,
+        },
+    ))
+}
+
+/// One file on its way to the person's repo.
+pub(crate) struct Outgoing<'a> {
+    pub repo_name: &'a str,
+    pub path: String,
+    pub text: &'a str,
+    pub base: Option<&'a str>,
+    /// This Machine's own entry. Nothing else writes it, so it's replaced whatever it says, and
+    /// it only goes to a private repo.
+    pub own_entry: bool,
+    pub local: PathBuf,
+}
+
+pub(crate) fn send(
+    runner: &dyn CommandRunner,
+    tools: &Tools,
+    outgoing: &Outgoing<'_>,
+) -> SaveOutcome {
     let waiting = |why| SaveOutcome::Waiting {
         why,
-        local: local.clone(),
+        local: outgoing.local.clone(),
     };
     if tools.gh.is_none() || tools.git.is_none() {
-        return Ok(waiting(WaitReason::SignIn));
+        return waiting(WaitReason::SignIn);
     }
     let github = GitHub::new(runner, tools);
     let identity = match github.sign_in() {
         SignIn::SignedIn(identity) => identity.clone(),
-        SignIn::SignedOut => return Ok(waiting(WaitReason::SignIn)),
-        SignIn::Unreachable => return Ok(waiting(WaitReason::Offline)),
+        SignIn::SignedOut => return waiting(WaitReason::SignIn),
+        SignIn::Unreachable => return waiting(WaitReason::Offline),
     };
     let sender = Sender {
         runner,
         tools,
         github: &github,
         identity,
-        repo_name: request.repo_name,
-        base: request.base,
-        text: &text,
-        path: format!("configs/{}.json", slug(&config.name)),
+        outgoing,
     };
     let mut created_repo = false;
     for _ in 0..TRIES {
         match sender.try_once(&mut created_repo) {
             Try::Rejected => {}
-            Try::Wait(why) => return Ok(waiting(why)),
-            Try::Done(outcome) => return Ok(outcome),
+            Try::Wait(why) => return waiting(why),
+            Try::Done(outcome) => return outcome,
         }
     }
-    Ok(waiting(WaitReason::Busy))
+    waiting(WaitReason::Busy)
 }
 
 enum Try {
@@ -181,7 +214,7 @@ enum Try {
     Done(SaveOutcome),
 }
 
-fn wait_for_fetch(error: &FetchError) -> WaitReason {
+pub(crate) fn wait_for_fetch(error: &FetchError) -> WaitReason {
     match error {
         FetchError::NotVisible { .. } => WaitReason::SignIn,
         FetchError::Malformed => WaitReason::Denied,
@@ -243,10 +276,7 @@ struct Sender<'a> {
     tools: &'a Tools,
     github: &'a GitHub<'a>,
     identity: Identity,
-    repo_name: &'a str,
-    base: Option<&'a str>,
-    text: &'a str,
-    path: String,
+    outgoing: &'a Outgoing<'a>,
 }
 
 impl Sender<'_> {
@@ -260,8 +290,8 @@ impl Sender<'_> {
 
     /// GitHub's answer about the person's repo, making it private if there isn't one.
     fn repo(&self, created: &mut bool) -> Result<RepoFacts, WaitReason> {
-        let id =
-            RepoId::new(&self.identity.login, self.repo_name).map_err(|_| WaitReason::Denied)?;
+        let id = RepoId::new(&self.identity.login, self.outgoing.repo_name)
+            .map_err(|_| WaitReason::Denied)?;
         let facts = match self.github.repo_facts(&id) {
             Ok(facts) => facts,
             Err(FetchError::NotVisible { .. }) => {
@@ -305,6 +335,9 @@ impl Sender<'_> {
             Ok(facts) => facts,
             Err(why) => return Try::Wait(why),
         };
+        if self.outgoing.own_entry && !facts.private {
+            return Try::Wait(WaitReason::Public);
+        }
         let head = match self.head(&facts) {
             Ok(head) => head,
             Err(why) => return Try::Wait(why),
@@ -352,37 +385,38 @@ impl Sender<'_> {
         let Ok(root) = SafeRoot::open(work) else {
             return Try::Wait(WaitReason::Denied);
         };
-        let parts: Vec<&str> = self.path.split('/').collect();
+        let outgoing = self.outgoing;
+        let parts: Vec<&str> = outgoing.path.split('/').collect();
         let public = !facts.private;
         let existing = match root.read_file(&parts, MAX_BYTES as u64 + 1) {
             Ok(existing) => existing,
             Err(_) => return Try::Wait(WaitReason::Denied),
         };
         if let Some(existing) = existing {
-            if existing == self.text.as_bytes() {
+            if existing == outgoing.text.as_bytes() {
                 return Try::Done(SaveOutcome::AlreadyThere {
                     repo: facts.repo.clone(),
-                    path: self.path.clone(),
+                    path: outgoing.path.clone(),
                     public,
                 });
             }
-            if self.base.is_none_or(|base| base.as_bytes() != existing) {
+            if !outgoing.own_entry && outgoing.base.is_none_or(|base| base.as_bytes() != existing) {
                 return Try::Done(SaveOutcome::ChangedElsewhere {
-                    path: self.path.clone(),
+                    path: outgoing.path.clone(),
                 });
             }
         }
         if root
-            .write_file(&parts, self.text.as_bytes(), 0o644)
+            .write_file(&parts, outgoing.text.as_bytes(), 0o644)
             .is_err()
         {
             return Try::Wait(WaitReason::Denied);
         }
 
-        git_or_wait!("add", "--", &self.path);
+        git_or_wait!("add", "--", &outgoing.path);
         let name = format!("user.name={}", self.identity.login);
         let email = format!("user.email={}", self.identity.noreply());
-        let message = format!("Save {}", self.path);
+        let message = format!("Save {}", outgoing.path);
         git_or_wait!(
             "-c",
             &name,
@@ -403,7 +437,7 @@ impl Sender<'_> {
         };
         Try::Done(SaveOutcome::Sent {
             repo: facts.repo.clone(),
-            path: self.path.clone(),
+            path: outgoing.path.clone(),
             commit,
             public,
             created_repo: created,

@@ -12,6 +12,7 @@ pub mod adopt;
 pub mod copies;
 pub mod dotfiles;
 pub mod fake;
+pub mod fleet;
 pub mod github;
 pub mod import;
 pub mod in_run;

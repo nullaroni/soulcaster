@@ -15,6 +15,7 @@ use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
 use soulcaster_core::plan::DotfilesPlan;
 use soulcaster_repo::dotfiles::{DotfilesError, DotfilesStep, LinkOutcome, UserStage};
 use soulcaster_repo::fake::{FakeGitHub, FileApprovals, RepoShape};
+use soulcaster_repo::fleet::{MachineEntry, Published, publish};
 use soulcaster_repo::process::runner as real_runner;
 use soulcaster_repo::save::{CONFIG_REPO_NAME, SaveOutcome, SaveRequest, save};
 use soulcaster_repo::tools::Tools;
@@ -465,4 +466,75 @@ fn a_save_on_top_of_a_moved_repo_keeps_what_else_is_there() {
     assert_eq!(sh(&bare, &["show", "main:configs/other.json"]), "{}");
     assert!(sh(&bare, &["show", "main:configs/my-mac.json"]).contains("My Mac"));
     assert_eq!(sh(&bare, &["rev-parse", "main~1"]), other.as_str());
+}
+
+fn fleet_entry(id: &str, last_seen: u64) -> MachineEntry {
+    MachineEntry::new(
+        id.to_string(),
+        "A Mac".to_string(),
+        "Dev".to_string(),
+        last_seen,
+    )
+}
+
+/// What GitHub would report now, since the fake doesn't watch the local repo.
+fn sync_head(server: &LocalServer, bare: &Path) {
+    let head = sh(bare, &["rev-parse", "refs/heads/main"]);
+    server.fake.add_repo(
+        "example-you",
+        CONFIG_REPO_NAME,
+        RepoShape::private("main", &head),
+    );
+}
+
+#[test]
+fn two_macs_each_land_and_a_later_update_replaces_only_its_own_entry() {
+    let world = world();
+    let bare = bare_config_repo(&world);
+    let fake = FakeGitHub::new();
+    fake.sign_in("example-you", 42);
+    fake.add_repo(
+        "example-you",
+        CONFIG_REPO_NAME,
+        RepoShape {
+            default_branch: "main".to_string(),
+            private: true,
+            head: None,
+        },
+    );
+    let server = LocalServer {
+        fake,
+        from: format!("https://github.com/example-you/{CONFIG_REPO_NAME}.git"),
+        to: bare.clone(),
+    };
+    let (mac_a, mac_b) = (
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+    let send = |entry: &MachineEntry| publish(&server, &world.tools, CONFIG_REPO_NAME, entry);
+
+    assert_eq!(send(&fleet_entry(mac_a, 1)), Published::Sent);
+    sync_head(&server, &bare);
+    assert_eq!(send(&fleet_entry(mac_b, 2)), Published::Sent);
+    sync_head(&server, &bare);
+    assert_eq!(send(&fleet_entry(mac_a, 3)), Published::Sent);
+
+    let listed = sh(&bare, &["ls-tree", "-r", "--name-only", "refs/heads/main"]);
+    assert_eq!(
+        listed.lines().collect::<Vec<_>>(),
+        [
+            format!("machines/{mac_a}.json"),
+            format!("machines/{mac_b}.json")
+        ]
+    );
+    let mine = sh(
+        &bare,
+        &["show", &format!("refs/heads/main:machines/{mac_a}.json")],
+    );
+    assert!(mine.contains("\"lastSeen\": 3"), "{mine}");
+    let theirs = sh(
+        &bare,
+        &["show", &format!("refs/heads/main:machines/{mac_b}.json")],
+    );
+    assert!(theirs.contains("\"lastSeen\": 2"), "{theirs}");
 }
