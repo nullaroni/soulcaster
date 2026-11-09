@@ -17,7 +17,7 @@ use soulcaster_core::plan::Plan;
 use soulcaster_engine::{
     Clock, EngineError, LastApplied, MachineRecord, Removal, RemovalConfirmed, check_drift,
     keep_here, leave_here, machine_record_path, record_saved, remove_from_mac, set_waiting_saves,
-    waiting_saves,
+    survey, waiting_saves,
 };
 
 struct Sandbox(PathBuf);
@@ -660,4 +660,43 @@ fn a_run_fills_in_the_home_folder_a_setting_stores() {
         write.args.last().unwrap(),
         "file:///Users/someone/Documents/"
     );
+}
+
+#[test]
+fn a_survey_finds_what_is_here_and_only_the_settings_someone_changed() {
+    let sandbox = Sandbox::new();
+    let runner = FakeRunner::new();
+    answer(&runner, "Cellar/ripgrep", Reply::ok(""));
+    answer(&runner, "read com.apple.dock autohide", Reply::ok("1\n"));
+    answer(&runner, "read com.apple.dock tilesize", Reply::ok("48\n"));
+    answer(
+        &runner,
+        "read com.apple.dock show-recents",
+        Reply::ok("1\n"),
+    );
+    answer(&runner, "CommandLineTools", Reply::ok(""));
+    answer(&runner, "brew leaves", Reply::ok("ripgrep\nhtop\n"));
+    answer(&runner, "brew list", Reply::ok("some-cask\n"));
+    absent_by_default(&runner);
+
+    let found = survey(&runner, sandbox.path(), Catalog::shipped());
+
+    assert_eq!(found.items, ["ripgrep"]);
+    assert_eq!(found.packages, ["htop", "cask:some-cask"]);
+    assert!(found.settings.contains_key("dock.autohide"));
+    assert!(
+        !found.settings.contains_key("dock.show-recents"),
+        "show-recents is on by default, so this is nothing the person chose: {:?}",
+        found.settings
+    );
+    assert!(runner.calls().iter().all(only_reads), "it only looks");
+}
+
+#[test]
+fn a_survey_of_a_bare_mac_finds_nothing() {
+    let sandbox = Sandbox::new();
+    let runner = FakeRunner::new();
+    absent_by_default(&runner);
+    let found = survey(&runner, sandbox.path(), Catalog::shipped());
+    assert_eq!(found, soulcaster_engine::Found::default());
 }

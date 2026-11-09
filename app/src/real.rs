@@ -11,21 +11,26 @@ use std::thread;
 use soulcaster_core::approval::ApprovalStore;
 use soulcaster_core::ask::{Asks, Password, PasswordRequest, SignInStatus};
 use soulcaster_core::catalog::Catalog;
+use soulcaster_core::command::CommandRunner;
 use soulcaster_core::config::Config;
 use soulcaster_core::drift::{Choice, Row};
 use soulcaster_core::event::{ConfigRef, Event, EventKind, EventSink, RunScope, Stamper};
 use soulcaster_core::lint::DEFAULT_CLONE_LOCATION;
 use soulcaster_core::plan::Plan;
+use soulcaster_engine::survey;
 use soulcaster_engine::{
     Clock, KeepAwake, MachineRecord, ProcessRunner, RecordApprovals, RunInput, SystemClock,
     gate_beside, perform,
 };
+use soulcaster_repo::fleet::{MachineEntry, computer_name, machine_id, publish, read};
 use soulcaster_repo::in_run::RunDotfiles;
+use soulcaster_repo::save::CONFIG_REPO_NAME;
 use soulcaster_repo::tools::Tools;
 
 use crate::answers::Answers;
 use crate::drift_flow::{self, Deps};
 use crate::engine::{DriftNews, Engine};
+use crate::fleet_flow::FleetNews;
 
 /// What a Drift job on its own thread hands back to the window.
 enum DriftDone {
@@ -127,12 +132,15 @@ pub struct RealEngine {
     drift_busy: Arc<AtomicBool>,
     drift_sender: Sender<DriftDone>,
     drift_news: Receiver<DriftDone>,
+    fleet_sender: Sender<FleetNews>,
+    fleet_news: Receiver<FleetNews>,
 }
 
 impl RealEngine {
     pub fn new(home: PathBuf) -> Self {
         let (sender, events) = mpsc::channel();
         let (drift_sender, drift_news) = mpsc::channel();
+        let (fleet_sender, fleet_news) = mpsc::channel();
         Self {
             home,
             waiting: Arc::default(),
@@ -143,6 +151,8 @@ impl RealEngine {
             drift_busy: Arc::default(),
             drift_sender,
             drift_news,
+            fleet_sender,
+            fleet_news,
         }
     }
 
@@ -203,6 +213,25 @@ impl RealEngine {
             });
             if let Err(error) = result {
                 finish_with(&sender, &format!("The Run stopped: {error}"));
+            }
+        });
+    }
+
+    /// Reads or writes the Fleet off the window's thread. These only touch GitHub, so a Run
+    /// doesn't stop them.
+    fn fleet_job(
+        &self,
+        job: impl FnOnce(&dyn CommandRunner, &Tools, &std::path::Path) -> Option<FleetNews>
+        + Send
+        + 'static,
+    ) {
+        let sender = self.fleet_sender.clone();
+        let home = self.home.clone();
+        thread::spawn(move || {
+            let repo = soulcaster_repo::process::runner();
+            let tools = Tools::for_mac(home.clone());
+            if let Some(news) = job(&repo, &tools, &home) {
+                let _ = sender.send(news);
             }
         });
     }
@@ -405,6 +434,42 @@ impl Engine for RealEngine {
         });
     }
 
+    fn refresh_fleet(&mut self) {
+        self.fleet_job(|repo, tools, home| Some(read_fleet(repo, tools, home)));
+    }
+
+    fn publish_self(&mut self, differences: Option<u32>) {
+        self.fleet_job(move |repo, tools, home| {
+            let machine_type = drift_flow::followed_name(home)?;
+            let id = machine_id(home).ok()?;
+            let mut entry = MachineEntry::new(
+                id,
+                computer_name(repo),
+                machine_type,
+                SystemClock.now_ms() / 1000,
+            );
+            entry.differences = differences;
+            publish(repo, tools, CONFIG_REPO_NAME, &entry);
+            Some(read_fleet(repo, tools, home))
+        });
+    }
+
+    fn survey_this_mac(&mut self) {
+        if self.is_running() {
+            return;
+        }
+        let sender = self.fleet_sender.clone();
+        let home = self.home.clone();
+        thread::spawn(move || {
+            let found = survey(&ProcessRunner::new(), &home, Catalog::shipped());
+            let _ = sender.send(FleetNews::Surveyed(found));
+        });
+    }
+
+    fn poll_fleet(&mut self) -> Option<FleetNews> {
+        self.fleet_news.try_recv().ok()
+    }
+
     fn poll_drift(&mut self) -> Option<DriftNews> {
         match self.drift_news.try_recv().ok()? {
             DriftDone::Checked(checked, notes) => Some(DriftNews::Checked(*checked, notes)),
@@ -422,6 +487,13 @@ impl Engine for RealEngine {
                 Some(DriftNews::Applying(carried.notes))
             }
         }
+    }
+}
+
+fn read_fleet(repo: &dyn CommandRunner, tools: &Tools, home: &std::path::Path) -> FleetNews {
+    FleetNews::Read {
+        read: read(repo, tools, CONFIG_REPO_NAME),
+        this_mac: machine_id(home).ok(),
     }
 }
 

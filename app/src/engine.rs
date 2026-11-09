@@ -10,6 +10,7 @@ use soulcaster_core::plan::Plan;
 
 use crate::answers::Answers;
 use crate::drift_flow::Checked;
+use crate::fleet_flow::FleetNews;
 
 /// What came back from Drift's work on the engine's thread.
 pub enum DriftNews {
@@ -53,6 +54,15 @@ pub trait Engine {
     fn send_waiting_saves(&mut self) {}
     fn discard_waiting_saves(&mut self) {}
     fn poll_drift(&mut self) -> Option<DriftNews> {
+        None
+    }
+    /// Reads the Fleet. The answer arrives through `poll_fleet`.
+    fn refresh_fleet(&mut self) {}
+    /// Sends this Mac's Machine Entry, with how many differences Drift last found if it looked.
+    fn publish_self(&mut self, _differences: Option<u32>) {}
+    /// Looks at this Mac to start a Machine Type. The answer arrives through `poll_fleet`.
+    fn survey_this_mac(&mut self) {}
+    fn poll_fleet(&mut self) -> Option<FleetNews> {
         None
     }
     /// GitHub's device code and address, while sign-in is waiting on the person.

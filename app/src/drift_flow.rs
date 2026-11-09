@@ -86,6 +86,14 @@ fn following(home: &Path) -> Option<Following> {
     serde_json::from_value(record.follows?).ok()
 }
 
+/// The name of the Machine Type this Mac follows, if it follows one.
+pub fn followed_name(home: &Path) -> Option<String> {
+    let held = following(home)?;
+    Config::parse(held.config.as_bytes())
+        .ok()
+        .map(|config| config.name)
+}
+
 fn store(home: &Path, following: &Following) {
     if let Ok(value) = serde_json::to_value(following) {
         let _ = set_followed(home, value);

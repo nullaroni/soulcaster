@@ -162,6 +162,8 @@ pub fn publish(
 pub struct TypeEntry {
     pub path: String,
     pub config: Config,
+    /// The file as GitHub has it, which is what a save goes on top of.
+    pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -269,13 +271,14 @@ impl Reader<'_> {
         let mut types = Vec::new();
         for file in self.files(CONFIGS, unreadable)? {
             let path = format!("{CONFIGS}/{}", file.name);
-            let config = self
-                .bytes(&path, MAX_BYTES)?
-                .and_then(|bytes| Config::parse(&bytes).ok())
+            let parsed = self.bytes(&path, MAX_BYTES)?.and_then(|bytes| {
+                let config = Config::parse(&bytes).ok()?;
                 // A save lands on the file its name makes, so a mismatch would fork on saving.
-                .filter(|config| format!("{}.json", slug(&config.name)) == file.name);
-            match config {
-                Some(config) => types.push(TypeEntry { path, config }),
+                let right_file = format!("{}.json", slug(&config.name)) == file.name;
+                right_file.then_some((config, String::from_utf8(bytes).ok()?))
+            });
+            match parsed {
+                Some((config, text)) => types.push(TypeEntry { path, config, text }),
                 None => *unreadable += 1,
             }
         }

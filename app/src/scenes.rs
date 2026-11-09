@@ -6,6 +6,7 @@ use soulcaster_core::lifecycle::ItemState;
 use soulcaster_repo::address::ConfigPath;
 use soulcaster_repo::review::Tick;
 
+use crate::fleet_flow::{FleetSample, seeded_fleet};
 use crate::repo_flow::DotfilesPhase;
 use crate::sim::{Scenario, SimEngine, SimMachine};
 use crate::state::{App, GithubState, PasswordState, SETTINGS_SECTION, Screen};
@@ -54,30 +55,48 @@ fn pick(app: &mut App, path: &str) {
 type Scene = (&'static str, fn(&mut App));
 
 pub const SCENES: &[Scene] = &[
-    ("catalog", |_| {}),
-    ("catalog-picked", |a| a.fill_typical()),
+    ("fleet", |a| a.open_fleet()),
+    ("fleet-one", |a| {
+        a.repo.sim.fleet = seeded_fleet(FleetSample::One);
+        a.open_fleet();
+    }),
+    ("fleet-empty", |a| {
+        a.repo.sim.fleet = seeded_fleet(FleetSample::Empty);
+        a.open_fleet();
+    }),
+    ("catalog", |a| a.screen = Screen::Catalog),
+    ("catalog-picked", |a| {
+        a.screen = Screen::Catalog;
+        a.fill_typical();
+    }),
     ("catalog-browsers", |a| {
+        a.screen = Screen::Catalog;
         a.fill_typical();
         a.show_section(1);
     }),
     ("catalog-editors", |a| {
+        a.screen = Screen::Catalog;
         a.fill_typical();
         a.show_section(2);
     }),
     ("catalog-cloud", |a| {
+        a.screen = Screen::Catalog;
         a.fill_typical();
         a.show_section(10);
     }),
     ("catalog-settings", |a| {
+        a.screen = Screen::Catalog;
         a.fill_typical();
         a.show_section(SETTINGS_SECTION);
     }),
     ("catalog-search", |a| {
+        a.screen = Screen::Catalog;
         a.fill_typical();
         a.search.text = "git".to_string();
         a.rebuild_rows();
     }),
     ("catalog-selected", |a| {
+        a.screen = Screen::Catalog;
         a.fill_typical();
         a.only_selected = true;
         a.rebuild_rows();

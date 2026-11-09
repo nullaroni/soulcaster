@@ -29,6 +29,7 @@ pub enum Screen {
     Import,
     Save,
     Dotfiles,
+    Fleet,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -111,6 +112,8 @@ pub struct App {
     pub grid_width: f32,
     pub config_name: String,
     pub name_edit: TextEdit,
+    /// The Dotfiles Repo a Machine Type opened from your own repo already names.
+    pub own_dotfiles: Option<soulcaster_core::config::Dotfiles>,
 
     // Review
     pub base_present: bool,
@@ -162,6 +165,8 @@ pub struct App {
     // Save, Import and the Dotfiles Repo
     pub repo: crate::repo_flow::RepoFlow,
 
+    pub fleet: crate::fleet_flow::FleetView,
+
     pub toast: Option<String>,
 }
 
@@ -173,9 +178,12 @@ pub fn init() -> App {
         let home = std::path::PathBuf::from(home);
         let mut app = with_engine(Box::new(crate::real::RealEngine::new(home.clone())));
         app.repo = crate::repo_flow::RepoFlow::real(home);
+        app.open_fleet();
         return app;
     }
-    with_engine(Box::new(SimEngine::new(Scenario::Both, SimMachine::Bare)))
+    let mut app = with_engine(Box::new(SimEngine::new(Scenario::Both, SimMachine::Bare)));
+    app.open_fleet();
+    app
 }
 
 pub fn with_engine(engine: Box<dyn Engine>) -> App {
@@ -197,6 +205,7 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         grid_width: 911.0,
         config_name: "My Mac".to_string(),
         name_edit: TextEdit::new("My Mac"),
+        own_dotfiles: None,
         base_present: false,
         answers: Answers::default(),
         password: TextEdit::new("").secure(),
@@ -251,6 +260,7 @@ pub fn with_engine(engine: Box<dyn Engine>) -> App {
         drift_applying: false,
         show_untracked: false,
         repo: crate::repo_flow::RepoFlow::simulated(),
+        fleet: crate::fleet_flow::FleetView::default(),
         toast: None,
     };
     app.rebuild_rows();
@@ -319,6 +329,16 @@ impl App {
         // Only the exact selection that was reviewed with it.
         if self.is_imported_selection() {
             config.dotfiles = self.dotfiles.clone();
+        }
+        config
+    }
+
+    /// What Save sends. Only this keeps the Dotfiles Repo a Machine Type from your own repo already
+    /// names, because changing the rest of it shouldn't drop that. A Run still needs its approval.
+    pub fn config_to_save(&self) -> Config {
+        let mut config = self.config();
+        if config.dotfiles.is_none() {
+            config.dotfiles = self.kept_dotfiles();
         }
         config
     }
@@ -755,6 +775,7 @@ impl App {
             EventKind::RunWarning { .. } => {}
             EventKind::RunFinished { .. } => {
                 self.run_finished = true;
+                self.engine.publish_self(None);
                 if self.screen == Screen::Run {
                     // Whoever walked away comes back to what's left, not to a finished log.
                     self.after(1.2, Timer::GoToFinish);
@@ -870,6 +891,10 @@ impl App {
         self.drift_applying = false;
         match news {
             DriftNews::Checked(checked, notes) => {
+                if checked.status != Status::NoConfig {
+                    self.engine
+                        .publish_self(Some(checked.report.rows.len() as u32));
+                }
                 self.drift = checked
                     .report
                     .rows
@@ -929,6 +954,10 @@ impl App {
         }
         if let Some(news) = self.engine.poll_drift() {
             self.drift_news(news);
+            changed = true;
+        }
+        if let Some(news) = self.engine.poll_fleet() {
+            self.fleet_news(news);
             changed = true;
         }
         // These come from the Run's thread between events, so a change here needs a redraw too.

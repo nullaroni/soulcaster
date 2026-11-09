@@ -19,6 +19,7 @@ use soulcaster_core::drift::{
 };
 use soulcaster_core::lifecycle::{Assurance, SkipReason};
 use soulcaster_core::plan::Plan;
+use soulcaster_core::recipe::EvidenceGroup;
 use soulcaster_core::recipe::{
     BuiltinProbe, BuiltinStore, InstallRecipe, Probe, Recipe, SettingRecipe, Store, StoredType,
     ValueType,
@@ -752,6 +753,66 @@ pub fn check_drift(
         }
     }
     Ok(found)
+}
+
+/// What a look at this Mac found, to start a Machine Type from.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Found {
+    pub items: Vec<String>,
+    /// Homebrew packages the Catalog doesn't know, as `name` or `cask:name`.
+    pub packages: Vec<String>,
+    pub settings: BTreeMap<String, SettingValue>,
+}
+
+/// Looks at this Mac for what a Machine Type could list. It changes nothing and sends nothing, and
+/// a check that can't answer is left out. A setting counts only if it isn't the macOS default,
+/// because a default is nothing the person chose.
+pub fn survey(runner: &dyn CommandRunner, home: &Path, catalog: &Catalog) -> Found {
+    let mut look = Look {
+        runner,
+        home,
+        probes: BTreeMap::new(),
+    };
+    let always: BTreeSet<&str> = catalog.base_items().map(|entry| entry.id()).collect();
+    let mut found = Found::default();
+    for entry in catalog.listed() {
+        if always.contains(entry.id()) || matches!(entry.lifecycle, Lifecycle::Retired(_)) {
+            continue;
+        }
+        if let Recipe::Install(install) = &entry.recipe
+            && !install.checks.is_empty()
+            && look.installed(install) == Seen::Present(Value::Bool(true))
+        {
+            found.items.push(entry.id().to_string());
+        }
+    }
+    for entry in catalog.settings() {
+        let Recipe::Setting(setting) = &entry.recipe else {
+            continue;
+        };
+        if setting.evidence.group == EvidenceGroup::Broken {
+            continue;
+        }
+        if let Seen::Present(value) = look.setting(setting, None, None)
+            && Some(&value) != setting.unset_means.as_ref()
+            && let Ok(value) = serde_json::from_value::<SettingValue>(value)
+        {
+            found.settings.insert(setting.id.clone(), value);
+        }
+    }
+    let known: BTreeSet<Keg> = catalog
+        .entries()
+        .flat_map(|entry| kegs_of(entry.id(), Some(&entry.recipe)))
+        .collect();
+    for key in look.homebrew_lists().unwrap_or_default() {
+        if kegs_of(&key, None).iter().any(|keg| known.contains(keg)) {
+            continue;
+        }
+        found
+            .packages
+            .push(key.strip_prefix("formula:").unwrap_or(&key).to_string());
+    }
+    found
 }
 
 /// The record changes below all take the Run lock, so none can land in the middle of a Run.

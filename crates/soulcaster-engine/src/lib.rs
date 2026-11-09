@@ -24,8 +24,8 @@ pub use approvals::RecordApprovals;
 pub use awake::KeepAwake;
 pub use dotfiles::{DotfilesHook, DotfilesResult};
 pub use inspect::{
-    Removal, RemovalConfirmed, check_drift, keep_here, leave_here, record_saved, remove_from_mac,
-    set_followed, set_waiting_saves, waiting_saves,
+    Found, Removal, RemovalConfirmed, check_drift, keep_here, leave_here, record_saved,
+    remove_from_mac, set_followed, set_waiting_saves, survey, waiting_saves,
 };
 pub use process::ProcessRunner;
 

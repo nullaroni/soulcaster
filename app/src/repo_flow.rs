@@ -22,6 +22,7 @@ use soulcaster_repo::save::{CONFIG_REPO_NAME, SaveOutcome, SaveRequest, save};
 use soulcaster_repo::tools::Tools;
 
 use crate::catalog_view::view;
+use crate::fleet_flow::{FleetSample, seeded_fleet};
 use crate::state::{App, Screen};
 
 /// What's on the Import screen.
@@ -88,6 +89,8 @@ pub struct RepoSim {
     /// Held so the folder lasts as long as the window. A real window has none.
     _dir: Option<tempfile::TempDir>,
     pub github: FakeGitHub,
+    /// The Fleet the window shows, kept apart from the samples above.
+    pub fleet: FakeGitHub,
     /// The real programs. Without this, everything goes to `github` above.
     real: Option<soulcaster_engine::ProcessRunner>,
     pub tools: Tools,
@@ -102,6 +105,7 @@ impl RepoSim {
         let store = Box::new(FileApprovals::new(home.join("approvals-test-double.json")));
         Self {
             github: seeded_github(),
+            fleet: seeded_fleet(FleetSample::Several),
             real: None,
             tools,
             store,
@@ -112,6 +116,7 @@ impl RepoSim {
     fn real(home: PathBuf) -> Self {
         Self {
             github: FakeGitHub::new(),
+            fleet: FakeGitHub::new(),
             real: Some(soulcaster_repo::process::runner()),
             tools: Tools::for_mac(home.clone()),
             store: Box::new(soulcaster_engine::RecordApprovals::new(home)),
@@ -467,6 +472,7 @@ impl App {
             return;
         };
         self.set_type_name(&run.config.name);
+        self.own_dotfiles = None;
         self.selected = run.config.items.iter().cloned().collect();
         self.settings = run.config.settings.clone();
         self.packages = run.config.packages.formulae.iter().cloned().collect();
@@ -488,7 +494,7 @@ impl App {
 
     /// Saves the current selection. A Run never waits on this, and nothing here blocks one.
     pub fn save_config(&mut self) {
-        let config = self.config();
+        let config = self.config_to_save();
         let request = SaveRequest {
             config: &config,
             repo_name: CONFIG_REPO_NAME,
@@ -504,6 +510,7 @@ impl App {
                 ) {
                     self.repo.last_saved = Some(config.to_canonical_json());
                     self.engine.follow(&config, true);
+                    self.saved_to_fleet(&config);
                 }
                 SavePhase::Done(outcome)
             }

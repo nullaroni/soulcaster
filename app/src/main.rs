@@ -14,6 +14,7 @@ mod catalog_view;
 mod drift;
 mod drift_flow;
 mod engine;
+mod fleet_flow;
 mod real;
 mod repo_flow;
 mod scenes;
