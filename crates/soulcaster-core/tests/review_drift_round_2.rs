@@ -39,7 +39,7 @@ fn something_only_pulled_in_is_not_called_new_in_your_config() {
     assert_eq!(row.kind, RowKind::NewInConfig);
     assert!(row.only_needed);
     assert!(
-        !row.sentence().contains("is new in your Config"),
+        !row.sentence().contains("is new in your Machine Type"),
         "{}",
         row.sentence()
     );

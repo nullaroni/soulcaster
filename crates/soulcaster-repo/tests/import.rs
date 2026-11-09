@@ -45,7 +45,7 @@ fn open(gh: &FakeGitHub, paste: &str) -> Result<Opened, ImportError> {
 fn one(gh: &FakeGitHub, paste: &str) -> soulcaster_repo::import::Fetched {
     match open(gh, paste) {
         Ok(Opened::One(fetched)) => *fetched,
-        Ok(Opened::Pick(_)) => panic!("expected one Config"),
+        Ok(Opened::Pick(_)) => panic!("expected one Machine Type"),
         Err(error) => panic!("{error:?}"),
     }
 }

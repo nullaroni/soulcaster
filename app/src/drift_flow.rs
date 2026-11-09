@@ -280,7 +280,7 @@ fn send(
     now_saved.ever_saved = true;
     store(deps.home, &now_saved);
     if public {
-        notes.push("This Config is public. Anyone can read what you save.".to_string());
+        notes.push("This Machine Type is public. Anyone can read what you save.".to_string());
     }
 }
 
@@ -289,7 +289,7 @@ fn switching(owner: &str) -> String {
 }
 
 pub fn unreadable() -> String {
-    "Your Config on GitHub can't be read: it isn't a file this version understands. Nothing on \
+    "Your Machine Type on GitHub can't be read: it isn't a file this version understands. Nothing on \
      this Mac has changed. Fix it on GitHub, or go back to the last version that worked."
         .to_string()
 }
@@ -852,7 +852,7 @@ mod tests {
         assert_eq!(
             world.record().last_applied["keyboard.key-repeat"].value,
             json!(2),
-            "GitHub's Work Config doesn't have this"
+            "GitHub's Work Machine Type doesn't have this"
         );
     }
 
@@ -963,7 +963,7 @@ mod tests {
         assert_eq!(
             world.record().last_applied["keyboard.key-repeat"].value,
             json!(2),
-            "GitHub's Work Config doesn't have this"
+            "GitHub's Work Machine Type doesn't have this"
         );
     }
 }

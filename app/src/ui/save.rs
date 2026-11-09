@@ -38,7 +38,7 @@ pub fn screen(app: &App) -> El {
     let mut body = col()
         .key("save-body")
         .w_full()
-        .child(line("name", "Config", format!("{:?}", config.name)))
+        .child(line("name", "Machine Type", format!("{:?}", config.name)))
         .child(line(
             "holds",
             "Holds",
@@ -74,7 +74,7 @@ pub fn screen(app: &App) -> El {
             if *public {
                 body = body.child(sentence(
                     "public",
-                    "This Config is public. Anyone can read what you save.",
+                    "This Machine Type is public. Anyone can read what you save.",
                     false,
                 ));
             }
@@ -85,7 +85,7 @@ pub fn screen(app: &App) -> El {
             if *public {
                 body = body.child(sentence(
                     "public",
-                    "This Config is public. Anyone can read what you save.",
+                    "This Machine Type is public. Anyone can read what you save.",
                     false,
                 ));
             }
@@ -93,7 +93,7 @@ pub fn screen(app: &App) -> El {
         SavePhase::Done(SaveOutcome::ChangedElsewhere { path }) => {
             body = body.child(sentence(
                 "elsewhere",
-                &format!("{path} also changed in your Config, so this wasn't saved. Choose which one to keep."),
+                &format!("{path} also changed in your Machine Type, so this wasn't saved. Choose which one to keep."),
                 true,
             ));
         }

@@ -90,7 +90,7 @@ fn pick(
         return Ok(None);
     };
     let path = ConfigPath::parse(wanted)
-        .ok_or_else(|| Done::Refused("That isn't a Config in this repo.".to_string()))?;
+        .ok_or_else(|| Done::Refused("That isn't a Machine Type in this repo.".to_string()))?;
     importer
         .pick(picker, &path)
         .map(Some)
@@ -99,7 +99,7 @@ fn pick(
 
 fn print_picker(picker: &Picker) -> String {
     let mut text = format!(
-        "{} at {} has several Configs. A Machine follows one, so pick with --config <path>.\n",
+        "{} at {} has several Machine Types. A Machine follows one, so pick with --config <path>.\n",
         picker.repo.full_name(),
         picker.commit.short()
     );
@@ -154,7 +154,7 @@ fn print_review(review: &Review) -> String {
             review.source.commit.short()
         ),
     );
-    text.push_str("Soulcaster doesn't verify or endorse any Config. Nothing has been installed, changed or run.\n");
+    text.push_str("Soulcaster doesn't verify or endorse any Machine Type. Nothing has been installed, changed or run.\n");
     if !review.signals.is_empty() {
         text.push_str("\nThis file looks built to mislead you, so everything starts off.\n");
         for signal in &review.signals {
@@ -292,7 +292,7 @@ pub fn save_config(
                 text.push_str("That's a new private repo on your GitHub account.\n");
             }
             if public {
-                text.push_str("This Config is public. Anyone can read what you save.\n");
+                text.push_str("This Machine Type is public. Anyone can read what you save.\n");
             }
             Done::Ok(text)
         }
@@ -396,7 +396,7 @@ mod tests {
         assert!(names.iter().any(|n| n.ends_with(".source.json")));
         let kept = names.iter().find(|n| !n.ends_with(".source.json")).unwrap();
         let bytes = std::fs::read(folder.join(kept)).unwrap();
-        let config = Config::parse(&bytes).expect("the copy is a valid Config");
+        let config = Config::parse(&bytes).expect("the copy is a valid Machine Type");
         assert!(
             !String::from_utf8_lossy(&bytes).contains("example-dev"),
             "no provenance in the file"

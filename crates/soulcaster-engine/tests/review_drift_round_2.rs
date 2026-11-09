@@ -370,7 +370,7 @@ fn an_apply_ends_a_keep_as_a_full_run_does() {
             .unwrap()
             .kept_here
             .contains(id),
-        "the Config lists it again, so this keep is over"
+        "the Machine Type lists it again, so this keep is over"
     );
 }
 
@@ -395,7 +395,7 @@ fn an_apply_ends_leaving_it_alone_once_the_entry_left_the_config() {
             .unwrap()
             .unavailable
             .contains_key(id),
-        "it left the Config, so the answer is over, and if it comes back it isn't silently skipped"
+        "it left the Machine Type, so the answer is over, and if it comes back it isn't silently skipped"
     );
 }
 
@@ -414,7 +414,7 @@ fn a_full_run_keeps_the_answer_for_what_a_skipped_entry_needs() {
             .unwrap()
             .unavailable
             .contains_key("dockutil"),
-        "dockutil hasn't left the Config"
+        "dockutil hasn't left the Machine Type"
     );
 }
 
@@ -443,7 +443,7 @@ fn a_full_run_does_not_forget_an_answer_recorded_before_the_catalog_gained_the_i
     let record = MachineRecord::load(sandbox.path()).unwrap();
     assert!(
         record.unavailable.contains_key("formula:jq") || record.unavailable.contains_key("jq"),
-        "the entry never left the Config: {:?}",
+        "the entry never left the Machine Type: {:?}",
         record.unavailable
     );
 }

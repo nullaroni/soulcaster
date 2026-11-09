@@ -88,17 +88,17 @@ impl Refusal {
 
     pub fn words(&self) -> &'static str {
         match self.kind {
-            RefusalKind::TooLarge => "This file is too large to be a Config.",
+            RefusalKind::TooLarge => "This file is too large to be a Machine Type.",
             RefusalKind::NotStrictJson => "This file isn't valid JSON.",
             RefusalKind::DuplicateKey => {
                 "The same key is in this file twice, and programs disagree on which one counts."
             }
-            RefusalKind::NewerVersion => "This Config needs a newer version of Soulcaster.",
+            RefusalKind::NewerVersion => "This Machine Type needs a newer version of Soulcaster.",
             RefusalKind::UnknownField => {
-                "This file has a field a Config can't have, such as one that would approve something for you."
+                "This file has a field a Machine Type can't have, such as one that would approve something for you."
             }
             RefusalKind::BadText => "The name has characters in it that change how text reads.",
-            RefusalKind::Invalid => "This file breaks the Config format.",
+            RefusalKind::Invalid => "This file breaks the Machine Type format.",
         }
     }
 }
@@ -122,9 +122,9 @@ impl fmt::Display for ImportError {
             Self::Fetch(error) => error.fmt(f),
             Self::Refused(refusal) => f.write_str(refusal.words()),
             Self::NoConfigs => f.write_str(
-                "No Configs there. Paste a link to the file if it lives somewhere else.",
+                "No Machine Types there. Paste a link to the file if it lives somewhere else.",
             ),
-            Self::NotOffered => f.write_str("That Config wasn't offered."),
+            Self::NotOffered => f.write_str("That Machine Type wasn't offered."),
         }
     }
 }

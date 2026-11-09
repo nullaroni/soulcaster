@@ -86,7 +86,7 @@ pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
     }
 
     if app.show_config {
-        Dialog::new("config", format!("Your Config: {}", app.config_name))
+        Dialog::new("config", format!("Your Machine Type: {}", app.config_name))
             .open(true)
             .width(560.0)
             .on_close(|app: &mut App| app.show_config = false)
@@ -258,7 +258,7 @@ fn footer(app: &App, plan: &Plan, left: usize) -> El {
         )
         .child(kit::action(
             "view-config".to_string(),
-            "Config",
+            "Machine Type",
             false,
             |app: &mut App, _| app.show_config = true,
         ))

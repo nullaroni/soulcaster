@@ -61,7 +61,7 @@ fn saving_something_on_this_mac_never_stops_the_config_applying_what_it_already_
     let latest = config(r#"{"schemaVersion":1,"name":"x","items":["rust"]}"#);
     assert!(
         applies(&Plan::new(&latest, Catalog::shipped()), "rust"),
-        "the Config applies rust before the save"
+        "the Machine Type applies rust before the save"
     );
     let extra = row(&latest, "rustup", &[("rustup", json!(true))], &[]);
     assert_eq!(extra.kind, RowKind::Extra);

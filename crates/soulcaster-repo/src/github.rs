@@ -45,7 +45,7 @@ impl fmt::Display for FetchError {
             Self::RateLimited => {
                 "GitHub is limiting this network. Sign in for a higher limit, or try again later."
             }
-            Self::TooLarge => "This file is too large to be a Config, so it wasn't read.",
+            Self::TooLarge => "This file is too large to be a Machine Type, so it wasn't read.",
             Self::Malformed => "GitHub's answer didn't make sense, so nothing was kept.",
             Self::Empty => "There's nothing in that repo yet.",
         })

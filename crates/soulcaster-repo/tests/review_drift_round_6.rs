@@ -113,7 +113,10 @@ fn a_save_never_stops_an_entry_another_mac_saved_since_this_mac_last_read() {
     let latest = config(
         r#"{"schemaVersion":1,"name":"My Mac","items":["rust"],"settings":{"keyboard.key-repeat":2}}"#,
     );
-    assert!(applies(&latest, "rust"), "the Config applies rust before");
+    assert!(
+        applies(&latest, "rust"),
+        "the Machine Type applies rust before"
+    );
     world.on_github(&latest.to_canonical_json());
     let held = config(HELD);
     let found = rows(&held, &["rustup"]);
@@ -151,7 +154,7 @@ fn saving_two_rows_together_never_saves_both_sides_of_a_conflict() {
         let conflicts = Plan::new(&saved, Catalog::shipped()).conflicts;
         assert!(
             conflicts.is_empty(),
-            "the save wrote a Config that applies neither side: {conflicts:?}"
+            "the save wrote a Machine Type that applies neither side: {conflicts:?}"
         );
     }
 }

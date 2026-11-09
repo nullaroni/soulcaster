@@ -28,13 +28,33 @@ _Avoid_: Script, formula
 
 ### Describing a Machine
 
-**Config**:
-A JSON file describing what a Machine should have. A Machine follows one Config at a time.
+**Machine Type**:
+What a Machine should have: its apps, languages, settings and dotfiles. A Machine follows one Machine Type at a time. It's the word people see, and each one is stored as a Config.
 _Avoid_: Role, profile, preset, manifest
+
+**Config**:
+The JSON file a Machine Type is stored as. The word stays in file names, the schema and code, and doesn't appear on screen.
+_Avoid_: Using this word on screen
 
 **Config Repo**:
 A user's GitHub repository holding their Configs.
 _Avoid_: Settings repo
+
+**Fleet**:
+All the Machines one person has, and the Machine Types they follow.
+_Avoid_: Devices, inventory
+
+**Machine Entry**:
+The small file each Machine writes about itself in the Config Repo, so the others can see it. Unlike the Machine Record, it's meant to be sent.
+_Avoid_: Heartbeat, registration
+
+**Ask first**:
+A Machine that applies by itself only what needs no password, tap, install script, license or removal. This is the default.
+_Avoid_: Manual mode, safe mode
+
+**Full auto**:
+A Machine that applies everything with nobody asked, including removals and macOS updates.
+_Avoid_: Unattended, headless mode
 
 **Dotfiles Repo**:
 A user's separate Git repository holding configuration files for their tools.

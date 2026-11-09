@@ -426,12 +426,12 @@ impl Choice {
     /// The sync design's sentence.
     pub fn words(self, value: &str) -> String {
         match self {
-            Self::Adopt => format!("Save {value} to your Config"),
+            Self::Adopt => format!("Save {value} to your Machine Type"),
             Self::Apply => format!("Change this Mac to {value}"),
             Self::NotHere => "Leave this Mac as it is and don't ask again".to_string(),
             Self::Keep => "Keep it here and stop tracking it".to_string(),
             Self::Remove => "Remove it from this Mac".to_string(),
-            Self::AddBack => "Put it back in your Config".to_string(),
+            Self::AddBack => "Put it back in your Machine Type".to_string(),
             Self::KeepHere => "Keep it on this Mac only".to_string(),
         }
     }
@@ -446,7 +446,9 @@ pub fn confirm_adopt_removal(name: &str) -> String {
 }
 
 pub fn changed_elsewhere(name: &str) -> String {
-    format!("{name} also changed in your Config, so this wasn't saved. Choose which one to keep.")
+    format!(
+        "{name} also changed in your Machine Type, so this wasn't saved. Choose which one to keep."
+    )
 }
 
 pub fn changed_again(name: &str) -> String {
@@ -454,7 +456,7 @@ pub fn changed_again(name: &str) -> String {
 }
 
 pub fn not_adoptable(name: &str, why: &str) -> String {
-    format!("{name} can't be saved to a Config because {why}. It stays on this Mac.")
+    format!("{name} can't be saved to a Machine Type because {why}. It stays on this Mac.")
 }
 
 /// A value the way a person reads it.
@@ -491,22 +493,24 @@ impl Row {
         }
         match self.kind {
             RowKind::NewInConfig if self.only_needed => {
-                format!("Something in your Config needs {name}, and it isn't on this Mac.")
+                format!("Something in your Machine Type needs {name}, and it isn't on this Mac.")
             }
             RowKind::RemovedHere if self.only_needed => {
-                format!("{name} was removed from this Mac, but something in your Config needs it.")
+                format!(
+                    "{name} was removed from this Mac, but something in your Machine Type needs it."
+                )
             }
             RowKind::ChangedHere => format!("{name} changed on this Mac."),
             RowKind::RemovedHere => {
-                format!("{name} was removed from this Mac, but your Config still lists it.")
+                format!("{name} was removed from this Mac, but your Machine Type still lists it.")
             }
-            RowKind::ChangedInConfig => format!("{name} changed in your Config."),
-            RowKind::NewInConfig => format!("{name} is new in your Config."),
+            RowKind::ChangedInConfig => format!("{name} changed in your Machine Type."),
+            RowKind::NewInConfig => format!("{name} is new in your Machine Type."),
             RowKind::Dropped => format!(
-                "{name} is no longer in this Config. It's still on this Mac, and nothing will be \
+                "{name} is no longer in this Machine Type. It's still on this Mac, and nothing will be \
                  removed unless you say so."
             ),
-            RowKind::Extra => format!("{name} is on this Mac but not in your Config."),
+            RowKind::Extra => format!("{name} is on this Mac but not in your Machine Type."),
             RowKind::Conflict => {
                 format!(
                     "{name} changed in two places, and they don't match. You choose which one to keep."
@@ -574,7 +578,7 @@ pub struct Report {
 
 pub fn held_sentence(name: &str) -> String {
     format!(
-        "{name}: update Soulcaster to review this. Your Config lists something this version \
+        "{name}: update Soulcaster to review this. Your Machine Type lists something this version \
          doesn't recognize."
     )
 }
@@ -1302,7 +1306,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             row.sentence(),
-            "nobody-covers-this is no longer in this Config. It's still on this Mac, and nothing will be removed unless you say so."
+            "nobody-covers-this is no longer in this Machine Type. It's still on this Mac, and nothing will be removed unless you say so."
         );
     }
 }

@@ -13,8 +13,8 @@ use crate::state::App;
 const TAP_STAKES: &str = "Homebrew runs code written by this account on this Mac, as you, after your password is gone. It can read what your account can. A later update of an approved package runs the newest formula with no new question, when you choose to update.";
 const REPO_STAKES: &str = "These files replace yours at the locations below, and some run by themselves when you use your Mac. This covers this version and this list of links, nothing newer. Existing files are backed up before they're replaced. Leave it off and the repo isn't downloaded.";
 const SCRIPT_STAKES: &str = "This one file runs once, as you, after your password is gone. It can run other files in the repo and do anything you can. A newer version needs a new approval.";
-const OWN_WORDS: &str = "Yours, and so is this Config, so it starts on";
-const FAKE_NOTE: &str = "Soulcaster doesn't verify or endorse any Config";
+const OWN_WORDS: &str = "Yours, and so is this Machine Type, so it starts on";
+const FAKE_NOTE: &str = "Soulcaster doesn't verify or endorse any Machine Type";
 
 pub fn screen(app: &App, k: &'static Kit) -> El {
     match &app.repo.import {
@@ -551,7 +551,7 @@ fn package_rows(
         true,
         false,
         if big {
-            "That's far more than a Config usually lists, so it starts off."
+            "That's far more than a Machine Type usually lists, so it starts off."
         } else {
             "From official Homebrew. Needs no approval."
         },

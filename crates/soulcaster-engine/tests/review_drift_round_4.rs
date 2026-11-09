@@ -158,7 +158,7 @@ fn a_hot_corner_that_needs_a_modifier_key_is_not_reported_as_the_same() {
     assert_ne!(
         state(&report),
         NOTHING,
-        "a corner that needs Command held reads as exactly what the Config says"
+        "a corner that needs Command held reads as exactly what the Machine Type says"
     );
 }
 
@@ -193,11 +193,11 @@ fn a_dock_with_the_same_app_twice_is_not_offered_for_saving() {
     });
     assert!(
         Config::parse(saved.to_string().as_bytes()).is_err(),
-        "the Config has to refuse this for the offer to be wrong"
+        "the Machine Type has to refuse this for the offer to be wrong"
     );
     assert!(
         !row.choices().contains(&Choice::Adopt),
-        "offers a save the Config refuses: {:?}",
+        "offers a save the Machine Type refuses: {:?}",
         row.choices()
     );
 }

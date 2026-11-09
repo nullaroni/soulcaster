@@ -476,7 +476,7 @@ impl Review {
             signal(
                 "name-claim",
                 format!(
-                    "The name says \"{}\". Soulcaster doesn't verify or endorse any Config.",
+                    "The name says \"{}\". Soulcaster doesn't verify or endorse any Machine Type.",
                     escaped(&word)
                 ),
             );
@@ -894,7 +894,7 @@ fn tap_cards(
                 row.push(TapPackage {
                     name: name.to_string(),
                     short: short_name(name),
-                    via: format!("the Catalog's {}, listed in this Config", entry.name),
+                    via: format!("the Catalog's {}, listed in this Machine Type", entry.name),
                     same_as_base: false,
                     same_as_catalog: None,
                 });

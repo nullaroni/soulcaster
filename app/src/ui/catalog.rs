@@ -622,7 +622,7 @@ fn value_control(app: &App, x: usize, k: &'static Kit) -> El {
                 })
                 .trigger(k)
         }
-        _ => kit::label("In your Config"),
+        _ => kit::label("In your Machine Type"),
     }
 }
 

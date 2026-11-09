@@ -92,16 +92,16 @@ impl fmt::Display for ConfigError {
         match self {
             Self::TooLarge { bytes } => write!(
                 f,
-                "this Config is {bytes} bytes, over the {MAX_BYTES} limit"
+                "this Machine Type is {bytes} bytes, over the {MAX_BYTES} limit"
             ),
-            Self::Parse(message) => write!(f, "this Config isn't strict JSON: {message}"),
+            Self::Parse(message) => write!(f, "this Machine Type isn't strict JSON: {message}"),
             Self::NewerVersion { found, known } => write!(
                 f,
-                "this Config uses schema version {found} and this app knows up to {known}, so update Soulcaster to read it"
+                "this Machine Type uses schema version {found} and this app knows up to {known}, so update Soulcaster to read it"
             ),
             Self::Invalid { path, message } => {
                 let at = if path.is_empty() { "top level" } else { path };
-                write!(f, "this Config is invalid at {at}: {message}")
+                write!(f, "this Machine Type is invalid at {at}: {message}")
             }
         }
     }
@@ -142,7 +142,8 @@ impl Config {
         sorted.items.sort();
         sorted.packages.formulae.sort();
         sorted.packages.casks.sort();
-        let mut text = serde_json::to_string_pretty(&sorted).expect("a Config always serializes");
+        let mut text =
+            serde_json::to_string_pretty(&sorted).expect("a Machine Type always serializes");
         text.push('\n');
         text
     }

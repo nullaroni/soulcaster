@@ -53,10 +53,10 @@ impl WaitReason {
                 "GitHub needs you to sign in again before this can be sent. Nothing is lost."
             }
             Self::Denied => {
-                "GitHub didn't accept this. You may not be allowed to change this Config, or its rules may not allow direct changes. Nothing is lost."
+                "GitHub didn't accept this. You may not be allowed to change this Machine Type, or its rules may not allow direct changes. Nothing is lost."
             }
             Self::Busy => {
-                "Your Config keeps changing on GitHub, so this wasn't sent. Nothing is lost. Try again in a moment."
+                "Your Machine Type keeps changing on GitHub, so this wasn't sent. Nothing is lost. Try again in a moment."
             }
         }
     }
@@ -103,7 +103,7 @@ impl fmt::Display for SaveError {
                 let at: Vec<&str> = findings.iter().map(|f| f.at.as_str()).collect();
                 write!(
                     f,
-                    "These can't be saved to a Config until they're removed: {}",
+                    "These can't be saved to a Machine Type until they're removed: {}",
                     crate::text::escaped(&at.join(", "))
                 )
             }

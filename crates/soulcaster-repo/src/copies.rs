@@ -25,7 +25,7 @@ impl std::fmt::Display for CopyError {
         f.write_str(match self {
             Self::Write => "Soulcaster couldn't write to its folder on this Mac.",
             Self::NameTaken => {
-                "Another Config is kept under the same file name. Choose a different name."
+                "Another Machine Type is kept under the same file name. Choose a different name."
             }
         })
     }

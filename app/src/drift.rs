@@ -50,7 +50,7 @@ pub fn choice_help(row: &Row, choice: Choice) -> String {
     match (choice, row.is_setting) {
         (Choice::Adopt, _) if row.on_mac.is_none() => {
             format!(
-                "Take {name} out of your Config. {}",
+                "Take {name} out of your Machine Type. {}",
                 confirm_adopt_removal(name)
             )
         }

@@ -186,7 +186,7 @@ fn read(path: &str) -> Result<Config, String> {
 
 fn validate(config: &Config) {
     let plan = Plan::new(config, Catalog::shipped());
-    println!("{:?} is a valid Config.", config.name);
+    println!("{:?} is a valid Machine Type.", config.name);
     print_notes(&plan);
 }
 
