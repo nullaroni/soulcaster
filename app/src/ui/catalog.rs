@@ -1,17 +1,30 @@
 //! Catalog: checkboxes over the shipped Catalog, a search and a running count.
 
-use std::borrow::Cow;
-
-use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
+use rune::color::hex;
+use rune::{El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{IconButton, IconButtonVariant, Kit, Select, TextInput};
 use soulcaster_core::config::SettingValue;
 use soulcaster_core::recipe::{EvidenceGroup, ValueType};
 
 use super::kit;
+use crate::brand_icons::{self, Brand};
 use crate::catalog_view::view;
-use crate::state::{ALWAYS_SECTION, App, CatRow, Screen};
+use crate::state::{ALWAYS_SECTION, App, CatRow, PACKAGES_SECTION, SETTINGS_SECTION, Screen};
 
 const SIDEBAR: f32 = 188.0;
+/// One row in a column, without its rule.
+const CELL: f32 = 32.0;
+const HEADING: f32 = 28.0;
+const PAD: f32 = 14.0;
+const COLUMN_GAP: f32 = 22.0;
+const MIN_COLUMN: f32 = 230.0;
+/// A setting needs room for its value beside its name.
+const MIN_SETTINGS_COLUMN: f32 = 340.0;
+const MAX_COLUMNS: usize = 5;
+const TILE: f32 = 24.0;
+const TILE_GLYPH: f32 = 15.0;
+const HEADING_TILE: f32 = 18.0;
+const HEADING_GLYPH: f32 = 11.0;
 
 pub fn screen(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
     row()
@@ -70,7 +83,7 @@ fn side_row(key: String, words: String, count: usize, on: bool) -> El {
 
 fn sidebar(app: &App) -> El {
     let cat = view();
-    let browsing = !app.only_selected && app.search.text.is_empty();
+    let browsing = app.browsing();
     let mut sections = col().key("sidebar-sections").w_full().py(6.0).child(
         side_row(
             "nav-always".to_string(),
@@ -104,10 +117,21 @@ fn sidebar(app: &App) -> El {
             "nav-settings".to_string(),
             "macOS and Git".to_string(),
             app.settings.len(),
-            browsing && app.current_section == usize::MAX,
+            browsing && app.current_section == SETTINGS_SECTION,
         )
-        .on_press_tx(|app: &mut App, tx| app.jump_to_section(usize::MAX, tx)),
+        .on_press_tx(|app: &mut App, tx| app.jump_to_section(SETTINGS_SECTION, tx)),
     );
+    if !app.packages.is_empty() {
+        sections = sections.child(
+            side_row(
+                "nav-packages".to_string(),
+                "Added from Homebrew".to_string(),
+                app.packages.len(),
+                browsing && app.current_section == PACKAGES_SECTION,
+            )
+            .on_press_tx(|app: &mut App, tx| app.jump_to_section(PACKAGES_SECTION, tx)),
+        );
+    }
     col()
         .key("catalog-sidebar")
         .role("navigation")
@@ -150,7 +174,179 @@ fn search_bar(app: &App, k: &Kit) -> El {
         .child(kit::hairline())
 }
 
+/// A run of rows that stay together under one heading.
+#[derive(Debug, PartialEq)]
+struct Group {
+    heading: Option<String>,
+    rows: Vec<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Shape {
+    Items,
+    Settings,
+    /// One message across the whole width.
+    Single,
+}
+
+/// Groups laid out together, under a category's name when a search shows several categories.
+#[derive(Debug, PartialEq)]
+struct Block {
+    title: Option<String>,
+    shape: Shape,
+    groups: Vec<Group>,
+}
+
+impl Block {
+    fn new(title: Option<String>, shape: Shape) -> Self {
+        Block {
+            title,
+            shape,
+            groups: Vec::new(),
+        }
+    }
+
+    fn open_group(&mut self, heading: &str) -> &mut Group {
+        self.groups.push(Group {
+            heading: Some(heading.to_string()),
+            rows: Vec::new(),
+        });
+        self.groups.last_mut().expect("just pushed")
+    }
+}
+
+/// Reads the flat rows into blocks of groups. Rows with no heading are groups of one, so a
+/// category with no groups (Browsers, Fonts) still spreads across the columns.
+fn blocks(rows: &[CatRow], browsing: bool) -> Vec<Block> {
+    let mut out: Vec<Block> = Vec::new();
+    for (i, row_data) in rows.iter().enumerate() {
+        match row_data {
+            CatRow::Base(_) => {
+                if i == 0 {
+                    let mut block = Block::new(None, Shape::Items);
+                    block.open_group("Always");
+                    out.push(block);
+                }
+                push_row(&mut out, i);
+            }
+            CatRow::Section(s) => {
+                let name = view().catalog.sections()[*s].name.clone();
+                out.push(Block::new((!browsing).then_some(name), Shape::Items));
+            }
+            CatRow::Group(name) => {
+                if let Some(block) = out.last_mut() {
+                    block.open_group(name);
+                }
+            }
+            CatRow::Item(_) => match out.last_mut() {
+                Some(block) if block.groups.last().is_some_and(|g| g.heading.is_some()) => {
+                    push_row(&mut out, i);
+                }
+                Some(block) => block.groups.push(Group {
+                    heading: None,
+                    rows: vec![i],
+                }),
+                None => {}
+            },
+            CatRow::Surface(name) => {
+                if out.last().is_none_or(|b| b.shape != Shape::Settings) {
+                    let title = (!browsing).then(|| "macOS and Git".to_string());
+                    out.push(Block::new(title, Shape::Settings));
+                }
+                if let Some(block) = out.last_mut() {
+                    block.open_group(name);
+                }
+            }
+            CatRow::Setting(_) => push_row(&mut out, i),
+            CatRow::Package(_) => {
+                if i == 0 || !matches!(rows[i - 1], CatRow::Package(_)) {
+                    let mut block = Block::new(None, Shape::Items);
+                    block.open_group("Added from Homebrew");
+                    out.push(block);
+                }
+                push_row(&mut out, i);
+            }
+            CatRow::AddPackage(_) | CatRow::Empty => {
+                let mut block = Block::new(None, Shape::Single);
+                block.groups.push(Group {
+                    heading: None,
+                    rows: vec![i],
+                });
+                out.push(block);
+            }
+        }
+    }
+    // A group of competing Items leaves the heading it was listed under with nothing in it.
+    for block in &mut out {
+        block.groups.retain(|group| !group.rows.is_empty());
+    }
+    out.retain(|block| !block.groups.is_empty());
+    out
+}
+
+fn push_row(out: &mut [Block], row: usize) {
+    if let Some(group) = out.last_mut().and_then(|b| b.groups.last_mut()) {
+        group.rows.push(row);
+    }
+}
+
+/// How many columns of at least `min` points fit in `width`.
+fn columns_for(width: f32, min: f32) -> usize {
+    let usable = width - 2.0 * PAD + COLUMN_GAP;
+    ((usable / (min + COLUMN_GAP)).floor() as usize).clamp(1, MAX_COLUMNS)
+}
+
+fn group_height(group: &Group) -> f32 {
+    let heading = if group.heading.is_some() {
+        HEADING
+    } else {
+        0.0
+    };
+    heading + group.rows.len() as f32 * (CELL + 1.0)
+}
+
+/// Deals groups into columns in reading order, so a language stays next to its managers, with the
+/// tallest column as short as it can be. Groups are never split.
+fn place(heights: &[f32], columns: usize) -> Vec<Vec<usize>> {
+    let (mut too_short, mut tall_enough) = (
+        heights.iter().copied().fold(0.0, f32::max) - 1.0,
+        heights.iter().sum::<f32>() + 1.0,
+    );
+    // Halving 32 times takes this far below a point, for any height a screen could have.
+    for _ in 0..32 {
+        let limit = (too_short + tall_enough) / 2.0;
+        if fill_columns(heights, usize::MAX, limit).len() <= columns {
+            tall_enough = limit;
+        } else {
+            too_short = limit;
+        }
+    }
+    let mut placed = fill_columns(heights, columns, tall_enough);
+    placed.resize(columns, Vec::new());
+    placed
+}
+
+/// Fills each column up to `limit` before starting the next, and the last column takes the rest.
+fn fill_columns(heights: &[f32], columns: usize, limit: f32) -> Vec<Vec<usize>> {
+    let mut placed: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut filled = 0.0;
+    for (i, &height) in heights.iter().enumerate() {
+        if filled + height > limit && filled > 0.0 && placed.len() < columns {
+            placed.push(Vec::new());
+            filled = 0.0;
+        }
+        placed.last_mut().expect("starts with one").push(i);
+        filled += height;
+    }
+    placed
+}
+
 fn list(app: &App) -> El {
+    let k = kit::theme();
+    let mut content = col().key("catalog-rows").w_full().px(PAD).pb(PAD);
+    for (b, block) in blocks(&app.rows, app.browsing()).iter().enumerate() {
+        content = content.child(block_el(app, b, block, k));
+    }
     col()
         .key("catalog-list")
         .role("list")
@@ -161,111 +357,132 @@ fn list(app: &App) -> El {
         .scroll(ScrollSpec {
             stick_bottom: false,
         })
+        .on_layout(|app: &mut App, [_, _, width, _]| app.grid_width = width)
+        .child(content)
+}
+
+fn block_el(app: &App, b: usize, block: &Block, k: &'static Kit) -> El {
+    let columns = match block.shape {
+        Shape::Single => 1,
+        Shape::Settings => columns_for(app.grid_width, MIN_SETTINGS_COLUMN),
+        Shape::Items => columns_for(app.grid_width, MIN_COLUMN),
+    };
+    let heights: Vec<f32> = block.groups.iter().map(group_height).collect();
+    let mut grid = row()
+        .key(format!("grid-{b}"))
+        .w_full()
+        .equal_columns(columns)
+        .gap(COLUMN_GAP);
+    for (c, groups) in place(&heights, columns).into_iter().enumerate() {
+        let mut column = col().key(format!("grid-{b}-{c}")).w_full().min_w(0.0);
+        for g in groups {
+            column = column.child(group_el(app, &block.groups[g], k));
+        }
+        grid = grid.child(column);
+    }
+    let mut out = col().w_full();
+    if let Some(title) = &block.title {
+        out = out
+            .child(
+                row()
+                    .w_full()
+                    .pt(14.0)
+                    .pb(6.0)
+                    .child(kit::group(title.clone()).role("heading").level(2)),
+            )
+            .child(kit::hairline());
+    }
+    out.child(grid)
+}
+
+fn group_el(app: &App, group: &Group, k: &'static Kit) -> El {
+    let mut out = col().w_full().min_w(0.0);
+    if let Some(words) = &group.heading {
+        out = out.child(heading(words));
+    }
+    for &i in &group.rows {
+        out = out.child(build_row(app, i, k));
+    }
+    out
+}
+
+fn heading(words: &str) -> El {
+    let mut r = row().w_full().h(HEADING).gap(7.0).items_end().pb(4.0);
+    if let Some(brand) = brand_icons::for_group(words) {
+        r = r.child(brand_tile(brand, HEADING_TILE, HEADING_GLYPH));
+    }
+    r.child(
+        kit::group(words.to_string())
+            .role("heading")
+            .level(3)
+            .shrink()
+            .truncate(),
+    )
+}
+
+fn brand_tile(brand: &Brand, size: f32, glyph: f32) -> El {
+    let fill = hex(brand.tile).expect("a generated color");
+    let tint = if brand.light_glyph {
+        kit::paper()
+    } else {
+        kit::ink()
+    };
+    el().size(size, size)
+        .radius(size / 4.0)
+        .center()
+        .fill(fill)
+        .a11y_hidden()
+        .child(icon(brand.icon, glyph).color(tint))
+}
+
+/// An Item's logo, or its first letter when it has no logo of its own.
+fn tile(id: &str, name: &str) -> El {
+    if let Some(brand) = brand_icons::for_item(id) {
+        return brand_tile(brand, TILE, TILE_GLYPH);
+    }
+    el().size(TILE, TILE)
+        .radius(TILE / 4.0)
+        .center()
+        .fill(kit::forest().alpha(0.12))
+        .a11y_hidden()
         .child(
-            col()
-                .key("catalog-rows")
-                .w_full()
-                .growth(GrowthSpec::default())
-                .virtual_rows(
-                    app.rows.len(),
-                    32.0,
-                    |s: &App, i| Cow::Owned(row_key(s, i)),
-                    |s: &App, i| build_row(s, i, kit::theme()),
-                )
-                .virtual_rows_version(app.rows_version)
-                .on_visible_rows(|app: &mut App, range| {
-                    let cat = view();
-                    let sections = cat.catalog.sections();
-                    let top = app
-                        .rows
-                        .get(range.start..range.end.min(app.rows.len()))
-                        .and_then(|rows| {
-                            rows.iter().find_map(|r| match r {
-                                CatRow::Base(_) => Some(ALWAYS_SECTION),
-                                CatRow::Item(i) => sections.iter().position(|s| {
-                                    Some(&s.id)
-                                        == cat.items[*i].listing.as_ref().map(|l| &l.section)
-                                }),
-                                CatRow::Section(s) => Some(*s),
-                                CatRow::Setting(_) | CatRow::Surface(_) => Some(usize::MAX),
-                                _ => None,
-                            })
-                        });
-                    match top {
-                        Some(section) if section != app.current_section => {
-                            app.current_section = section;
-                            true
-                        }
-                        _ => false,
-                    }
-                }),
+            text(monogram(name))
+                .font(kit::bold_style())
+                .color(kit::forest()),
         )
 }
 
-fn row_key(app: &App, i: usize) -> String {
-    match &app.rows[i] {
-        CatRow::Base(b) => format!("row-base-{b}"),
-        CatRow::Section(s) => format!("row-section-{s}"),
-        CatRow::Group(name) => format!("row-group-{name}-{i}"),
-        CatRow::Item(x) => format!("row-item-{}", view().items[*x].id()),
-        CatRow::Surface(name) => {
-            if app
-                .rows
-                .iter()
-                .position(|r| matches!(r, CatRow::Surface(_)))
-                == Some(i)
-            {
-                "row-surface-first".to_string()
-            } else {
-                format!("row-surface-{name}")
-            }
-        }
-        CatRow::Setting(x) => format!("row-setting-{}", view().settings[*x].id),
-        CatRow::Package(p) => format!("row-package-{p}"),
-        CatRow::AddPackage(_) => "row-add-package".to_string(),
-        CatRow::Empty => "row-empty".to_string(),
-    }
+fn monogram(name: &str) -> String {
+    name.chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_default()
 }
 
-fn heading(words: String, role_heading: bool) -> El {
-    let t = if role_heading {
-        kit::group(words).role("heading").level(2)
-    } else {
-        text(words).font(kit::ui_style()).color(kit::dim())
-    };
-    row().w_full().px(14.0).pt(12.0).pb(2.0).child(t)
+/// A row in a column, with its rule underneath.
+fn cell(key: String, content: El) -> El {
+    col()
+        .key(key)
+        .w_full()
+        .min_w(0.0)
+        .child(content.w_full().min_h(CELL).px(2.0).gap(9.0).center_y())
+        .child(kit::row_rule())
 }
 
 fn build_row(app: &App, i: usize, k: &'static Kit) -> El {
     match &app.rows[i] {
         CatRow::Base(b) => base_row(*b, k),
-        CatRow::Section(s) => heading(view().catalog.sections()[*s].name.clone(), true),
-        CatRow::Group(name) => heading(name.clone(), false),
         CatRow::Item(x) => item_row(app, *x, k),
-        CatRow::Surface(name) => {
-            let first = app
-                .rows
-                .iter()
-                .position(|r| matches!(r, CatRow::Surface(_)))
-                == Some(i);
-            if first {
-                col()
-                    .w_full()
-                    .child(heading("macOS and Git".to_string(), true))
-                    .child(heading(name.clone(), false))
-            } else {
-                heading(name.clone(), false)
-            }
-        }
         CatRow::Setting(x) => setting_row(app, *x, k),
         CatRow::Package(p) => package_row(p, k),
         CatRow::AddPackage(q) => add_package_row(q),
         CatRow::Empty => row()
             .w_full()
-            .px(14.0)
             .h(kit::ROW)
             .center_y()
             .child(kit::label("Nothing selected")),
+        // Headings are read into `Group`s before anything draws.
+        CatRow::Section(_) | CatRow::Group(_) | CatRow::Surface(_) => el().h(0.0),
     }
 }
 
@@ -273,12 +490,9 @@ fn base_row(b: usize, k: &Kit) -> El {
     let entry = view().catalog.base_items().nth(b).expect("a Base Item");
     let content = row()
         .child(kit::check_box(k, true, true))
-        .child(kit::label(entry.name().to_string()));
-    let mut wrapped = col().w_full();
-    if b == 0 {
-        wrapped = wrapped.child(heading("Always".to_string(), true));
-    }
-    wrapped.child(kit::ruled(format!("base-{}", entry.id()), content))
+        .child(tile(entry.id(), entry.name()))
+        .child(kit::label(entry.name().to_string()).shrink().truncate());
+    cell(format!("base-{}", entry.id()), content)
 }
 
 fn item_row(app: &App, x: usize, k: &Kit) -> El {
@@ -309,6 +523,7 @@ fn item_row(app: &App, x: usize, k: &Kit) -> El {
         .hover(kit::ink().alpha(0.05))
         .on_press(move |app: &mut App| app.toggle_item(&id))
         .child(kit::check_box(k, on, false))
+        .child(tile(entry.id(), entry.name()))
         .child(kit::label(entry.name().to_string()).shrink().truncate())
         .child(el().grow(1.0));
     if on && !rivals.is_empty() {
@@ -320,7 +535,7 @@ fn item_row(app: &App, x: usize, k: &Kit) -> El {
                 .truncate(),
         );
     }
-    kit::ruled(format!("item-{}", entry.id()), content)
+    cell(format!("item-{}", entry.id()), content)
 }
 
 fn value_control(app: &App, x: usize, k: &'static Kit) -> El {
@@ -411,8 +626,7 @@ fn value_control(app: &App, x: usize, k: &'static Kit) -> El {
     }
 }
 
-/// Selects can't open from inside a virtual row, because a row can't reach the overlay layer. So
-/// the open one builds here, against the trigger's key.
+/// A row can't reach the overlay layer, so the open Select builds here, against its trigger's key.
 fn overlay_for_select(app: &App, k: &'static Kit, layer: &mut Vec<El>) -> El {
     if let Some(id) = &app.open_select
         && let Some(setting) = view().setting(id)
@@ -478,7 +692,7 @@ fn setting_row(app: &App, x: usize, k: &'static Kit) -> El {
     } else {
         row().child(toggle).child(value_control(app, x, k))
     };
-    kit::ruled(format!("setting-{id}"), content)
+    cell(format!("setting-{id}"), content)
 }
 
 fn package_row(package: &str, k: &Kit) -> El {
@@ -495,8 +709,9 @@ fn package_row(package: &str, k: &Kit) -> El {
             app.rebuild_rows();
         })
         .child(kit::check_box(k, true, false))
-        .child(kit::label(package.to_string()));
-    kit::ruled(format!("package-{package}"), content)
+        .child(tile(package, package))
+        .child(kit::label(package.to_string()).shrink().truncate());
+    cell(format!("package-{package}"), content)
 }
 
 fn add_package_row(query: &str) -> El {
@@ -514,7 +729,7 @@ fn add_package_row(query: &str) -> El {
             false,
             move |app: &mut App, _| app.add_package(&name),
         ));
-    kit::ruled("add-package-row".to_string(), content)
+    cell("add-package-row".to_string(), content)
 }
 
 fn footer(app: &App) -> El {
@@ -532,4 +747,147 @@ fn footer(app: &App) -> El {
             app.screen = Screen::Review
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_column_count_follows_the_width() {
+        assert_eq!(columns_for(911.0, MIN_COLUMN), 3, "the default window");
+        assert_eq!(columns_for(630.0, MIN_COLUMN), 2, "the smallest window");
+        assert_eq!(columns_for(100.0, MIN_COLUMN), 1);
+        assert_eq!(columns_for(5000.0, MIN_COLUMN), MAX_COLUMNS);
+        assert_eq!(columns_for(911.0, MIN_SETTINGS_COLUMN), 2);
+    }
+
+    #[test]
+    fn groups_stay_in_reading_order_across_columns() {
+        let placed = place(&[100.0, 60.0, 60.0, 40.0, 100.0, 40.0], 3);
+        let order: Vec<usize> = placed.iter().flatten().copied().collect();
+        assert_eq!(order, [0, 1, 2, 3, 4, 5]);
+        assert!(placed.iter().all(|column| !column.is_empty()));
+    }
+
+    #[test]
+    fn one_column_takes_everything_and_a_tall_group_is_never_split() {
+        assert_eq!(place(&[10.0, 20.0], 1), vec![vec![0, 1]]);
+        let placed = place(&[900.0, 10.0, 10.0], 2);
+        assert_eq!(placed[0], vec![0]);
+        assert_eq!(placed[1], vec![1, 2]);
+    }
+
+    #[test]
+    fn the_tallest_column_is_as_short_as_reading_order_allows() {
+        // The Languages page: filling each column to an even share left the middle one at 668.
+        let heights = [
+            215.0, 141.0, 141.0, 141.0, 104.0, 67.0, 104.0, 252.0, 67.0, 104.0, 67.0, 141.0, 104.0,
+        ];
+        let placed = place(&heights, 3);
+        let tallest = placed
+            .iter()
+            .map(|column| column.iter().map(|&i| heights[i]).sum::<f32>())
+            .fold(0.0, f32::max);
+        assert_eq!(tallest, 638.0);
+    }
+
+    #[test]
+    fn fewer_groups_than_columns_is_fine() {
+        let placed = place(&[50.0], 3);
+        assert_eq!(placed, vec![vec![0], vec![], vec![]]);
+    }
+
+    fn languages() -> Vec<Block> {
+        let mut app = crate::state::init();
+        app.show_section(0);
+        blocks(&app.rows, true)
+    }
+
+    fn headings(block: &Block) -> Vec<&str> {
+        block
+            .groups
+            .iter()
+            .filter_map(|g| g.heading.as_deref())
+            .collect()
+    }
+
+    #[test]
+    fn a_language_stays_next_to_its_managers_and_empty_headings_go() {
+        let page = languages();
+        assert_eq!(page.len(), 1);
+        let names = headings(&page[0]);
+        let javascript = names.iter().position(|n| *n == "JavaScript").unwrap();
+        assert_eq!(names[javascript + 1], "Node.js version managers");
+        assert!(
+            !names.contains(&"Version managers"),
+            "its Items all sit under the choice's own heading: {names:?}"
+        );
+    }
+
+    #[test]
+    fn a_category_with_no_groups_spreads_across_the_columns() {
+        let mut app = crate::state::init();
+        app.show_section(1);
+        let page = blocks(&app.rows, true);
+        assert_eq!(page[0].groups.len(), 10, "Browsers, a group of one each");
+        assert!(page[0].groups.iter().all(|g| g.heading.is_none()));
+    }
+
+    #[test]
+    fn a_search_names_each_category_and_browsing_does_not() {
+        assert_eq!(languages()[0].title, None);
+        let mut app = crate::state::init();
+        app.search.text = "ripgrep".to_string();
+        app.rebuild_rows();
+        let found = blocks(&app.rows, app.browsing());
+        assert_eq!(found[0].title.as_deref(), Some("CLI tools"));
+        assert_eq!(
+            found.last().unwrap().shape,
+            Shape::Single,
+            "add from Homebrew"
+        );
+    }
+
+    #[test]
+    fn every_row_lands_in_a_group() {
+        let mut app = crate::state::init();
+        app.fill_typical();
+        app.only_selected = true;
+        app.rebuild_rows();
+        let drawn: usize = blocks(&app.rows, app.browsing())
+            .iter()
+            .flat_map(|b| &b.groups)
+            .map(|g| g.rows.len())
+            .sum();
+        let drawable = app
+            .rows
+            .iter()
+            .filter(|r| {
+                !matches!(
+                    r,
+                    CatRow::Section(_) | CatRow::Group(_) | CatRow::Surface(_)
+                )
+            })
+            .count();
+        assert_eq!(drawn, drawable);
+    }
+
+    #[test]
+    fn a_monogram_is_the_first_letter_or_digit() {
+        assert_eq!(monogram("fnm"), "F");
+        assert_eq!(monogram(".dotter"), "D");
+        assert_eq!(monogram("1thing"), "1");
+        assert_eq!(monogram(""), "");
+    }
+
+    #[test]
+    fn logos_are_real_and_unrelated_brands_stay_out() {
+        assert!(brand_icons::for_item("python").is_some());
+        assert!(brand_icons::for_item("homebrew").is_some(), "a Base Item");
+        assert!(brand_icons::for_item("delta").is_none(), "not the airline");
+        assert!(brand_icons::for_item("lazygit").is_none(), "not Git's mark");
+        assert!(brand_icons::for_group("JavaScript").is_some());
+        assert!(brand_icons::for_group("Other languages").is_none());
+    }
 }

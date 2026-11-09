@@ -8,6 +8,8 @@
 //! ```
 
 mod answers;
+#[rustfmt::skip]
+mod brand_icons;
 mod catalog_view;
 mod drift;
 mod drift_flow;
